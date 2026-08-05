@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { buildLogRatioAxis, mapRatioToY } from "./charting";
 import type { RawImportedRow, WellRecord } from "../../schemas/src";
 import { calculateRelativeQuantification } from "./calculations";
 import { calculateReplicateQc } from "./qc";
@@ -33,6 +34,17 @@ describe("replicate QC", () => {
   });
 });
 
+describe("publication chart ratio axis", () => {
+  it("always includes the no-change reference and expands to all observations", () => {
+    const axis = buildLogRatioAxis([0.2, 1, 9]);
+    expect(axis.tickValues).toContain(1);
+    expect(axis.minExponent).toBeLessThanOrEqual(Math.log2(0.2));
+    expect(axis.maxExponent).toBeGreaterThanOrEqual(Math.log2(9));
+    expect(mapRatioToY(9, axis, 40, 300)).toBeLessThan(mapRatioToY(1, axis, 40, 300));
+    expect(mapRatioToY(0.2, axis, 40, 300)).toBeGreaterThan(mapRatioToY(1, axis, 40, 300));
+  });
+});
+
 describe("audited edits", () => {
   it("returns new wells and logs without overwriting raw input", () => {
     const original = [well("1", "A1", "S1", "G1", 20)];
@@ -62,4 +74,3 @@ describe("relative quantification", () => {
     expect(results.find((row) => row.sampleName === "Treat")?.relativeExpression).toBeCloseTo(2);
   });
 });
-

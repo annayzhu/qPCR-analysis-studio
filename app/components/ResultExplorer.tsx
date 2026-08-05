@@ -1,7 +1,8 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import type { RelativeQuantificationResult } from "@/packages/schemas/src";
+import { buildLogRatioAxis, mapRatioToY } from "@/packages/qpcr-core/src";
 
 type SortKey = "sampleName" | "targetName" | "targetMeanCq" | "deltaCq" | "normalizedQuantity" | "relativeExpression";
 
@@ -9,65 +10,202 @@ function formatNumber(value: number | null, digits = 3): string {
   return value === null || !Number.isFinite(value) ? "—" : value.toFixed(digits);
 }
 
+type ChartTheme = "dark" | "paper";
+type AxisMode = "log-ratio" | "linear";
+
+function axisTickLabel(value: number): string {
+  if (value >= 1) return Number.isInteger(value) ? String(value) : value.toFixed(1);
+  return value >= 0.1 ? value.toFixed(3).replace(/0+$/, "").replace(/\.$/, "") : value.toPrecision(2);
+}
+
+function downloadBlob(blob: Blob, fileName: string) {
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = fileName;
+  anchor.click();
+  URL.revokeObjectURL(url);
+}
+
+function safeFileName(value: string): string {
+  return value.trim().replace(/[^\p{L}\p{N}._-]+/gu, "-") || "qpcr-expression";
+}
+
 function ExpressionChart({ rows, target }: { rows: RelativeQuantificationResult[]; target: string }) {
-  const [logScale, setLogScale] = useState(false);
+  const svgRef = useRef<SVGSVGElement>(null);
+  const [theme, setTheme] = useState<ChartTheme>("dark");
+  const [axisMode, setAxisMode] = useState<AxisMode>("log-ratio");
   const chartRows = rows
     .filter((row) => row.targetName === target)
     .map((row) => ({
       label: row.sampleName,
       rawValue: row.relativeExpression ?? row.normalizedQuantity,
-      value: logScale ? Math.log2(Math.max(row.relativeExpression ?? row.normalizedQuantity, Number.EPSILON)) : row.relativeExpression ?? row.normalizedQuantity,
       warning: row.warningCodes.length > 0,
     }))
-    .sort((a, b) => b.value - a.value)
-    .slice(0, 30);
+    .filter((row) => Number.isFinite(row.rawValue) && row.rawValue > 0)
+    .sort((a, b) => b.rawValue - a.rawValue)
+    .slice(0, 40);
 
   if (!chartRows.length) return <div className="empty-chart">当前筛选下没有可绘制的数据。</div>;
 
-  const width = 920;
-  const labelWidth = 150;
-  const rightPad = 58;
-  const plotWidth = width - labelWidth - rightPad;
-  const rowHeight = 34;
-  const height = Math.max(240, chartRows.length * rowHeight + 62);
-  const values = chartRows.map((row) => row.value);
-  const min = Math.min(0, ...values);
-  const max = Math.max(0, ...values);
-  const range = max - min || 1;
-  const x = (value: number) => labelWidth + ((value - min) / range) * plotWidth;
-  const zeroX = x(0);
+  const values = chartRows.map((row) => row.rawValue);
+  const left = 92;
+  const right = 40;
+  const top = 88;
+  const bottom = 350;
+  const height = 440;
+  const width = Math.max(860, left + right + chartRows.length * 72);
+  const plotWidth = width - left - right;
+  const slotWidth = plotWidth / chartRows.length;
+  const barWidth = Math.min(42, slotWidth * .56);
+  const ratioAxis = buildLogRatioAxis(values);
+  const linearMax = Math.max(1.2, Math.max(...values) * 1.14);
+  const linearTicks = Array.from({ length: 6 }, (_, index) => (linearMax / 5) * index);
+  const ticks = axisMode === "log-ratio" ? ratioAxis.tickValues : linearTicks;
+  const y = (value: number) => axisMode === "log-ratio"
+    ? mapRatioToY(value, ratioAxis, top, bottom)
+    : bottom - (Math.min(linearMax, Math.max(0, value)) / linearMax) * (bottom - top);
+  const referenceY = y(1);
+  const colors = theme === "dark" ? {
+    background: "#06161a", panel: "#081b20", border: "#24505a", text: "#b9dcd7", muted: "#6ea7a2",
+    axis: "#4e8581", grid: "#16353a", bar: "#218f85", barBottom: "#092a2d", warning: "#d6a45b", reference: "#c99b57",
+  } : {
+    background: "#ffffff", panel: "#ffffff", border: "#cbd5d1", text: "#172126", muted: "#65746f",
+    axis: "#4b5955", grid: "#e6ebe8", bar: "#147d74", barBottom: "#8fc6be", warning: "#b36f2d", reference: "#a56c2d",
+  };
+  const metricLabel = rows.some((row) => row.relativeExpression !== null) ? "Relative expression · 2^-ΔΔCq" : "Normalized quantity · 2^-ΔCq";
+
+  function serializedSvg(): string | null {
+    if (!svgRef.current) return null;
+    const clone = svgRef.current.cloneNode(true) as SVGSVGElement;
+    clone.setAttribute("xmlns", "http://www.w3.org/2000/svg");
+    clone.setAttribute("width", String(width));
+    clone.setAttribute("height", String(height));
+    return new XMLSerializer().serializeToString(clone);
+  }
+
+  function exportSvg() {
+    const markup = serializedSvg();
+    if (!markup) return;
+    downloadBlob(new Blob([markup], { type: "image/svg+xml;charset=utf-8" }), `${safeFileName(target)}-relative-expression.svg`);
+  }
+
+  async function exportPng() {
+    const markup = serializedSvg();
+    if (!markup) return;
+    const sourceUrl = URL.createObjectURL(new Blob([markup], { type: "image/svg+xml;charset=utf-8" }));
+    const image = new Image();
+    image.src = sourceUrl;
+    await new Promise<void>((resolve, reject) => {
+      image.onload = () => resolve();
+      image.onerror = () => reject(new Error("图表渲染失败"));
+    });
+    const scale = 4;
+    const canvas = document.createElement("canvas");
+    canvas.width = width * scale;
+    canvas.height = height * scale;
+    const context = canvas.getContext("2d");
+    if (!context) return;
+    context.scale(scale, scale);
+    context.fillStyle = colors.background;
+    context.fillRect(0, 0, width, height);
+    context.drawImage(image, 0, 0, width, height);
+    URL.revokeObjectURL(sourceUrl);
+    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/png", 1));
+    if (blob) downloadBlob(blob, `${safeFileName(target)}-relative-expression-4x.png`);
+  }
 
   return (
-    <div className="chart-card">
-      <div className="chart-heading">
-        <div><p className="eyebrow">EXPRESSION PROFILE</p><h3>{target || "目标基因"}</h3></div>
-        <button type="button" className={logScale ? "scale-toggle active" : "scale-toggle"} onClick={() => setLogScale((current) => !current)}>
-          {logScale ? "log₂ 显示" : "线性显示"}
-        </button>
+    <div className={`chart-card publication-chart-card chart-theme-${theme}`}>
+      <div className="chart-heading publication-chart-heading">
+        <div><p className="eyebrow">PUBLICATION FIGURE</p><h3>相对表达量</h3><p>竖向柱图 · 校准基线 · 可编辑矢量导出</p></div>
+        <div className="chart-control-stack">
+          <div className="segmented-control" aria-label="图表主题">
+            <button type="button" className={theme === "dark" ? "active" : ""} onClick={() => setTheme("dark")}>深色展示</button>
+            <button type="button" className={theme === "paper" ? "active" : ""} onClick={() => setTheme("paper")}>论文白底</button>
+          </div>
+          <div className="segmented-control" aria-label="纵轴模式">
+            <button type="button" className={axisMode === "log-ratio" ? "active" : ""} onClick={() => setAxisMode("log-ratio")}>2 的幂次轴</button>
+            <button type="button" className={axisMode === "linear" ? "active" : ""} onClick={() => setAxisMode("linear")}>线性轴</button>
+          </div>
+          <div className="chart-export-actions">
+            <button type="button" onClick={exportSvg}>导出 SVG</button>
+            <button type="button" onClick={() => void exportPng()}>导出 PNG 4×</button>
+          </div>
+        </div>
       </div>
       <div className="chart-scroll">
-        <svg className="expression-chart" viewBox={`0 0 ${width} ${height}`} role="img" aria-label={`${target} 相对表达量图`}>
-          <line x1={zeroX} x2={zeroX} y1={28} y2={height - 26} className="zero-line" />
-          {chartRows.map((row, index) => {
-            const y = 38 + index * rowHeight;
-            const endX = x(row.value);
-            const barX = Math.min(zeroX, endX);
-            const barWidth = Math.max(2, Math.abs(endX - zeroX));
+        <svg
+          ref={svgRef}
+          className="expression-chart publication-expression-chart"
+          viewBox={`0 0 ${width} ${height}`}
+          role="img"
+          aria-label={`${target} 相对表达量图`}
+          style={{ width: `${width}px`, minWidth: "100%", fontFamily: "Arial, Helvetica, 'PingFang SC', sans-serif", background: colors.background }}
+        >
+          <defs>
+            <linearGradient id="qpcrBarGradient" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor={colors.bar} />
+              <stop offset="100%" stopColor={colors.barBottom} />
+            </linearGradient>
+          </defs>
+          <rect x="0" y="0" width={width} height={height} rx="12" fill={colors.background} />
+          <rect x="1" y="1" width={width - 2} height={height - 2} rx="11" fill="none" stroke={colors.border} strokeWidth="1" />
+          <text x={left} y="34" fill={colors.text} fontSize="18" fontWeight="700">{target || "目标基因"}</text>
+          <text x={left} y="54" fill={colors.muted} fontSize="10">{metricLabel}</text>
+          <g transform={`translate(${Math.max(left + 250, width - 330)}, 30)`}>
+            <rect x="0" y="-7" width="12" height="12" rx="2" fill="url(#qpcrBarGradient)" />
+            <text x="19" y="3" fill={colors.muted} fontSize="9">每根柱 = 一个生物学样本</text>
+            <line x1="176" x2="190" y1="-1" y2="-1" stroke={colors.reference} strokeDasharray="4 3" />
+            <text x="197" y="3" fill={colors.muted} fontSize="9">校准值 = 1</text>
+          </g>
+
+          {ticks.map((tick) => {
+            const tickY = y(tick);
             return (
-              <g key={`${row.label}-${index}`}>
-                <text x={labelWidth - 12} y={y + 13} textAnchor="end" className="chart-label">{row.label}</text>
-                <line x1={labelWidth} x2={width - rightPad} y1={y + 18} y2={y + 18} className="grid-line" />
-                <rect x={barX} y={y} width={barWidth} height={22} rx={5} className={row.warning ? "bar warning" : "bar"} />
-                <text x={row.value >= 0 ? endX + 8 : endX - 8} y={y + 15} textAnchor={row.value >= 0 ? "start" : "end"} className="chart-value">
-                  {logScale ? row.value.toFixed(2) : row.rawValue.toFixed(3)}
-                </text>
+              <g key={tick}>
+                <line x1={left} x2={width - right} y1={tickY} y2={tickY} stroke={colors.grid} strokeWidth="1" />
+                <line x1={left - 5} x2={left} y1={tickY} y2={tickY} stroke={colors.axis} strokeWidth="1" />
+                <text x={left - 10} y={tickY + 3} textAnchor="end" fill={colors.muted} fontSize="9">{axisTickLabel(tick)}</text>
               </g>
             );
           })}
-          <text x={labelWidth} y={height - 6} className="axis-title">{logScale ? "log₂(relative expression)" : "relative expression / normalized quantity"}</text>
+          <line x1={left} x2={left} y1={top} y2={bottom} stroke={colors.axis} strokeWidth="1.2" />
+          <line x1={left} x2={width - right} y1={bottom} y2={bottom} stroke={colors.axis} strokeWidth="1.2" />
+          {referenceY >= top && referenceY <= bottom && (
+            <line x1={left} x2={width - right} y1={referenceY} y2={referenceY} stroke={colors.reference} strokeWidth="1.2" strokeDasharray="5 4" />
+          )}
+          {chartRows.map((row, index) => {
+            const centerX = left + slotWidth * (index + .5);
+            const barTop = y(row.rawValue);
+            const barHeight = Math.max(1, bottom - barTop);
+            const label = row.label.length > 13 ? `${row.label.slice(0, 12)}…` : row.label;
+            return (
+              <g key={`${row.label}-${index}`}>
+                <title>{row.label}: {row.rawValue.toFixed(4)}{row.warning ? " · QC 提示" : ""}</title>
+                <rect x={centerX - barWidth / 2} y={barTop} width={barWidth} height={barHeight} rx="3" fill="url(#qpcrBarGradient)" stroke={row.warning ? colors.warning : "none"} strokeWidth={row.warning ? 1.3 : 0} />
+                {row.warning && <circle cx={centerX} cy={Math.max(top + 4, barTop - 7)} r="3" fill={colors.warning} />}
+                <text
+                  x={centerX}
+                  y={bottom + 20}
+                  textAnchor={chartRows.length > 10 ? "end" : "middle"}
+                  transform={chartRows.length > 10 ? `rotate(-35 ${centerX} ${bottom + 20})` : undefined}
+                  fill={colors.muted}
+                  fontSize="9"
+                >{label}</text>
+              </g>
+            );
+          })}
+          <text x={(left + width - right) / 2} y={height - 20} textAnchor="middle" fill={colors.text} fontSize="10" fontWeight="600">Biological sample</text>
+          <text x="24" y={(top + bottom) / 2} textAnchor="middle" transform={`rotate(-90 24 ${(top + bottom) / 2})`} fill={colors.text} fontSize="10" fontWeight="600">
+            {axisMode === "log-ratio" ? "Relative expression (log₂ ratio axis)" : "Relative expression"}
+          </text>
         </svg>
       </div>
-      <p className="chart-note">每条柱代表一个生物学样本；橙色表示该结果带有 QC 提示。当前最多显示 30 个样本。</p>
+      <div className="publication-note">
+        <i>i</i>
+        <p><b>误差线不会自动伪造。</b>当前每根柱是一个生物学样本的技术复孔汇总值。只有后续提供生物学重复或分组信息，才计算并显示 SD、SEM 或 95% CI，并在图注中明确误差类型和 n。</p>
+      </div>
     </div>
   );
 }
