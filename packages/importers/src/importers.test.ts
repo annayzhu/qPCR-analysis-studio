@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { buildCanonicalDataset } from "./canonicalize";
 import { inferFieldMappings } from "./field-mapping";
 import { parseDelimitedText } from "./workbook";
+import { assessImportReadiness, getSourceCapabilities } from "./readiness";
 
 describe("field mapping", () => {
   it("maps English and Chinese synonyms while keeping mean Cq separate", () => {
@@ -38,3 +39,47 @@ describe("Roche LightCycler 480 adapter", () => {
   });
 });
 
+describe("staged import readiness", () => {
+  it("skips a separate layout when the primary result already contains sample and target", () => {
+    const source = parseDelimitedText(
+      "Well\tSample\tTarget\tCq\nA1\tS01\tGAPDH\t20.1\nA2\tS01\tGENE1\t22.4\n",
+      "complete-result.tsv",
+    );
+    expect(getSourceCapabilities(source).includesPlateLayout).toBe(true);
+    expect(assessImportReadiness([source])).toMatchObject({
+      status: "ready",
+      canAnalyze: true,
+      resultIncludesPlateLayout: true,
+      layoutRequired: false,
+    });
+  });
+
+  it("requires a plate layout when the instrument result only identifies wells", () => {
+    const result = parseDelimitedText(
+      "Pos\tName\tCp\nA1\t1\t20.1\nA2\t1\t22.4\n",
+      "roche-cp.txt",
+    );
+    expect(assessImportReadiness([result])).toMatchObject({
+      status: "waiting-layout",
+      canAnalyze: false,
+      layoutRequired: true,
+    });
+
+    const layout = parseDelimitedText(
+      "Well\tSample Name\tTarget Name\nA1\tS01\tGAPDH\nA2\tS01\tGENE1\n",
+      "layout.tsv",
+    );
+    expect(assessImportReadiness([result, layout])).toMatchObject({
+      status: "ready",
+      canAnalyze: true,
+      resultIncludesPlateLayout: false,
+      layoutCount: 1,
+    });
+  });
+
+  it("does not treat Tm-only supplements as a primary result", () => {
+    const tm = parseDelimitedText("Pos\tName\tTm1\nA1\t1\t82.4\n", "tm.txt");
+    expect(getSourceCapabilities(tm).role).toBe("supplemental-result");
+    expect(assessImportReadiness([tm]).status).toBe("waiting-results");
+  });
+});

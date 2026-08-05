@@ -15,11 +15,12 @@ test("server-renders the instrument-independent qPCR application", async () => {
   assert.equal(response.status, 200);
   const html = await response.text();
   assert.match(html, /qPCR Analysis Studio/);
-  assert.match(html, /从原始孔位到可追溯结果/);
-  assert.match(html, /Roche LC480/);
+  assert.match(html, /结果与板布局，分开导入/);
+  assert.match(html, /Roche/);
   assert.match(html, /QuantStudio 5/);
-  assert.match(html, /ABI 7500/);
-  assert.match(html, /Generic XLSX/);
+  assert.match(html, /ABI/);
+  assert.match(html, /通用表格/);
+  assert.match(html, /添加结果文件/);
+  assert.match(html, /添加板布局/);
   assert.doesNotMatch(html, /codex-preview|Building your site|react-loading-skeleton/i);
 });
-

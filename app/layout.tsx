@@ -13,6 +13,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
+  metadataBase: new URL("https://qpcr-analysis-studio.pountneycitlali784.chatgpt.site"),
   title: "qPCR Analysis Studio",
   description: "Instrument-independent qPCR relative quantification workspace.",
   icons: {
