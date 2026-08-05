@@ -454,14 +454,14 @@ footer { display: flex; justify-content: space-between; padding: 19px clamp(20px
 }
 
 /* Compact scientific-tool layout */
-.topbar { height: 58px; padding-inline: clamp(18px, 3vw, 48px); }
+.topbar { height: 58px; padding-inline: clamp(18px, 3vw, 48px); background: rgba(57, 91, 86, .98); border-bottom-color: rgba(255,255,255,.12); }
 .brand-mark { width: 34px; height: 34px; padding: 8px; border-radius: 10px; }
 .brand-lockup strong { font-size: 14px; }
 .brand-lockup small { font-size: 8px; }
 .data-manager-page {
   min-height: calc(100vh - 58px);
   padding-bottom: 44px;
-  background: linear-gradient(180deg, var(--night) 0 118px, var(--canvas) 118px);
+  background: linear-gradient(180deg, #58766f 0 118px, var(--canvas) 118px);
 }
 .intake-hero {
   width: min(1380px, calc(100% - 40px));
@@ -513,7 +513,7 @@ footer { display: flex; justify-content: space-between; padding: 19px clamp(20px
   min-height: 100px;
   padding: 19px clamp(20px, 4vw, 60px) 17px;
   align-items: center;
-  background: linear-gradient(125deg, #112126, #193238 72%, #244840);
+  background: linear-gradient(125deg, #4d6d67, #5e7c75 72%, #6b8880);
 }
 .workspace-masthead .eyebrow { margin-bottom: 5px; font-size: 7px; }
 .workspace-masthead h1 { margin-bottom: 5px; font-size: clamp(23px, 2.7vw, 32px); }
@@ -585,19 +585,19 @@ footer { display: flex; justify-content: space-between; padding: 19px clamp(20px
 .melt-legend { display: flex; align-items: center; gap: 10px; color: #697873; font-size: 7px; }
 .melt-legend span { display: inline-flex; align-items: center; gap: 4px; }
 .melt-legend i { width: 7px; height: 7px; display: inline-block; }
-.tm-primary-dot { border-radius: 50%; background: #17877d; }
-.tm-secondary-dot { background: #c58a3b; clip-path: polygon(50% 0,100% 100%,0 100%); }
-.tm-median-dot { transform: rotate(45deg); border: 1px solid #17363b; background: white; }
-.melt-plot-scroll { overflow: auto; margin-top: 10px; border: 1px solid #e4e9e7; border-radius: 8px; background: #fcfdfc; }
+.tm-primary-dot { border-radius: 50%; background: #4f827c; }
+.tm-secondary-dot { background: #c0764f; clip-path: polygon(50% 0,100% 100%,0 100%); }
+.tm-median-dot { transform: rotate(45deg); border: 1px solid #343a3b; background: white; }
+.melt-plot-scroll { overflow: auto; margin-top: 10px; border: 1px solid #ded8d0; border-radius: 5px; background: white; }
 .melt-dotplot { min-width: 650px; height: auto; display: block; }
-.melt-gridline { stroke: #e7ecea; stroke-width: 1; }
-.melt-axis-label { fill: #84908c; font-size: 8px; }
-.melt-target-label { fill: #41545a; font-size: 9px; font-weight: 700; }
-.melt-range-line { stroke: #a8beba; stroke-width: 2; }
-.melt-primary-point { fill: #218f84; fill-opacity: .72; stroke: white; stroke-width: 1; }
-.melt-primary-point.warning { fill: #9f6b31; }
-.melt-secondary-point { fill: #c58a3b; stroke: white; stroke-width: 1; }
-.melt-median-point { fill: white; stroke: #133b3d; stroke-width: 1.5; }
+.melt-gridline { stroke: #e7ded4; stroke-width: .8; }
+.melt-axis-label { fill: #687071; font-size: 8px; }
+.melt-target-label { fill: #303536; font-size: 9px; font-weight: 600; }
+.melt-range-line { stroke: #a7aaa7; stroke-width: 1.4; }
+.melt-primary-point { fill: #4f827c; fill-opacity: .78; stroke: white; stroke-width: .8; }
+.melt-primary-point.warning { fill: #a85460; }
+.melt-secondary-point { fill: #c0764f; stroke: white; stroke-width: .8; }
+.melt-median-point { fill: white; stroke: #343a3b; stroke-width: 1.2; }
 .plot-caption { margin: 8px 0 0; color: #7a8783; font-size: 7px; line-height: 1.5; }
 .melt-group-list { display: grid; gap: 1px; max-height: 280px; overflow: auto; margin-top: 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--line); }
 .melt-group-list div { display: flex; justify-content: space-between; gap: 10px; padding: 8px 9px; background: #fafbfa; }
@@ -622,7 +622,7 @@ footer { display: flex; justify-content: space-between; padding: 19px clamp(20px
 
 @media (max-width: 760px) {
   .topbar { height: 58px; }
-  .data-manager-page { background: linear-gradient(180deg, var(--night) 0 132px, var(--canvas) 132px); }
+  .data-manager-page { background: linear-gradient(180deg, #58766f 0 132px, var(--canvas) 132px); }
   .intake-hero { width: calc(100% - 24px); min-height: 132px; padding: 16px 0; }
   .intake-shell { width: calc(100% - 24px); padding: 14px; }
   .intake-heading { align-items: flex-start; margin-bottom: 13px; }

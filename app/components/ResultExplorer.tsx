@@ -33,7 +33,7 @@ function safeFileName(value: string): string {
 
 function ExpressionChart({ rows, target }: { rows: RelativeQuantificationResult[]; target: string }) {
   const svgRef = useRef<SVGSVGElement>(null);
-  const [theme, setTheme] = useState<ChartTheme>("dark");
+  const [theme, setTheme] = useState<ChartTheme>("paper");
   const [axisMode, setAxisMode] = useState<AxisMode>("log-ratio");
   const chartRows = rows
     .filter((row) => row.targetName === target)
@@ -41,6 +41,7 @@ function ExpressionChart({ rows, target }: { rows: RelativeQuantificationResult[
       label: row.sampleName,
       rawValue: row.relativeExpression ?? row.normalizedQuantity,
       warning: row.warningCodes.length > 0,
+      calibrator: Boolean(row.calibratorValue && row.sampleName === row.calibratorValue),
     }))
     .filter((row) => Number.isFinite(row.rawValue) && row.rawValue > 0)
     .sort((a, b) => b.rawValue - a.rawValue)
@@ -67,13 +68,16 @@ function ExpressionChart({ rows, target }: { rows: RelativeQuantificationResult[
     : bottom - (Math.min(linearMax, Math.max(0, value)) / linearMax) * (bottom - top);
   const referenceY = y(1);
   const colors = theme === "dark" ? {
-    background: "#06161a", panel: "#081b20", border: "#24505a", text: "#b9dcd7", muted: "#6ea7a2",
-    axis: "#4e8581", grid: "#16353a", bar: "#218f85", barBottom: "#092a2d", warning: "#d6a45b", reference: "#c99b57",
+    background: "#183330", border: "#55736e", text: "#f2f5f3", muted: "#c0cfcb",
+    axis: "#d2dcda", grid: "#42605b", bar: "#70aaa2", calibrator: "#c8b9a7", calibratorStroke: "#eadfd2",
+    warning: "#e2ad65", reference: "#e2ad65",
   } : {
-    background: "#ffffff", panel: "#ffffff", border: "#cbd5d1", text: "#172126", muted: "#65746f",
-    axis: "#4b5955", grid: "#e6ebe8", bar: "#147d74", barBottom: "#8fc6be", warning: "#b36f2d", reference: "#a56c2d",
+    background: "#ffffff", border: "#ded8d0", text: "#292d2e", muted: "#60686a",
+    axis: "#343a3b", grid: "#e7ded4", bar: "#4f827c", calibrator: "#d7cdc0", calibratorStroke: "#746c64",
+    warning: "#b36b45", reference: "#a66a3f",
   };
-  const metricLabel = rows.some((row) => row.relativeExpression !== null) ? "Relative expression · 2^-ΔΔCq" : "Normalized quantity · 2^-ΔCq";
+  const usesCalibrator = chartRows.some((row) => row.calibrator);
+  const metricLabel = rows.some((row) => row.relativeExpression !== null) ? "Relative expression · 2⁻ΔΔCq" : "Normalized quantity · 2⁻ΔCq";
 
   function serializedSvg(): string | null {
     if (!svgRef.current) return null;
@@ -118,11 +122,11 @@ function ExpressionChart({ rows, target }: { rows: RelativeQuantificationResult[
   return (
     <div className={`chart-card publication-chart-card chart-theme-${theme}`}>
       <div className="chart-heading publication-chart-heading">
-        <div><p className="eyebrow">PUBLICATION FIGURE</p><h3>相对表达量</h3><p>竖向柱图 · 校准基线 · 可编辑矢量导出</p></div>
+        <div><p className="eyebrow">PUBLICATION FIGURE</p><h3>相对表达量</h3><p>论文白底 · 扁平配色 · 可编辑矢量导出</p></div>
         <div className="chart-control-stack">
           <div className="segmented-control" aria-label="图表主题">
-            <button type="button" className={theme === "dark" ? "active" : ""} onClick={() => setTheme("dark")}>深色展示</button>
             <button type="button" className={theme === "paper" ? "active" : ""} onClick={() => setTheme("paper")}>论文白底</button>
+            <button type="button" className={theme === "dark" ? "active" : ""} onClick={() => setTheme("dark")}>屏幕深色</button>
           </div>
           <div className="segmented-control" aria-label="纵轴模式">
             <button type="button" className={axisMode === "log-ratio" ? "active" : ""} onClick={() => setAxisMode("log-ratio")}>2 的幂次轴</button>
@@ -143,35 +147,30 @@ function ExpressionChart({ rows, target }: { rows: RelativeQuantificationResult[
           aria-label={`${target} 相对表达量图`}
           style={{ width: `${width}px`, minWidth: "100%", fontFamily: "Arial, Helvetica, 'PingFang SC', sans-serif", background: colors.background }}
         >
-          <defs>
-            <linearGradient id="qpcrBarGradient" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor={colors.bar} />
-              <stop offset="100%" stopColor={colors.barBottom} />
-            </linearGradient>
-          </defs>
-          <rect x="0" y="0" width={width} height={height} rx="12" fill={colors.background} />
-          <rect x="1" y="1" width={width - 2} height={height - 2} rx="11" fill="none" stroke={colors.border} strokeWidth="1" />
-          <text x={left} y="34" fill={colors.text} fontSize="18" fontWeight="700">{target || "目标基因"}</text>
-          <text x={left} y="54" fill={colors.muted} fontSize="10">{metricLabel}</text>
-          <g transform={`translate(${Math.max(left + 250, width - 330)}, 30)`}>
-            <rect x="0" y="-7" width="12" height="12" rx="2" fill="url(#qpcrBarGradient)" />
-            <text x="19" y="3" fill={colors.muted} fontSize="9">每根柱 = 一个生物学样本</text>
-            <line x1="176" x2="190" y1="-1" y2="-1" stroke={colors.reference} strokeDasharray="4 3" />
-            <text x="197" y="3" fill={colors.muted} fontSize="9">校准值 = 1</text>
+          <rect x="0" y="0" width={width} height={height} fill={colors.background} />
+          {theme === "dark" && <rect x="1" y="1" width={width - 2} height={height - 2} fill="none" stroke={colors.border} strokeWidth="1" />}
+          <text x={left} y="32" fill={colors.text} fontSize="17" fontWeight="400" fontStyle="italic">{target || "Target"}</text>
+          <text x={left} y="50" fill={colors.muted} fontSize="9">{metricLabel}</text>
+          <g transform={`translate(${Math.max(left + 250, width - (usesCalibrator ? 410 : 330))}, 29)`}>
+            <rect x="0" y="-7" width="11" height="11" fill={colors.bar} stroke={colors.axis} strokeWidth=".6" />
+            <text x="18" y="2" fill={colors.muted} fontSize="8.5">Biological sample</text>
+            {usesCalibrator && <><rect x="121" y="-7" width="11" height="11" fill={colors.calibrator} stroke={colors.calibratorStroke} strokeWidth=".8" /><text x="139" y="2" fill={colors.muted} fontSize="8.5">Calibrator</text></>}
+            <line x1={usesCalibrator ? 210 : 132} x2={usesCalibrator ? 225 : 147} y1="-1" y2="-1" stroke={colors.reference} strokeDasharray="4 3" />
+            <text x={usesCalibrator ? 232 : 154} y="2" fill={colors.muted} fontSize="8.5">Reference = 1</text>
           </g>
 
           {ticks.map((tick) => {
             const tickY = y(tick);
             return (
               <g key={tick}>
-                <line x1={left} x2={width - right} y1={tickY} y2={tickY} stroke={colors.grid} strokeWidth="1" />
+                <line x1={left} x2={width - right} y1={tickY} y2={tickY} stroke={colors.grid} strokeWidth=".8" />
                 <line x1={left - 5} x2={left} y1={tickY} y2={tickY} stroke={colors.axis} strokeWidth="1" />
                 <text x={left - 10} y={tickY + 3} textAnchor="end" fill={colors.muted} fontSize="9">{axisTickLabel(tick)}</text>
               </g>
             );
           })}
-          <line x1={left} x2={left} y1={top} y2={bottom} stroke={colors.axis} strokeWidth="1.2" />
-          <line x1={left} x2={width - right} y1={bottom} y2={bottom} stroke={colors.axis} strokeWidth="1.2" />
+          <line x1={left} x2={left} y1={top} y2={bottom} stroke={colors.axis} strokeWidth="1" />
+          <line x1={left} x2={width - right} y1={bottom} y2={bottom} stroke={colors.axis} strokeWidth="1" />
           {referenceY >= top && referenceY <= bottom && (
             <line x1={left} x2={width - right} y1={referenceY} y2={referenceY} stroke={colors.reference} strokeWidth="1.2" strokeDasharray="5 4" />
           )}
@@ -183,8 +182,8 @@ function ExpressionChart({ rows, target }: { rows: RelativeQuantificationResult[
             return (
               <g key={`${row.label}-${index}`}>
                 <title>{row.label}: {row.rawValue.toFixed(4)}{row.warning ? " · QC 提示" : ""}</title>
-                <rect x={centerX - barWidth / 2} y={barTop} width={barWidth} height={barHeight} rx="3" fill="url(#qpcrBarGradient)" stroke={row.warning ? colors.warning : "none"} strokeWidth={row.warning ? 1.3 : 0} />
-                {row.warning && <circle cx={centerX} cy={Math.max(top + 4, barTop - 7)} r="3" fill={colors.warning} />}
+                <rect x={centerX - barWidth / 2} y={barTop} width={barWidth} height={barHeight} fill={row.calibrator ? colors.calibrator : colors.bar} fillOpacity=".9" stroke={row.warning ? colors.warning : row.calibrator ? colors.calibratorStroke : colors.axis} strokeWidth={row.warning ? 1.35 : .7} />
+                {row.warning && <circle cx={centerX} cy={Math.max(top + 4, barTop - 7)} r="3" fill={colors.background} stroke={colors.warning} strokeWidth="1.2" />}
                 <text
                   x={centerX}
                   y={bottom + 20}
@@ -196,8 +195,8 @@ function ExpressionChart({ rows, target }: { rows: RelativeQuantificationResult[
               </g>
             );
           })}
-          <text x={(left + width - right) / 2} y={height - 20} textAnchor="middle" fill={colors.text} fontSize="10" fontWeight="600">Biological sample</text>
-          <text x="24" y={(top + bottom) / 2} textAnchor="middle" transform={`rotate(-90 24 ${(top + bottom) / 2})`} fill={colors.text} fontSize="10" fontWeight="600">
+          <text x={(left + width - right) / 2} y={height - 20} textAnchor="middle" fill={colors.text} fontSize="10">Biological sample</text>
+          <text x="24" y={(top + bottom) / 2} textAnchor="middle" transform={`rotate(-90 24 ${(top + bottom) / 2})`} fill={colors.text} fontSize="10">
             {axisMode === "log-ratio" ? "Relative expression (log₂ ratio axis)" : "Relative expression"}
           </text>
         </svg>
