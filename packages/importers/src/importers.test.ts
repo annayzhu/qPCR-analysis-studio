@@ -49,6 +49,7 @@ describe("staged import readiness", () => {
     expect(assessImportReadiness([source])).toMatchObject({
       status: "ready",
       canAnalyze: true,
+      analysisMode: "quantification",
       resultIncludesPlateLayout: true,
       layoutRequired: false,
     });
@@ -72,14 +73,28 @@ describe("staged import readiness", () => {
     expect(assessImportReadiness([result, layout])).toMatchObject({
       status: "ready",
       canAnalyze: true,
+      analysisMode: "quantification",
       resultIncludesPlateLayout: false,
       layoutCount: 1,
     });
   });
 
-  it("does not treat Tm-only supplements as a primary result", () => {
+  it("allows a Tm-only result to proceed after a separate layout is supplied", () => {
     const tm = parseDelimitedText("Pos\tName\tTm1\nA1\t1\t82.4\n", "tm.txt");
     expect(getSourceCapabilities(tm).role).toBe("supplemental-result");
-    expect(assessImportReadiness([tm]).status).toBe("waiting-results");
+    expect(assessImportReadiness([tm])).toMatchObject({
+      status: "waiting-layout",
+      canAnalyze: false,
+      analysisMode: "melt-only",
+    });
+    const layout = parseDelimitedText(
+      "Well\tSample Name\tTarget Name\nA1\tS01\tGENE1\n",
+      "layout.tsv",
+    );
+    expect(assessImportReadiness([tm, layout])).toMatchObject({
+      status: "ready",
+      canAnalyze: true,
+      analysisMode: "melt-only",
+    });
   });
 });

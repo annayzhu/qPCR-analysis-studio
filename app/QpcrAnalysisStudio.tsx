@@ -23,16 +23,16 @@ import {
   updateWellFields,
 } from "@/packages/qpcr-core/src";
 import ImportManager from "./components/ImportManager";
+import MeltAnalysis from "./components/MeltAnalysis";
 import ResultExplorer from "./components/ResultExplorer";
 
-type WorkspaceView = "overview" | "plate" | "qc" | "results" | "audit";
+type WorkspaceView = "overview" | "plate" | "results";
+type ResultSection = "quantification" | "melt";
 
 const VIEW_ITEMS: [WorkspaceView, string, string][] = [
-  ["overview", "概览", "Overview"],
+  ["overview", "概览与 QC", "Overview + QC"],
   ["plate", "板工作区", "Plate"],
-  ["qc", "复孔质控", "QC"],
   ["results", "结果与图表", "Results"],
-  ["audit", "审计记录", "Audit"],
 ];
 
 function formatNumber(value: number | null, digits = 2): string {
@@ -53,35 +53,6 @@ function commonValue(wells: WellRecord[], field: "sampleName" | "targetName" | "
   return "未设置";
 }
 
-function CqDistribution({ wells }: { wells: WellRecord[] }) {
-  const values = wells.map((well) => well.cq).filter((value): value is number => value !== null && Number.isFinite(value));
-  if (!values.length) return <div className="empty-chart">尚无可绘制的有效 Cq。</div>;
-  const min = Math.floor(Math.min(...values));
-  const max = Math.ceil(Math.max(...values));
-  const binCount = Math.max(5, Math.min(12, max - min + 1));
-  const step = (max - min || 1) / binCount;
-  const bins = Array.from({ length: binCount }, (_, index) => ({
-    start: min + index * step,
-    count: 0,
-  }));
-  values.forEach((value) => {
-    const index = Math.min(binCount - 1, Math.floor((value - min) / step));
-    bins[index].count += 1;
-  });
-  const maxCount = Math.max(...bins.map((bin) => bin.count), 1);
-  return (
-    <div className="cq-chart" role="img" aria-label="有效 Cq 分布图">
-      {bins.map((bin, index) => (
-        <div className="cq-bin" key={index}>
-          <span className="cq-count">{bin.count || ""}</span>
-          <i style={{ height: `${Math.max(3, (bin.count / maxCount) * 100)}%` }} />
-          <small>{bin.start.toFixed(0)}</small>
-        </div>
-      ))}
-    </div>
-  );
-}
-
 export default function QpcrAnalysisStudio() {
   const resultInput = useRef<HTMLInputElement>(null);
   const layoutInput = useRef<HTMLInputElement>(null);
@@ -93,6 +64,7 @@ export default function QpcrAnalysisStudio() {
   const [selectionAnchor, setSelectionAnchor] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
   const [view, setView] = useState<WorkspaceView>("overview");
+  const [resultSection, setResultSection] = useState<ResultSection>("quantification");
   const [dataManagerOpen, setDataManagerOpen] = useState(true);
   const [needsRebuild, setNeedsRebuild] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -163,6 +135,9 @@ export default function QpcrAnalysisStudio() {
     setAuditLogs([]);
     setNeedsRebuild(false);
     setView("overview");
+    const hasCq = built.wells.some((well) => well.cq !== null);
+    const hasMelt = built.wells.some((well) => well.tm1 !== null || well.tm2 !== null || Boolean(well.meltGroup));
+    setResultSection(hasCq || !hasMelt ? "quantification" : "melt");
     const builtTargets = [...new Set(built.wells.map((well) => well.targetName).filter(Boolean))];
     const probableReference = builtTargets.find((target) => /^(?:gapdh|actb|18s|rplp0|b2m|hprt1)$/i.test(target))
       ?? builtTargets.find((target) => /gapdh|actb|18s|rplp0|b2m|hprt/i.test(target));
@@ -358,6 +333,10 @@ export default function QpcrAnalysisStudio() {
   }
 
   const detectedCount = appliedWells.filter((well) => well.cqStatus === "detected" && !well.userExcluded).length;
+  const meltWellCount = appliedWells.filter((well) => well.tm1 !== null || well.tm2 !== null || Boolean(well.meltGroup) || well.meltScore !== null || well.meltResolution !== null).length;
+  const secondaryPeakCount = appliedWells.filter((well) => well.tm2 !== null && !well.userExcluded).length;
+  const hasQuantification = appliedWells.some((well) => well.cq !== null || well.cqStatus === "not-detected");
+  const hasMeltAnalysis = meltWellCount > 0;
   const namedReactionCount = draftWells.filter((well) => well.sampleName || well.targetName).length;
   const qcIssueCount = qc.filter((row) => row.warningCodes.length).length;
 
@@ -382,14 +361,9 @@ export default function QpcrAnalysisStudio() {
         <div className="data-manager-page">
           <section className="intake-hero">
             <div>
-              <p className="eyebrow">INSTRUMENT-INDEPENDENT qPCR</p>
-              <h1>导入之后，<br />直接得到可解释的结果。</h1>
-              <p>系统先识别文件角色，再决定是否需要单独的板布局。Cq、Tm、熔解摘要和修正布局可持续追加，不会因为只选了一个文件就关掉入口。</p>
-            </div>
-            <div className="hero-proof-grid">
-              <div><b>Local</b><span>原始数据仅在浏览器处理</span></div>
-              <div><b>Traceable</b><span>保留来源行与人工改动</span></div>
-              <div><b>Instrument-neutral</b><span>Roche LC480 / ABI 7500 / QuantStudio 5 / 通用表格</span></div>
+              <p className="eyebrow">qPCR · RELATIVE QUANTIFICATION & MELT REVIEW</p>
+              <div className="hero-title-row"><h1>qPCR 分析工具</h1><span>RUO</span></div>
+              <p>孔级 Cq 相对定量、复孔质控、Tm 与熔解分组复核；结果文件和修正板布局分类型导入。</p>
             </div>
           </section>
           <ImportManager
@@ -412,8 +386,8 @@ export default function QpcrAnalysisStudio() {
           <section className="workspace-masthead">
             <div>
               <p className="eyebrow">ACTIVE ANALYSIS</p>
-              <h1>{dataset.plate.plateFormat}-well qPCR analysis</h1>
-              <p>{sources.length} 个来源文件已自动合并 · {detectedCount} 个有效 Cq · {samples.length} 个样本</p>
+              <h1>{dataset.plate.plateFormat} 孔 qPCR 分析</h1>
+              <p>{sources.length} 个来源文件 · {samples.length} 个样本 · {targets.length} 个靶标{hasQuantification ? ` · ${detectedCount} 个有效 Cq` : ""}{hasMeltAnalysis ? ` · ${meltWellCount} 个熔解记录` : ""}</p>
             </div>
             <div className="analysis-state"><span />已自动计算</div>
           </section>
@@ -430,34 +404,48 @@ export default function QpcrAnalysisStudio() {
             {view === "overview" && (
               <div className="overview-layout">
                 <div className="section-heading overview-heading">
-                  <div><p className="eyebrow">ANALYSIS OVERVIEW</p><h2>先看整体，再进入需要处理的区域</h2></div>
+                  <div><p className="eyebrow">OVERVIEW + QUALITY CONTROL</p><h2>概览与复孔质控</h2><p className="section-summary">{dataset.plate.plateFormat} 孔板中定义 {namedReactionCount} 个反应；当前 {qcIssueCount} 个复孔组需要复核{secondaryPeakCount ? `，${secondaryPeakCount} 个孔检测到第二熔解峰` : ""}。</p></div>
                   <button className="quiet-button bordered" type="button" onClick={() => setDataManagerOpen(true)}>管理导入文件</button>
                 </div>
-                <div className="metric-grid">
-                  <article><span>样本</span><b>{samples.length}</b><small>unique samples</small></article>
-                  <article><span>基因</span><b>{targets.length}</b><small>unique targets</small></article>
-                  <article><span>有效 Cq</span><b>{detectedCount}</b><small>detected reactions</small></article>
-                  <article className={qcIssueCount ? "attention" : ""}><span>需复核</span><b>{qcIssueCount}</b><small>replicate groups</small></article>
-                </div>
-                <div className="overview-grid">
-                  <article className="overview-card chart-overview-card">
-                    <div className="card-heading"><div><p className="eyebrow">Cq DISTRIBUTION</p><h3>有效扩增分布</h3></div><span>{detectedCount} reactions</span></div>
-                    <CqDistribution wells={appliedWells} />
-                  </article>
-                  <article className="overview-card">
-                    <div className="card-heading"><div><p className="eyebrow">QC QUEUE</p><h3>优先复核</h3></div><button type="button" onClick={() => setView("qc")}>查看全部 →</button></div>
-                    <div className="qc-queue">
-                      {qc.filter((row) => row.warningCodes.length).slice(0, 5).map((row) => (
-                        <button type="button" key={row.id} onClick={() => setView("qc")}><span><b>{row.sampleName}</b><small>{row.targetName} · {row.wells.join(", ")}</small></span><i>{formatNumber(row.cqRange, 2)}</i></button>
-                      ))}
-                      {qcIssueCount === 0 && <div className="all-clear"><span>✓</span><p><b>没有发现复孔警告</b><small>当前阈值：Cq range &gt; 0.5</small></p></div>}
+                <div className="overview-qc-grid">
+                  <article className="qc-workbench">
+                    <div className="card-heading compact-card-heading">
+                      <div><p className="eyebrow">REPLICATE QC</p><h3>技术复孔</h3></div>
+                      <details className="inline-rules"><summary>规则：Cq/Tm 极差 &gt; 0.5</summary><p>仅提示，不自动排除；单孔不计算 SD/CV；Tm 偏移需结合曲线和实验设计人工判断。</p></details>
+                    </div>
+                    <div className="table-filterbar compact-filterbar">
+                      <input value={qcSearch} onChange={(event) => setQcSearch(event.target.value)} placeholder="筛选样本、靶标或孔位" />
+                      <button type="button" className={qcIssueOnly ? "filter-chip active" : "filter-chip"} onClick={() => setQcIssueOnly((current) => !current)}>仅看需复核</button>
+                      <span>{filteredQc.length} / {qc.length} 组</span>
+                    </div>
+                    <div className="table-wrap compact-qc-table">
+                      <table>
+                        <thead><tr><th>样本</th><th>靶标</th><th>孔位</th>{hasQuantification && <><th>有效 Cq/总数</th><th>Mean Cq</th><th>SD</th><th>Cq range</th><th>线性量 CV%</th></>}{hasMeltAnalysis && <><th>Mean Tm1</th><th>Tm1 range</th><th>第二峰</th><th>熔解分组</th></>}<th>判定</th></tr></thead>
+                        <tbody>{filteredQc.map((row) => <tr key={row.id} className={row.warningCodes.length ? "flagged-row" : ""}>
+                          <td><b>{row.sampleName}</b></td><td>{row.targetName}</td><td>{row.wells.join(", ")}</td>{hasQuantification && <><td>{row.validReplicates}/{row.totalReplicates}</td><td>{formatNumber(row.meanCq, 3)}</td><td>{formatNumber(row.sdCq, 3)}</td><td>{formatNumber(row.cqRange, 3)}</td><td>{formatNumber(row.linearQuantityCvPercent, 1)}</td></>}{hasMeltAnalysis && <><td>{formatNumber(row.meanTm1, 2)}</td><td>{formatNumber(row.tm1Range, 2)}</td><td>{row.secondaryPeakCount || "—"}</td><td>{row.meltGroups.join(", ") || "—"}</td></>}<td>{row.warningCodes.length ? <span className="status warning-status">复核 {row.suspectWell ? `· ${row.suspectWell}` : ""}</span> : <span className="status pass-status">通过</span>}</td>
+                        </tr>)}</tbody>
+                      </table>
                     </div>
                   </article>
-                </div>
-                <div className="action-lane">
-                  <button type="button" onClick={() => setView("plate")}><span>01</span><div><b>检查板布局</b><small>批量选择、编辑或排除反应孔</small></div><i>→</i></button>
-                  <button type="button" onClick={() => setView("qc")}><span>02</span><div><b>处理复孔 QC</b><small>查看极差、SD、CV 与熔解提示</small></div><i>→</i></button>
-                  <button type="button" onClick={() => setView("results")}><span>03</span><div><b>查看结果与图表</b><small>设置内参、筛选结果并可视化</small></div><i>→</i></button>
+
+                  <aside className="overview-side-stack">
+                    <article className="provenance-card">
+                      <div className="card-heading"><div><p className="eyebrow">DATA SOURCES</p><h3>数据与假设</h3></div><button type="button" onClick={() => setDataManagerOpen(true)}>编辑</button></div>
+                      <div className="source-summary-list">
+                        {sources.map((source) => <div key={source.id}><span>{source.fileName}</span><small>{source.tables.find((table) => table.id === source.selectedTableId)?.sourceSheet ?? "—"}</small></div>)}
+                      </div>
+                      {(dataset.warnings.length > 0 || dataset.assumptions.length > 0) && <details className="assumption-details"><summary>{dataset.warnings.length + dataset.assumptions.length} 条数据说明</summary>{[...dataset.warnings, ...dataset.assumptions].map((item) => <p key={item}>{item}</p>)}</details>}
+                    </article>
+                    <article className="audit-card">
+                      <div className="card-heading"><div><p className="eyebrow">AUDIT TRAIL</p><h3>审计记录</h3></div><span>{auditLogs.length} 已应用 · {pendingCount} 待应用</span></div>
+                      <div className="timeline compact-timeline">
+                        {auditLogs.length === 0 && <div className="empty-table embedded">尚无已应用的人工改动。</div>}
+                        {[...auditLogs].reverse().slice(0, 8).map((log) => (
+                          <article key={log.id}><span className="timeline-dot" /><div><b>{"field" in log ? `编辑 ${log.field}` : log.action === "exclude" ? "排除反应孔" : "恢复反应孔"}</b><p>{"field" in log ? `${log.previousValue || "(空)"} → ${log.newValue || "(空)"}` : log.reason}</p><small>{log.wellRecordId} · {new Date(log.timestamp).toLocaleString("zh-CN")}</small></div></article>
+                        ))}
+                      </div>
+                    </article>
+                  </aside>
                 </div>
               </div>
             )}
@@ -546,48 +534,26 @@ export default function QpcrAnalysisStudio() {
               </div>
             )}
 
-            {view === "qc" && (
-              <div className="panel-stack">
-                <div className="section-heading"><div><p className="eyebrow">REPLICATE QC</p><h2>技术复孔质控</h2></div><div className="metric-chip"><b>{qcIssueCount}</b><span>组需复核</span></div></div>
-                <div className="method-note"><b>当前规则</b><span>Cq 极差 &gt; 0.5 警告</span><span>只提示可疑孔，不自动排除</span><span>单孔 SD / CV 不计算</span></div>
-                <div className="table-filterbar">
-                  <input value={qcSearch} onChange={(event) => setQcSearch(event.target.value)} placeholder="筛选样本、基因或孔位" />
-                  <button type="button" className={qcIssueOnly ? "filter-chip active" : "filter-chip"} onClick={() => setQcIssueOnly((current) => !current)}>仅看需复核</button>
-                  <span>{filteredQc.length} / {qc.length} 组</span>
-                </div>
-                <div className="table-wrap">
-                  <table>
-                    <thead><tr><th>样本</th><th>基因</th><th>孔位</th><th>有效/总数</th><th>Mean Cq</th><th>SD</th><th>Range</th><th>线性量 CV%</th><th>Tm1 range</th><th>判定</th></tr></thead>
-                    <tbody>{filteredQc.map((row) => <tr key={row.id} className={row.warningCodes.length ? "flagged-row" : ""}>
-                      <td><b>{row.sampleName}</b></td><td>{row.targetName}</td><td>{row.wells.join(", ")}</td><td>{row.validReplicates}/{row.totalReplicates}</td><td>{formatNumber(row.meanCq, 3)}</td><td>{formatNumber(row.sdCq, 3)}</td><td>{formatNumber(row.cqRange, 3)}</td><td>{formatNumber(row.linearQuantityCvPercent, 1)}</td><td>{formatNumber(row.tm1Range, 2)}</td><td>{row.warningCodes.length ? <span className="status warning-status">复核 {row.suspectWell ? `· ${row.suspectWell}` : ""}</span> : <span className="status pass-status">通过</span>}</td>
-                    </tr>)}</tbody>
-                  </table>
-                </div>
-              </div>
-            )}
-
             {view === "results" && (
               <div className="panel-stack results-panel">
-                <div className="section-heading"><div><p className="eyebrow">RELATIVE QUANTIFICATION</p><h2>结果、筛选与可视化</h2></div></div>
-                <div className="settings-card">
-                  <div><p className="field-title">内参基因（可多选）</p><div className="choice-row">{targets.map((target) => <label className={referenceTargets.includes(target) ? "choice active" : "choice"} key={target}><input type="checkbox" checked={referenceTargets.includes(target)} onChange={() => setReferenceTargets((current) => current.includes(target) ? current.filter((item) => item !== target) : [...current, target])} />{target}</label>)}</div></div>
-                  <label className="compact-field">校准样本<select value={calibrator} onChange={(event) => setCalibrator(event.target.value)}><option value="">仅计算 ΔCq</option>{samples.map((sample) => <option key={sample} value={sample}>{sample}</option>)}</select></label>
-                  <p className="microcopy">多内参按内参相对量的几何均值归一化。未提供扩增效率时按 100% 计算，并在导出规范中保留该假设。</p>
+                <div className="section-heading results-heading">
+                  <div><p className="eyebrow">RESULTS & FIGURES</p><h2>{resultSection === "quantification" ? "相对定量结果" : "Tm 与熔解分析"}</h2></div>
+                  <div className="result-mode-tabs" aria-label="结果类型">
+                    <button type="button" disabled={!hasQuantification} className={resultSection === "quantification" ? "active" : ""} onClick={() => setResultSection("quantification")}>相对定量</button>
+                    <button type="button" disabled={!hasMeltAnalysis} className={resultSection === "melt" ? "active" : ""} onClick={() => setResultSection("melt")}>Tm 与熔解</button>
+                  </div>
                 </div>
-                {!referenceTargets.length ? <div className="empty-table">请选择至少一个内参基因，系统随后生成可筛选表格和表达图。</div> : <ResultExplorer results={relativeResults} />}
-              </div>
-            )}
-
-            {view === "audit" && (
-              <div className="panel-stack">
-                <div className="section-heading"><div><p className="eyebrow">AUDIT TRAIL</p><h2>数据来源与人工改动</h2></div></div>
-                <div className="audit-summary"><div><b>{sources.length}</b><span>来源文件</span></div><div><b>{dataset.wells.length}</b><span>原始孔记录</span></div><div><b>{auditLogs.length}</b><span>已应用改动</span></div><div><b>{pendingCount}</b><span>待应用</span></div></div>
-                <div className="timeline">
-                  {auditLogs.length === 0 && <div className="empty-table embedded">尚无已应用的人工改动。</div>}
-                  {[...auditLogs].reverse().map((log) => (
-                    <article key={log.id}><span className="timeline-dot" /><div><b>{"field" in log ? `编辑 ${log.field}` : log.action === "exclude" ? "排除反应孔" : "恢复反应孔"}</b><p>{"field" in log ? `${log.previousValue || "(空)"} → ${log.newValue || "(空)"}` : log.reason}</p><small>{log.wellRecordId} · {new Date(log.timestamp).toLocaleString("zh-CN")}</small></div></article>
-                  ))}
-                </div>
+                {resultSection === "quantification" && hasQuantification && <>
+                  <div className="settings-card compact-settings-card">
+                    <div><p className="field-title">内参基因（可多选）</p><div className="choice-row">{targets.map((target) => <label className={referenceTargets.includes(target) ? "choice active" : "choice"} key={target}><input type="checkbox" checked={referenceTargets.includes(target)} onChange={() => setReferenceTargets((current) => current.includes(target) ? current.filter((item) => item !== target) : [...current, target])} />{target}</label>)}</div></div>
+                    <label className="compact-field">校准样本<select value={calibrator} onChange={(event) => setCalibrator(event.target.value)}><option value="">仅计算 ΔCq</option>{samples.map((sample) => <option key={sample} value={sample}>{sample}</option>)}</select></label>
+                    <p className="microcopy">多内参按相对量几何均值归一化；未提供扩增效率时暂按 100% 计算并保留假设。</p>
+                  </div>
+                  {!referenceTargets.length ? <div className="empty-table">请选择至少一个内参基因，系统随后生成可筛选结果表和发表级表达图。</div> : <ResultExplorer results={relativeResults} />}
+                </>}
+                {resultSection === "quantification" && !hasQuantification && <div className="empty-table">当前仅导入了 Tm/熔解结果；添加单孔 Cq/Ct/Cp 后可进行相对定量。</div>}
+                {resultSection === "melt" && hasMeltAnalysis && <MeltAnalysis wells={appliedWells} />}
+                {resultSection === "melt" && !hasMeltAnalysis && <div className="empty-table">当前没有 Tm 或熔解分组数据；可返回数据文件追加对应结果。</div>}
               </div>
             )}
           </section>

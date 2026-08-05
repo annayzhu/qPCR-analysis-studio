@@ -47,15 +47,17 @@ export function calculateReplicateQc(
   }
 
   return [...groups.entries()].map(([key, group]) => {
-    const valid = group.filter(
+    const active = group.filter((well) => !well.instrumentOmit && !well.userExcluded);
+    const valid = active.filter(
       (well) => !well.instrumentOmit && !well.userExcluded && well.cqStatus === "detected" && well.cq !== null,
     );
     const cqs = valid.map((well) => well.cq as number);
     const cqRange = range(cqs);
-    const tm1s = valid.map((well) => well.tm1).filter((value): value is number => value !== null);
+    const tm1s = active.map((well) => well.tm1).filter((value): value is number => value !== null);
     const tm1Range = range(tm1s);
     const warnings: string[] = [];
-    if (valid.length < group.length) warnings.push("EXCLUDED_OR_NON_DETECTED");
+    const hasQuantificationData = group.some((well) => well.cq !== null || well.cqStatus === "not-detected");
+    if (active.length < group.length || (hasQuantificationData && valid.length < active.length)) warnings.push("EXCLUDED_OR_NON_DETECTED");
     if (cqRange !== null && cqRange > cqRangeWarning) warnings.push("CQ_RANGE_HIGH");
     if (tm1Range !== null && tm1Range > tmRangeWarning) warnings.push("TM_RANGE_HIGH");
     if (group.some((well) => well.tm2 !== null)) warnings.push("SECONDARY_MELT_PEAK");
@@ -91,4 +93,3 @@ export function calculateReplicateQc(
     };
   });
 }
-

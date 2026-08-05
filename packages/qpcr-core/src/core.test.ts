@@ -3,6 +3,7 @@ import { buildLogRatioAxis, mapRatioToY } from "./charting";
 import type { RawImportedRow, WellRecord } from "../../schemas/src";
 import { calculateRelativeQuantification } from "./calculations";
 import { calculateReplicateQc } from "./qc";
+import { summarizeMeltWells } from "./melt";
 import { setWellExclusion, updateWellFields } from "./audit";
 
 const raw: RawImportedRow = {
@@ -42,6 +43,25 @@ describe("publication chart ratio axis", () => {
     expect(axis.maxExponent).toBeGreaterThanOrEqual(Math.log2(9));
     expect(mapRatioToY(9, axis, 40, 300)).toBeLessThan(mapRatioToY(1, axis, 40, 300));
     expect(mapRatioToY(0.2, axis, 40, 300)).toBeGreaterThan(mapRatioToY(1, axis, 40, 300));
+  });
+});
+
+describe("melt summary", () => {
+  it("flags secondary peaks and target-relative Tm shifts without excluding wells", () => {
+    const wells = [well("1", "A1", "S1", "G1", null), well("2", "A2", "S2", "G1", null), well("3", "A3", "S3", "G1", null)];
+    wells[0].tm1 = 82.0;
+    wells[1].tm1 = 82.1;
+    wells[2].tm1 = 84.0;
+    wells[2].tm2 = 72.4;
+    wells[2].meltGroup = "Unknown";
+    const summary = summarizeMeltWells(wells, 0.5);
+    expect(summary.targets[0].medianTm1).toBe(82.1);
+    expect(summary.wells[2].warningCodes).toEqual(expect.arrayContaining([
+      "SECONDARY_MELT_PEAK",
+      "UNKNOWN_MELT_GROUP",
+      "TM_SHIFT_FROM_TARGET_MEDIAN",
+    ]));
+    expect(wells[2].userExcluded).toBe(false);
   });
 });
 

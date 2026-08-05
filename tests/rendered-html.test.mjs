@@ -10,17 +10,17 @@ async function render() {
   }, { waitUntil() {}, passThroughOnException() {} });
 }
 
-test("server-renders the instrument-independent qPCR application", async () => {
+test("server-renders the staged qPCR analysis application", async () => {
   const response = await render();
   assert.equal(response.status, 200);
   const html = await response.text();
   assert.match(html, /qPCR Analysis Studio/);
-  assert.match(html, /结果与板布局，分开导入/);
-  assert.match(html, /Roche/);
-  assert.match(html, /QuantStudio 5/);
-  assert.match(html, /ABI/);
-  assert.match(html, /通用表格/);
-  assert.match(html, /添加结果文件/);
-  assert.match(html, /添加板布局/);
+  assert.match(html, /分类型导入，再统一分析/);
+  assert.match(html, /Cq\/Ct\/Cp/);
+  assert.match(html, /Tm\/熔解/);
+  assert.match(html, /仪器结果/);
+  assert.match(html, /板布局/);
+  assert.match(html, /添加结果/);
+  assert.match(html, /添加布局/);
   assert.doesNotMatch(html, /codex-preview|Building your site|react-loading-skeleton/i);
 });

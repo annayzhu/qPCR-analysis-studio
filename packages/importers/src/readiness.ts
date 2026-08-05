@@ -19,6 +19,7 @@ export interface SourceCapabilities {
 export interface ImportReadiness {
   status: "waiting-results" | "waiting-layout" | "review-mapping" | "ready";
   canAnalyze: boolean;
+  analysisMode: "quantification" | "melt-only" | null;
   resultIncludesPlateLayout: boolean;
   layoutRequired: boolean;
   primaryResultCount: number;
@@ -87,19 +88,22 @@ export function assessImportReadiness(sources: ImportedSource[]): ImportReadines
   const supplementalResults = capabilities.filter((item) => item.role === "supplemental-result");
   const layouts = capabilities.filter((item) => item.role === "plate-layout");
   const hasBlockingConflict = capabilities.some((item) => item.blockingConflicts.length > 0);
-  const resultIncludesPlateLayout = primaryResults.some((item) => item.includesPlateLayout);
-  const layoutRequired = primaryResults.length > 0 && !resultIncludesPlateLayout;
+  const analysisResults = [...primaryResults, ...supplementalResults];
+  const analysisMode = primaryResults.length ? "quantification" : supplementalResults.length ? "melt-only" : null;
+  const resultIncludesPlateLayout = analysisResults.some((item) => item.includesPlateLayout);
+  const layoutRequired = analysisResults.length > 0 && !resultIncludesPlateLayout;
 
-  if (!primaryResults.length) {
+  if (!analysisResults.length) {
     return {
       status: "waiting-results",
       canAnalyze: false,
+      analysisMode: null,
       resultIncludesPlateLayout: false,
       layoutRequired: false,
       primaryResultCount: 0,
       supplementalResultCount: supplementalResults.length,
       layoutCount: layouts.length,
-      message: "请先导入至少一个包含单孔 Cq/Ct/Cp 的仪器结果文件。",
+      message: "请先导入 Cq/Ct/Cp 或 Tm/熔解结果文件。",
     };
   }
 
@@ -107,12 +111,13 @@ export function assessImportReadiness(sources: ImportedSource[]): ImportReadines
     return {
       status: "review-mapping",
       canAnalyze: false,
+      analysisMode,
       resultIncludesPlateLayout,
       layoutRequired,
       primaryResultCount: primaryResults.length,
       supplementalResultCount: supplementalResults.length,
       layoutCount: layouts.length,
-      message: "关键字段存在映射冲突，请确认孔位、样本、基因或 Cq 字段后再计算。",
+      message: "关键字段存在映射冲突，请确认孔位、样本、基因或结果字段后再分析。",
     };
   }
 
@@ -120,25 +125,29 @@ export function assessImportReadiness(sources: ImportedSource[]): ImportReadines
     return {
       status: "waiting-layout",
       canAnalyze: false,
+      analysisMode,
       resultIncludesPlateLayout: false,
       layoutRequired: true,
       primaryResultCount: primaryResults.length,
       supplementalResultCount: supplementalResults.length,
       layoutCount: 0,
-      message: "结果文件未包含完整的 Sample/Target 信息，请再导入板布局。",
+      message: "结果文件未包含完整的 Sample/Target 信息，请再导入修正后的板布局。",
     };
   }
 
   return {
     status: "ready",
     canAnalyze: true,
+    analysisMode,
     resultIncludesPlateLayout,
     layoutRequired,
     primaryResultCount: primaryResults.length,
     supplementalResultCount: supplementalResults.length,
     layoutCount: layouts.length,
-    message: resultIncludesPlateLayout
-      ? "结果文件已包含板布局信息，无需另传布局；数据已具备自动计算条件。"
-      : "仪器结果与板布局均已就绪；数据已具备自动计算条件。",
+    message: analysisMode === "melt-only"
+      ? "Tm/熔解结果与板布局已就绪，可进入熔解分析；相对定量仍需 Cq/Ct/Cp。"
+      : resultIncludesPlateLayout
+        ? "结果文件已包含板布局信息，无需另传布局；相对定量已就绪。"
+        : "仪器结果与板布局均已就绪；相对定量已自动计算。",
   };
 }

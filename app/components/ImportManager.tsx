@@ -132,8 +132,8 @@ export default function ImportManager({
       <div className="intake-heading">
         <div>
           <p className="eyebrow">DATA INTAKE</p>
-          <h2>结果与板布局，分开导入</h2>
-          <p>先读取仪器结果，再判断它是否已经包含 Sample 和 Target。缺少布局时，系统才会要求第二类文件。</p>
+          <h2>分类型导入，再统一分析</h2>
+          <p>Cq 用于相对定量；Tm/熔解结果用于峰值与分组复核。系统读取结果后，只有缺少 Sample/Target 时才要求板布局。</p>
         </div>
         <div className={`readiness-badge readiness-${readiness.status}`}>
           <span />{readiness.status === "ready" ? "分析已就绪" : readiness.status === "review-mapping" ? "需确认映射" : "等待数据"}
@@ -143,15 +143,16 @@ export default function ImportManager({
       {loading && <div className="notice">正在当前浏览器中解析文件…</div>}
       {error && <div className="notice error">{error}</div>}
 
-      <div className="import-stage-grid">
+      <div className="import-stage-grid" aria-label="分阶段数据导入">
         <article className="import-stage primary-stage">
-          <div className="stage-number">01</div>
-          <div className="stage-copy">
-            <p className="stage-kicker">必需</p>
-            <h3>仪器结果</h3>
-            <p>导入 Cq/Ct/Cp；Tm 与熔解结果也放在这里。可以连续添加多个结果文件。</p>
+          <div className="stage-header">
+            <div className="stage-number">01</div>
+            <div className="stage-copy">
+              <div className="stage-title-line"><h3>仪器结果</h3><span className="stage-kicker">必需</span></div>
+              <p>可连续添加 Cq/Ct/Cp、Tm 或熔解分组文件；任一分析类型具备板信息后即可进入对应结果页。</p>
+            </div>
+            <button className="primary-button" type="button" onClick={onPickResults}>+ 添加结果</button>
           </div>
-          <button className="primary-button" type="button" onClick={onPickResults}>+ 添加结果文件</button>
           <div className="stage-files">
             {resultSources.length === 0 ? <div className="stage-empty">尚未添加仪器结果</div> : resultSources.map((source) => (
               <SourceCard
@@ -166,13 +167,14 @@ export default function ImportManager({
         </article>
 
         <article className={`import-stage ${readiness.layoutRequired ? "required-stage" : "optional-stage"}`}>
-          <div className="stage-number">02</div>
-          <div className="stage-copy">
-            <p className="stage-kicker">{readiness.layoutRequired ? "当前需要" : "按需"}</p>
-            <h3>板布局</h3>
-            <p>{readiness.resultIncludesPlateLayout ? "结果文件已带 Sample/Target，这一步可以跳过。" : "结果中没有完整的样本和基因信息时，再导入修正后的布局表。"}</p>
+          <div className="stage-header">
+            <div className="stage-number">02</div>
+            <div className="stage-copy">
+              <div className="stage-title-line"><h3>板布局</h3><span className="stage-kicker">{readiness.layoutRequired ? "当前需要" : "按需"}</span></div>
+              <p>{readiness.resultIncludesPlateLayout ? "结果已带 Sample/Target，可跳过；如需纠正错位，仍可追加修正版。" : "结果缺少完整样本和基因信息时，导入修正后的布局表。"}</p>
+            </div>
+            <button className="secondary-button" type="button" onClick={onPickLayout}>+ 添加布局</button>
           </div>
-          <button className="secondary-button" type="button" onClick={onPickLayout}>+ 添加板布局</button>
           <div className="stage-files">
             {layoutSources.length === 0 ? (
               <div className="stage-empty">{readiness.resultIncludesPlateLayout ? "无需单独导入" : "尚未添加板布局"}</div>
@@ -193,11 +195,11 @@ export default function ImportManager({
         <div className="readiness-icon">{readiness.status === "ready" ? "✓" : readiness.status === "review-mapping" ? "!" : "→"}</div>
         <div>
           <strong>{readiness.message}</strong>
-          <p>已读取 {readiness.primaryResultCount} 个主结果、{readiness.supplementalResultCount} 个补充结果、{readiness.layoutCount} 个布局文件。文件仍可继续添加或移除。</p>
+          <p>已读取 {readiness.primaryResultCount} 个 Cq 结果、{readiness.supplementalResultCount} 个 Tm/熔解结果、{readiness.layoutCount} 个布局文件。进入分析后仍可返回追加或替换。</p>
         </div>
         <div className="readiness-actions">
           {readiness.canAnalyze && <button className="quiet-button bordered" type="button" onClick={onRebuild}>重新合并并计算</button>}
-          <button className="primary-button" type="button" disabled={!hasDataset} onClick={onContinue}>进入分析概览 →</button>
+          <button className="primary-button" type="button" disabled={!hasDataset} onClick={onContinue}>{readiness.analysisMode === "melt-only" ? "进入熔解分析" : "进入分析"} →</button>
         </div>
       </div>
     </section>
