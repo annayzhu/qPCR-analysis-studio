@@ -94,6 +94,9 @@ input:focus, select:focus, textarea:focus {
 .brand-mark i:nth-child(3) { height: 20px; }
 .brand-mark i:nth-child(4) { height: 11px; opacity: .68; }
 .topbar-actions { display: flex; align-items: center; gap: 8px; }
+.language-switch { display: inline-flex; padding: 2px; border: 1px solid rgba(255,255,255,.18); border-radius: 8px; background: rgba(255,255,255,.06); }
+.language-switch button { min-height: 26px; padding: 4px 7px; border: 0; border-radius: 6px; color: rgba(255,255,255,.62); background: transparent; font-size: 8px; font-weight: 720; }
+.language-switch button.active { color: #24504b; background: #e8f3f0; box-shadow: 0 2px 7px rgba(10,31,34,.16); }
 .privacy-pill {
   display: inline-flex;
   align-items: center;
@@ -421,6 +424,7 @@ footer { display: flex; justify-content: space-between; padding: 19px clamp(20px
 @media (max-width: 760px) {
   .topbar { height: 64px; padding: 0 14px; }
   .brand-lockup small, .privacy-pill { display: none; }
+  .language-switch button { padding-inline: 6px; }
   .topbar-button { padding: 7px 8px; font-size: 9px; }
   .data-manager-page { background: linear-gradient(180deg, var(--night) 0 360px, var(--canvas) 360px); }
   .intake-hero, .intake-shell { width: min(100% - 24px, 1320px); }

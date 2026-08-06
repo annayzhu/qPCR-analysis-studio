@@ -25,15 +25,12 @@ import {
 import ImportManager from "./components/ImportManager";
 import MeltAnalysis from "./components/MeltAnalysis";
 import ResultExplorer from "./components/ResultExplorer";
+import { localizeRuntimeMessage, useLanguage } from "./i18n";
 
 type WorkspaceView = "overview" | "plate" | "results";
 type ResultSection = "quantification" | "melt";
 
-const VIEW_ITEMS: [WorkspaceView, string, string][] = [
-  ["overview", "概览与 QC", "Overview + QC"],
-  ["plate", "板工作区", "Plate"],
-  ["results", "结果与图表", "Results"],
-];
+const VIEW_ITEMS: WorkspaceView[] = ["overview", "plate", "results"];
 
 function formatNumber(value: number | null, digits = 2): string {
   return value === null || !Number.isFinite(value) ? "—" : value.toFixed(digits);
@@ -46,14 +43,19 @@ function targetColor(target: string): string {
   return target ? palette[Math.abs(hash) % palette.length] : "#cbd1ce";
 }
 
-function commonValue(wells: WellRecord[], field: "sampleName" | "targetName" | "taskType"): string {
+function commonValue(
+  wells: WellRecord[],
+  field: "sampleName" | "targetName" | "taskType",
+  l: (zh: string, en: string) => string,
+): string {
   const values = [...new Set(wells.map((well) => well[field]).filter(Boolean))];
   if (values.length === 1) return values[0];
-  if (values.length > 1) return "多个不同值（留空则保留）";
-  return "未设置";
+  if (values.length > 1) return l("多个不同值（留空则保留）", "Multiple values (leave blank to keep)");
+  return l("未设置", "Not set");
 }
 
 export default function QpcrAnalysisStudio() {
+  const { language, setLanguage, l } = useLanguage();
   const resultInput = useRef<HTMLInputElement>(null);
   const layoutInput = useRef<HTMLInputElement>(null);
   const [sources, setSources] = useState<ImportedSource[]>([]);
@@ -76,7 +78,7 @@ export default function QpcrAnalysisStudio() {
   const [batchTarget, setBatchTarget] = useState("");
   const [batchTask, setBatchTask] = useState("");
   const [pasteBlock, setPasteBlock] = useState("");
-  const [exclusionReason, setExclusionReason] = useState("技术复孔异常（人工判定）");
+  const [exclusionReason, setExclusionReason] = useState("");
   const [referenceTargets, setReferenceTargets] = useState<string[]>([]);
   const [calibrator, setCalibrator] = useState("");
   const [displaySamples, setDisplaySamples] = useState<string[]>([]);
@@ -368,7 +370,12 @@ export default function QpcrAnalysisStudio() {
 
   function setExclusion(excluded: boolean, ids = selected) {
     if (!ids.length) return;
-    const updated = setWellExclusion(draftWells, ids, excluded, exclusionReason);
+    const updated = setWellExclusion(
+      draftWells,
+      ids,
+      excluded,
+      exclusionReason.trim() || l("技术复孔异常（人工判定）", "Technical replicate issue (manual decision)"),
+    );
     setDraftWells(updated.wells);
     setPendingExclusionLogs((current) => [...current, ...updated.logs]);
   }
@@ -414,6 +421,11 @@ export default function QpcrAnalysisStudio() {
   const namedReactionCount = draftWells.filter((well) => well.sampleName || well.targetName).length;
   const qcIssueCount = qc.filter((row) => row.warningCodes.length).length;
   const selectedDisplayTargets = displayTargets.filter((target) => !referenceTargets.includes(target));
+  const viewLabels: Record<WorkspaceView, [string, string]> = {
+    overview: [l("概览与 QC", "Overview & QC"), "Overview + QC"],
+    plate: [l("板工作区", "Plate workspace"), "Plate"],
+    results: [l("结果与图表", "Results & figures"), "Results"],
+  };
 
   return (
     <main className="app-shell">
@@ -426,9 +438,13 @@ export default function QpcrAnalysisStudio() {
           <span><strong>qPCR Analysis Studio</strong><small>Relative quantification workspace</small></span>
         </button>
         <div className="topbar-actions">
-          <span className="privacy-pill"><i />Local processing</span>
-          {dataset && <button className="quiet-button topbar-button" type="button" onClick={() => setDataManagerOpen(true)}>数据文件 <span className="file-count">{sources.length}</span></button>}
-          {sources.length > 0 && <button className="quiet-button topbar-button" type="button" onClick={clearProject}>新建分析</button>}
+          <span className="privacy-pill"><i />{l("本地处理", "Local processing")}</span>
+          <div className="language-switch" role="group" aria-label={l("语言选择", "Language selection")}>
+            <button type="button" className={language === "zh" ? "active" : ""} onClick={() => setLanguage("zh")}>中文</button>
+            <button type="button" className={language === "en" ? "active" : ""} onClick={() => setLanguage("en")}>EN</button>
+          </div>
+          {dataset && <button className="quiet-button topbar-button" type="button" onClick={() => setDataManagerOpen(true)}>{l("数据文件", "Data files")} <span className="file-count">{sources.length}</span></button>}
+          {sources.length > 0 && <button className="quiet-button topbar-button" type="button" onClick={clearProject}>{l("新建分析", "New analysis")}</button>}
         </div>
       </header>
 
@@ -437,8 +453,8 @@ export default function QpcrAnalysisStudio() {
           <section className="intake-hero">
             <div>
               <p className="eyebrow">qPCR · RELATIVE QUANTIFICATION & MELT REVIEW</p>
-              <div className="hero-title-row"><h1>qPCR 分析工具</h1><span>RUO</span></div>
-              <p>孔级 Cq 相对定量、复孔质控、Tm 与熔解分组复核；结果文件和修正板布局分类型导入。</p>
+              <div className="hero-title-row"><h1>{l("qPCR 分析工具", "qPCR Analysis Studio")}</h1><span>RUO</span></div>
+              <p>{l("孔级 Cq 相对定量、复孔质控、Tm 与熔解分组复核；结果文件和修正板布局分类型导入。", "Well-level Cq relative quantification, replicate QC, and Tm/melt-group review with separate result and corrected-layout imports.")}</p>
             </div>
           </section>
           <ImportManager
@@ -461,50 +477,59 @@ export default function QpcrAnalysisStudio() {
           <section className="workspace-masthead">
             <div>
               <p className="eyebrow">ACTIVE ANALYSIS</p>
-              <h1>{dataset.plate.plateFormat} 孔 qPCR 分析</h1>
-              <p>{sources.length} 个来源文件 · {samples.length} 个样本 · {targets.length} 个靶标{hasQuantification ? ` · ${detectedCount} 个有效 Cq` : ""}{hasMeltAnalysis ? ` · ${meltWellCount} 个熔解记录` : ""}</p>
+              <h1>{l(`${dataset.plate.plateFormat} 孔 qPCR 分析`, `${dataset.plate.plateFormat}-well qPCR analysis`)}</h1>
+              <p>{l(
+                `${sources.length} 个来源文件 · ${samples.length} 个样本 · ${targets.length} 个靶标${hasQuantification ? ` · ${detectedCount} 个有效 Cq` : ""}${hasMeltAnalysis ? ` · ${meltWellCount} 个熔解记录` : ""}`,
+                `${sources.length} source file(s) · ${samples.length} sample(s) · ${targets.length} target(s)${hasQuantification ? ` · ${detectedCount} valid Cq` : ""}${hasMeltAnalysis ? ` · ${meltWellCount} melt record(s)` : ""}`,
+              )}</p>
             </div>
-            <div className={pendingCount > 0 ? "analysis-state pending" : "analysis-state"}><span />{pendingCount > 0 ? `${pendingCount} 项修改待重算` : "概览、板布局与结果已同步"}</div>
+            <div className={pendingCount > 0 ? "analysis-state pending" : "analysis-state"}><span />{pendingCount > 0 ? l(`${pendingCount} 项修改待重算`, `${pendingCount} change(s) awaiting recalculation`) : l("概览、板布局与结果已同步", "Overview, plate, and results synchronized")}</div>
           </section>
 
-          <nav className="workspace-tabs" aria-label="分析工作区">
-            {VIEW_ITEMS.map(([value, label, english]) => (
+          <nav className="workspace-tabs" aria-label={l("分析工作区", "Analysis workspace")}>
+            {VIEW_ITEMS.map((value) => {
+              const [label, english] = viewLabels[value];
+              return (
               <button
                 key={value}
                 type="button"
                 className={view === value ? "active" : ""}
                 disabled={pendingCount > 0 && value !== "plate"}
-                title={pendingCount > 0 && value !== "plate" ? "请先应用板布局修改并重算" : undefined}
+                title={pendingCount > 0 && value !== "plate" ? l("请先应用板布局修改并重算", "Apply plate edits and recalculate first") : undefined}
                 onClick={() => switchWorkspaceView(value)}
               >
                 <span>{label}</span><small>{english}</small>
               </button>
-            ))}
+              );
+            })}
           </nav>
 
           <section className="workspace-content">
             {view === "overview" && (
               <div className="overview-layout">
                 <div className="section-heading overview-heading">
-                  <div><p className="eyebrow">OVERVIEW + QUALITY CONTROL</p><h2>概览与复孔质控</h2><p className="section-summary">{dataset.plate.plateFormat} 孔板中定义 {namedReactionCount} 个反应；当前 {qcIssueCount} 个复孔组需要复核{secondaryPeakCount ? `，${secondaryPeakCount} 个孔检测到第二熔解峰` : ""}。</p></div>
-                  <button className="quiet-button bordered" type="button" onClick={() => setDataManagerOpen(true)}>管理导入文件</button>
+                  <div><p className="eyebrow">OVERVIEW + QUALITY CONTROL</p><h2>{l("概览与复孔质控", "Overview & replicate QC")}</h2><p className="section-summary">{l(
+                    `${dataset.plate.plateFormat} 孔板中定义 ${namedReactionCount} 个反应；当前 ${qcIssueCount} 个复孔组需要复核${secondaryPeakCount ? `，${secondaryPeakCount} 个孔检测到第二熔解峰` : ""}。`,
+                    `${namedReactionCount} reactions are defined on the ${dataset.plate.plateFormat}-well plate; ${qcIssueCount} replicate group(s) require review${secondaryPeakCount ? `, with secondary melt peaks in ${secondaryPeakCount} well(s)` : ""}.`,
+                  )}</p></div>
+                  <button className="quiet-button bordered" type="button" onClick={() => setDataManagerOpen(true)}>{l("管理导入文件", "Manage imported files")}</button>
                 </div>
                 <div className="overview-qc-grid">
                   <article className="qc-workbench">
                     <div className="card-heading compact-card-heading">
-                      <div><p className="eyebrow">REPLICATE QC</p><h3>技术复孔</h3></div>
-                      <details className="inline-rules"><summary>规则：Cq/Tm 极差 &gt; 0.5</summary><p>仅提示，不自动排除；单孔不计算 SD/CV；Tm 偏移需结合曲线和实验设计人工判断。</p></details>
+                      <div><p className="eyebrow">REPLICATE QC</p><h3>{l("技术复孔", "Technical replicates")}</h3></div>
+                      <details className="inline-rules"><summary>{l("规则：Cq/Tm 极差 > 0.5", "Rule: Cq/Tm range > 0.5")}</summary><p>{l("仅提示，不自动排除；单孔不计算 SD/CV；Tm 偏移需结合曲线和实验设计人工判断。", "Warnings do not automatically exclude wells. SD/CV are not calculated for a single well. Interpret Tm shifts with the curve and experimental design.")}</p></details>
                     </div>
                     <div className="table-filterbar compact-filterbar">
-                      <input value={qcSearch} onChange={(event) => setQcSearch(event.target.value)} placeholder="筛选样本、靶标或孔位" />
-                      <button type="button" className={qcIssueOnly ? "filter-chip active" : "filter-chip"} onClick={() => setQcIssueOnly((current) => !current)}>仅看需复核</button>
-                      <span>{filteredQc.length} / {qc.length} 组</span>
+                      <input value={qcSearch} onChange={(event) => setQcSearch(event.target.value)} placeholder={l("筛选样本、靶标或孔位", "Filter sample, target, or well")} />
+                      <button type="button" className={qcIssueOnly ? "filter-chip active" : "filter-chip"} onClick={() => setQcIssueOnly((current) => !current)}>{l("仅看需复核", "Review only")}</button>
+                      <span>{filteredQc.length} / {qc.length} {l("组", "groups")}</span>
                     </div>
                     <div className="table-wrap compact-qc-table">
                       <table>
-                        <thead><tr><th>样本</th><th>靶标</th><th>孔位</th>{hasQuantification && <><th>有效 Cq/总数</th><th>Mean Cq</th><th>SD</th><th>Cq range</th><th>线性量 CV%</th></>}{hasMeltAnalysis && <><th>Mean Tm1</th><th>Tm1 range</th><th>第二峰</th><th>熔解分组</th></>}<th>判定</th></tr></thead>
+                        <thead><tr><th>{l("样本", "Sample")}</th><th>{l("靶标", "Target")}</th><th>{l("孔位", "Wells")}</th>{hasQuantification && <><th>{l("有效 Cq/总数", "Valid/total Cq")}</th><th>Mean Cq</th><th>SD</th><th>Cq range</th><th>{l("线性量 CV%", "Linear quantity CV%")}</th></>}{hasMeltAnalysis && <><th>Mean Tm1</th><th>Tm1 range</th><th>{l("第二峰", "Second peak")}</th><th>{l("熔解分组", "Melt groups")}</th></>}<th>{l("判定", "Status")}</th></tr></thead>
                         <tbody>{filteredQc.map((row) => <tr key={row.id} className={row.warningCodes.length ? "flagged-row" : ""}>
-                          <td><b>{row.sampleName}</b></td><td>{row.targetName}</td><td>{row.wells.join(", ")}</td>{hasQuantification && <><td>{row.validReplicates}/{row.totalReplicates}</td><td>{formatNumber(row.meanCq, 3)}</td><td>{formatNumber(row.sdCq, 3)}</td><td>{formatNumber(row.cqRange, 3)}</td><td>{formatNumber(row.linearQuantityCvPercent, 1)}</td></>}{hasMeltAnalysis && <><td>{formatNumber(row.meanTm1, 2)}</td><td>{formatNumber(row.tm1Range, 2)}</td><td>{row.secondaryPeakCount || "—"}</td><td>{row.meltGroups.join(", ") || "—"}</td></>}<td>{row.warningCodes.length ? <span className="status warning-status">复核 {row.suspectWell ? `· ${row.suspectWell}` : ""}</span> : <span className="status pass-status">通过</span>}</td>
+                          <td><b>{row.sampleName}</b></td><td>{row.targetName}</td><td>{row.wells.join(", ")}</td>{hasQuantification && <><td>{row.validReplicates}/{row.totalReplicates}</td><td>{formatNumber(row.meanCq, 3)}</td><td>{formatNumber(row.sdCq, 3)}</td><td>{formatNumber(row.cqRange, 3)}</td><td>{formatNumber(row.linearQuantityCvPercent, 1)}</td></>}{hasMeltAnalysis && <><td>{formatNumber(row.meanTm1, 2)}</td><td>{formatNumber(row.tm1Range, 2)}</td><td>{row.secondaryPeakCount || "—"}</td><td>{row.meltGroups.join(", ") || "—"}</td></>}<td>{row.warningCodes.length ? <span className="status warning-status">{l("复核", "Review")} {row.suspectWell ? `· ${row.suspectWell}` : ""}</span> : <span className="status pass-status">{l("通过", "Pass")}</span>}</td>
                         </tr>)}</tbody>
                       </table>
                     </div>
@@ -512,18 +537,18 @@ export default function QpcrAnalysisStudio() {
 
                   <aside className="overview-side-stack">
                     <article className="provenance-card">
-                      <div className="card-heading"><div><p className="eyebrow">DATA SOURCES</p><h3>数据与假设</h3></div><button type="button" onClick={() => setDataManagerOpen(true)}>编辑</button></div>
+                      <div className="card-heading"><div><p className="eyebrow">DATA SOURCES</p><h3>{l("数据与假设", "Data & assumptions")}</h3></div><button type="button" onClick={() => setDataManagerOpen(true)}>{l("编辑", "Edit")}</button></div>
                       <div className="source-summary-list">
                         {sources.map((source) => <div key={source.id}><span>{source.fileName}</span><small>{source.tables.find((table) => table.id === source.selectedTableId)?.sourceSheet ?? "—"}</small></div>)}
                       </div>
-                      {(dataset.warnings.length > 0 || dataset.assumptions.length > 0) && <details className="assumption-details"><summary>{dataset.warnings.length + dataset.assumptions.length} 条数据说明</summary>{[...dataset.warnings, ...dataset.assumptions].map((item) => <p key={item}>{item}</p>)}</details>}
+                      {(dataset.warnings.length > 0 || dataset.assumptions.length > 0) && <details className="assumption-details"><summary>{dataset.warnings.length + dataset.assumptions.length} {l("条数据说明", "data note(s)")}</summary>{[...dataset.warnings, ...dataset.assumptions].map((item) => <p key={item}>{localizeRuntimeMessage(item, language)}</p>)}</details>}
                     </article>
                     <article className="audit-card">
-                      <div className="card-heading"><div><p className="eyebrow">AUDIT TRAIL</p><h3>审计记录</h3></div><span>{auditLogs.length} 已应用 · {pendingCount} 待应用</span></div>
+                      <div className="card-heading"><div><p className="eyebrow">AUDIT TRAIL</p><h3>{l("审计记录", "Audit trail")}</h3></div><span>{auditLogs.length} {l("已应用", "applied")} · {pendingCount} {l("待应用", "pending")}</span></div>
                       <div className="timeline compact-timeline">
-                        {auditLogs.length === 0 && <div className="empty-table embedded">尚无已应用的人工改动。</div>}
+                        {auditLogs.length === 0 && <div className="empty-table embedded">{l("尚无已应用的人工改动。", "No applied manual changes yet.")}</div>}
                         {[...auditLogs].reverse().slice(0, 8).map((log) => (
-                          <article key={log.id}><span className="timeline-dot" /><div><b>{"field" in log ? `编辑 ${log.field}` : log.action === "exclude" ? "排除反应孔" : "恢复反应孔"}</b><p>{"field" in log ? `${log.previousValue || "(空)"} → ${log.newValue || "(空)"}` : log.reason}</p><small>{log.wellRecordId} · {new Date(log.timestamp).toLocaleString("zh-CN")}</small></div></article>
+                          <article key={log.id}><span className="timeline-dot" /><div><b>{"field" in log ? l(`编辑 ${log.field}`, `Edit ${log.field}`) : log.action === "exclude" ? l("排除反应孔", "Exclude well") : l("恢复反应孔", "Restore well")}</b><p>{"field" in log ? `${log.previousValue || l("(空)", "(blank)")} → ${log.newValue || l("(空)", "(blank)")}` : localizeRuntimeMessage(log.reason, language)}</p><small>{log.wellRecordId} · {new Date(log.timestamp).toLocaleString(language === "zh" ? "zh-CN" : "en-US")}</small></div></article>
                         ))}
                       </div>
                     </article>
@@ -535,13 +560,13 @@ export default function QpcrAnalysisStudio() {
             {view === "plate" && (
               <div className="plate-workspace">
                 <div className="section-heading plate-heading">
-                  <div><p className="eyebrow">PLATE WORKSPACE</p><h2>{dataset.plate.plateFormat} 孔板 · {namedReactionCount} 个已定义反应</h2></div>
-                  <div className="legend"><span><i className="dot selected-dot" />已选</span><span><i className="dot group-warning-dot" />复孔组提示</span><span><i className="dot warning-dot" />疑似异常孔</span><span><i className="dot excluded-dot" />已排除</span></div>
+                  <div><p className="eyebrow">PLATE WORKSPACE</p><h2>{l(`${dataset.plate.plateFormat} 孔板 · ${namedReactionCount} 个已定义反应`, `${dataset.plate.plateFormat}-well plate · ${namedReactionCount} defined reactions`)}</h2></div>
+                  <div className="legend"><span><i className="dot selected-dot" />{l("已选", "Selected")}</span><span><i className="dot group-warning-dot" />{l("复孔组提示", "Replicate-group warning")}</span><span><i className="dot warning-dot" />{l("疑似异常孔", "Suspect well")}</span><span><i className="dot excluded-dot" />{l("已排除", "Excluded")}</span></div>
                 </div>
-                {dataset.warnings.map((warning) => <div className="notice" key={warning}>{warning}</div>)}
-                {pendingCount > 0 && <div className="pending-recalculation-notice"><span>板布局草稿已改变</span><p>概览和结果暂时锁定；应用修改并重算后，三处会基于同一份孔数据同步更新。</p><button type="button" onClick={recalculate}>立即应用并重算</button></div>}
+                {dataset.warnings.map((warning) => <div className="notice" key={warning}>{localizeRuntimeMessage(warning, language)}</div>)}
+                {pendingCount > 0 && <div className="pending-recalculation-notice"><span>{l("板布局草稿已改变", "Plate draft changed")}</span><p>{l("概览和结果暂时锁定；应用修改并重算后，三处会基于同一份孔数据同步更新。", "Overview and results are temporarily locked. Apply changes and recalculate to synchronize all three views from the same well data.")}</p><button type="button" onClick={recalculate}>{l("立即应用并重算", "Apply & recalculate")}</button></div>}
                 <div className="selection-guide">
-                  <span>批量选择：</span>鼠标拖动框选 · Shift 选择矩形范围 · ⌘/Ctrl 追加或取消 · 点击行列标可整行/整列选择
+                  <span>{l("批量选择：", "Batch selection: ")}</span>{l("鼠标拖动框选 · Shift 选择矩形范围 · ⌘/Ctrl 追加或取消 · 点击行列标可整行/整列选择", "Drag to select · Shift for a rectangular range · ⌘/Ctrl to add or remove · click a row/column label to select it")}
                 </div>
                 <div className="plate-and-editor">
                   <div className="plate-scroll" onMouseUp={() => setDragging(false)} onMouseLeave={() => setDragging(false)}>
@@ -568,13 +593,13 @@ export default function QpcrAnalysisStudio() {
                               key={wellName}
                               className={`well-cell ${isSelected ? "selected" : ""} ${hasGroupWarning ? "qc-group-warning" : ""} ${hasSpecificWarning ? "warning" : ""} ${well?.userExcluded ? "excluded" : ""}`}
                               style={{ "--well-color": targetColor(well?.targetName ?? "") } as React.CSSProperties}
-                              title={well ? `${well.well} | ${well.sampleName || "未命名"} | ${well.targetName || "未命名"} | Cq ${formatNumber(well.cq)}${warningText ? ` | QC: ${warningText}` : ""}` : wellName}
+                              title={well ? `${well.well} | ${well.sampleName || l("未命名", "Unnamed")} | ${well.targetName || l("未命名", "Unnamed")} | Cq ${formatNumber(well.cq)}${warningText ? ` | QC: ${warningText}` : ""}` : wellName}
                               onMouseDown={(event) => well && startWellSelection(well, event)}
                               onMouseEnter={(event) => well && extendWellSelection(well, event)}
                               onContextMenu={(event) => { event.preventDefault(); if (well) { setSelected([well.id]); setExclusion(true, [well.id]); } }}
                             >
                               <span className="well-name">{wellName}</span>
-                              {well && <><b>{well.sampleName || "—"}</b><small>{well.targetName || "空孔"}</small></>}
+                              {well && <><b>{well.sampleName || "—"}</b><small>{well.targetName || l("空孔", "Empty")}</small></>}
                             </button>
                           );
                         }),
@@ -583,40 +608,40 @@ export default function QpcrAnalysisStudio() {
                   </div>
 
                   <aside className="editor-panel">
-                    <div className="editor-header"><p className="eyebrow">BATCH SELECTION</p><h3>{selectedWells.length ? `${selectedWells.length} 个孔已选` : "请选择孔位"}</h3><p>{selectedWells.length ? selectedWells.slice(0, 8).map((well) => well.well).join(", ") + (selectedWells.length > 8 ? "…" : "") : "可在板上拖动框选多个孔"}</p></div>
+                    <div className="editor-header"><p className="eyebrow">BATCH SELECTION</p><h3>{selectedWells.length ? l(`${selectedWells.length} 个孔已选`, `${selectedWells.length} well(s) selected`) : l("请选择孔位", "Select wells")}</h3><p>{selectedWells.length ? selectedWells.slice(0, 8).map((well) => well.well).join(", ") + (selectedWells.length > 8 ? "…" : "") : l("可在板上拖动框选多个孔", "Drag across the plate to select multiple wells")}</p></div>
                     <div className="selection-actions">
-                      <button type="button" onClick={() => selectByField("sampleName")} disabled={!selectedWells.some((well) => well.sampleName)}>选中同一样本</button>
-                      <button type="button" onClick={() => selectByField("targetName")} disabled={!selectedWells.some((well) => well.targetName)}>选中同一基因</button>
-                      <button type="button" onClick={() => setSelected([])} disabled={!selected.length}>清空</button>
+                      <button type="button" onClick={() => selectByField("sampleName")} disabled={!selectedWells.some((well) => well.sampleName)}>{l("选中同一样本", "Same sample")}</button>
+                      <button type="button" onClick={() => selectByField("targetName")} disabled={!selectedWells.some((well) => well.targetName)}>{l("选中同一基因", "Same target")}</button>
+                      <button type="button" onClick={() => setSelected([])} disabled={!selected.length}>{l("清空", "Clear")}</button>
                     </div>
                     <div className="selection-summary">
-                      <div><span>Sample</span><b>{commonValue(selectedWells, "sampleName")}</b></div>
-                      <div><span>Target</span><b>{commonValue(selectedWells, "targetName")}</b></div>
+                      <div><span>Sample</span><b>{commonValue(selectedWells, "sampleName", l)}</b></div>
+                      <div><span>Target</span><b>{commonValue(selectedWells, "targetName", l)}</b></div>
                       <div><span>Detected Cq</span><b>{selectedWells.filter((well) => well.cqStatus === "detected").length} / {selectedWells.length}</b></div>
                     </div>
                     <div className="form-stack batch-form">
-                      <label>统一修改 Sample Name<input value={batchSample} placeholder={commonValue(selectedWells, "sampleName")} onChange={(event) => setBatchSample(event.target.value)} /></label>
-                      <label>统一修改 Target Name<input value={batchTarget} placeholder={commonValue(selectedWells, "targetName")} onChange={(event) => setBatchTarget(event.target.value)} /></label>
-                      <label>统一修改反应角色<input value={batchTask} placeholder={commonValue(selectedWells, "taskType")} onChange={(event) => setBatchTask(event.target.value)} /></label>
-                      <button className="secondary-button" type="button" onClick={applyBatchEdit} disabled={!selected.length || ![batchSample, batchTarget, batchTask].some((value) => value.trim())}>应用到 {selected.length || 0} 个已选孔</button>
+                      <label>{l("统一修改 Sample Name", "Set Sample Name for selection")}<input value={batchSample} placeholder={commonValue(selectedWells, "sampleName", l)} onChange={(event) => setBatchSample(event.target.value)} /></label>
+                      <label>{l("统一修改 Target Name", "Set Target Name for selection")}<input value={batchTarget} placeholder={commonValue(selectedWells, "targetName", l)} onChange={(event) => setBatchTarget(event.target.value)} /></label>
+                      <label>{l("统一修改反应角色", "Set reaction role for selection")}<input value={batchTask} placeholder={commonValue(selectedWells, "taskType", l)} onChange={(event) => setBatchTask(event.target.value)} /></label>
+                      <button className="secondary-button" type="button" onClick={applyBatchEdit} disabled={!selected.length || ![batchSample, batchTarget, batchTask].some((value) => value.trim())}>{l(`应用到 ${selected.length || 0} 个已选孔`, `Apply to ${selected.length || 0} selected well(s)`)}</button>
                     </div>
 
                     <details className="paste-details">
-                      <summary>批量贴入不同孔信息 <span>Excel 专用</span></summary>
-                      <p>仅当 Excel 每一行对应不同孔时使用。统一修改多个孔，请用上面的批量修改。</p>
-                      <div className="paste-format"><b>支持两种格式</b><code>Well · Sample · Target · Role</code><code>Sample · Target · Role（按已选孔顺序）</code></div>
+                      <summary>{l("批量贴入不同孔信息", "Paste different values by well")} <span>{l("Excel 专用", "Excel")}</span></summary>
+                      <p>{l("仅当 Excel 每一行对应不同孔时使用。统一修改多个孔，请用上面的批量修改。", "Use this only when each Excel row maps to a different well. Use the fields above to apply one value to multiple wells.")}</p>
+                      <div className="paste-format"><b>{l("支持两种格式", "Two supported formats")}</b><code>Well · Sample · Target · Role</code><code>{l("Sample · Target · Role（按已选孔顺序）", "Sample · Target · Role (selected-well order)")}</code></div>
                       <textarea value={pasteBlock} placeholder={"A1\tS01\tGAPDH\tUnknown\nA2\tS01\tGENE1\tUnknown"} onChange={(event) => setPasteBlock(event.target.value)} />
-                      {pastePreview.rows.length > 0 && <p className="paste-preview">已识别 {pastePreview.rows.length} 行 · {pastePreview.hasWellColumn ? "按 Well 精确匹配" : `按 ${selected.length} 个已选孔顺序匹配`}</p>}
-                      <button className="quiet-button bordered full-width" type="button" onClick={applyPastedBlock} disabled={!pastePreview.rows.length || (!pastePreview.hasWellColumn && !selected.length)}>应用粘贴内容</button>
+                      {pastePreview.rows.length > 0 && <p className="paste-preview">{l(`已识别 ${pastePreview.rows.length} 行 · ${pastePreview.hasWellColumn ? "按 Well 精确匹配" : `按 ${selected.length} 个已选孔顺序匹配`}`, `${pastePreview.rows.length} row(s) recognized · ${pastePreview.hasWellColumn ? "matched by Well" : `matched to ${selected.length} selected well(s) in order`}`)}</p>}
+                      <button className="quiet-button bordered full-width" type="button" onClick={applyPastedBlock} disabled={!pastePreview.rows.length || (!pastePreview.hasWellColumn && !selected.length)}>{l("应用粘贴内容", "Apply pasted values")}</button>
                     </details>
 
                     <div className="divider" />
-                    <label className="form-label">排除原因<textarea value={exclusionReason} onChange={(event) => setExclusionReason(event.target.value)} /></label>
+                    <label className="form-label">{l("排除原因", "Exclusion reason")}<textarea value={exclusionReason} placeholder={l("技术复孔异常（人工判定）", "Technical replicate issue (manual decision)")} onChange={(event) => setExclusionReason(event.target.value)} /></label>
                     <div className="split-actions">
-                      <button className="danger-button" type="button" onClick={() => setExclusion(true)} disabled={!selected.length}>排除已选孔</button>
-                      <button className="quiet-button bordered" type="button" onClick={() => setExclusion(false)} disabled={!selected.length}>恢复</button>
+                      <button className="danger-button" type="button" onClick={() => setExclusion(true)} disabled={!selected.length}>{l("排除已选孔", "Exclude selected")}</button>
+                      <button className="quiet-button bordered" type="button" onClick={() => setExclusion(false)} disabled={!selected.length}>{l("恢复", "Restore")}</button>
                     </div>
-                    <p className="microcopy">所有修改先保留为草稿；点击右下角“应用修改并重算”后才进入结果和审计记录。</p>
+                    <p className="microcopy">{l("所有修改先保留为草稿；点击右下角“应用修改并重算”后才进入结果和审计记录。", "Edits remain in draft until you select “Apply changes & recalculate”; then QC, results, and the audit trail are updated.")}</p>
                   </aside>
                 </div>
               </div>
@@ -625,32 +650,32 @@ export default function QpcrAnalysisStudio() {
             {view === "results" && (
               <div className="panel-stack results-panel">
                 <div className="section-heading results-heading">
-                  <div><p className="eyebrow">RESULTS & FIGURES</p><h2>{resultSection === "quantification" ? "相对定量结果" : "Tm 与熔解分析"}</h2></div>
-                  <div className="result-mode-tabs" aria-label="结果类型">
-                    <button type="button" disabled={!hasQuantification} className={resultSection === "quantification" ? "active" : ""} onClick={() => setResultSection("quantification")}>相对定量</button>
-                    <button type="button" disabled={!hasMeltAnalysis} className={resultSection === "melt" ? "active" : ""} onClick={() => setResultSection("melt")}>Tm 与熔解</button>
+                  <div><p className="eyebrow">RESULTS & FIGURES</p><h2>{resultSection === "quantification" ? l("相对定量结果", "Relative quantification") : l("Tm 与熔解分析", "Tm & melt analysis")}</h2></div>
+                  <div className="result-mode-tabs" aria-label={l("结果类型", "Result type")}>
+                    <button type="button" disabled={!hasQuantification} className={resultSection === "quantification" ? "active" : ""} onClick={() => setResultSection("quantification")}>{l("相对定量", "Quantification")}</button>
+                    <button type="button" disabled={!hasMeltAnalysis} className={resultSection === "melt" ? "active" : ""} onClick={() => setResultSection("melt")}>{l("Tm 与熔解", "Tm & melt")}</button>
                   </div>
                 </div>
                 {resultSection === "quantification" && hasQuantification && <>
                   <div className="result-settings-grid">
                     <section className="result-setting-step reference-step">
-                      <div className="setting-step-heading"><span>1</span><div><p className="eyebrow">NORMALIZATION</p><h3>选择内参基因</h3></div><small>可多选</small></div>
+                      <div className="setting-step-heading"><span>1</span><div><p className="eyebrow">NORMALIZATION</p><h3>{l("选择内参基因", "Select reference targets")}</h3></div><small>{l("可多选", "Multiple")}</small></div>
                       <div className="choice-row">{targets.map((target) => <label className={referenceTargets.includes(target) ? "choice active" : "choice"} key={target}><input type="checkbox" checked={referenceTargets.includes(target)} onChange={() => setReferenceTargets((current) => current.includes(target) ? current.filter((item) => item !== target) : [...current, target])} />{target}</label>)}</div>
-                      <p>多内参按相对量几何均值归一化。</p>
+                      <p>{l("多内参按相对量几何均值归一化。", "Multiple reference targets are normalized by the geometric mean of relative quantities.")}</p>
                     </section>
 
                     <section className="result-setting-step display-step">
-                      <div className="setting-step-heading"><span>2</span><div><p className="eyebrow">DISPLAY ORDER</p><h3>选择展示的基因和样本</h3></div><button className="clear-selection-button" type="button" onClick={() => { setDisplayTargets([]); setDisplaySamples([]); }} disabled={!displayTargets.length && !displaySamples.length}>Clear</button></div>
+                      <div className="setting-step-heading"><span>2</span><div><p className="eyebrow">DISPLAY ORDER</p><h3>{l("选择展示的基因和样本", "Choose displayed targets & samples")}</h3></div><button className="clear-selection-button" type="button" onClick={() => { setDisplayTargets([]); setDisplaySamples([]); }} disabled={!displayTargets.length && !displaySamples.length}>{l("清空", "Clear")}</button></div>
                       <div className="display-choice-group">
-                        <div className="display-choice-label"><span>基因</span><small>{selectedDisplayTargets.length} 已选</small></div>
+                        <div className="display-choice-label"><span>{l("基因", "Targets")}</span><small>{selectedDisplayTargets.length} {l("已选", "selected")}</small></div>
                         <div className="ordered-choice-row">{targets.map((target) => {
                           const isReference = referenceTargets.includes(target);
                           const selectionIndex = selectedDisplayTargets.indexOf(target);
-                          return <button type="button" key={target} disabled={isReference} aria-pressed={selectionIndex >= 0 && !isReference} className={selectionIndex >= 0 && !isReference ? "ordered-choice active" : "ordered-choice"} onClick={() => toggleOrderedSelection(target, displayTargets, setDisplayTargets)}><span>{target}</span>{isReference ? <em>内参</em> : selectionIndex >= 0 ? <i>{selectionIndex + 1}</i> : null}</button>;
+                          return <button type="button" key={target} disabled={isReference} aria-pressed={selectionIndex >= 0 && !isReference} className={selectionIndex >= 0 && !isReference ? "ordered-choice active" : "ordered-choice"} onClick={() => toggleOrderedSelection(target, displayTargets, setDisplayTargets)}><span>{target}</span>{isReference ? <em>{l("内参", "Ref")}</em> : selectionIndex >= 0 ? <i>{selectionIndex + 1}</i> : null}</button>;
                         })}</div>
                       </div>
                       <div className="display-choice-group sample-display-group">
-                        <div className="display-choice-label"><span>样本</span><small>{displaySamples.length} 已选 · 编号即图中从左到右顺序</small></div>
+                        <div className="display-choice-label"><span>{l("样本", "Samples")}</span><small>{l(`${displaySamples.length} 已选 · 编号即图中从左到右顺序`, `${displaySamples.length} selected · numbers define left-to-right order`)}</small></div>
                         <div className="ordered-choice-row">{samples.map((sample) => {
                           const selectionIndex = displaySamples.indexOf(sample);
                           return <button type="button" key={sample} aria-pressed={selectionIndex >= 0} className={selectionIndex >= 0 ? "ordered-choice active" : "ordered-choice"} onClick={() => toggleOrderedSelection(sample, displaySamples, setDisplaySamples)}><span>{sample}</span>{selectionIndex >= 0 && <i>{selectionIndex + 1}</i>}</button>;
@@ -659,16 +684,16 @@ export default function QpcrAnalysisStudio() {
                     </section>
 
                     <section className="result-setting-step calibrator-step">
-                      <div className="setting-step-heading"><span>3</span><div><p className="eyebrow">CALIBRATION</p><h3>选择校准样本</h3></div></div>
-                      <label className="compact-field">校准样本<select value={calibrator} onChange={(event) => setCalibrator(event.target.value)}><option value="">不设置，仅计算 ΔCq</option>{samples.map((sample) => <option key={sample} value={sample}>{sample}</option>)}</select></label>
-                      <p>设置后计算 ΔΔCq 与相对表达量；未提供扩增效率时按 100% 计算并记录假设。</p>
+                      <div className="setting-step-heading"><span>3</span><div><p className="eyebrow">CALIBRATION</p><h3>{l("选择校准样本", "Select calibrator sample")}</h3></div></div>
+                      <label className="compact-field">{l("校准样本", "Calibrator")}<select value={calibrator} onChange={(event) => setCalibrator(event.target.value)}><option value="">{l("不设置，仅计算 ΔCq", "None — calculate ΔCq only")}</option>{samples.map((sample) => <option key={sample} value={sample}>{sample}</option>)}</select></label>
+                      <p>{l("设置后计算 ΔΔCq 与相对表达量；未提供扩增效率时按 100% 计算并记录假设。", "A calibrator enables ΔΔCq and relative expression. Missing amplification efficiency is recorded and assumed to be 100%.")}</p>
                     </section>
                   </div>
-                  {!referenceTargets.length ? <div className="empty-table">请先在第 1 区选择至少一个内参基因。</div> : <ResultExplorer results={relativeResults} sampleOrder={displaySamples} targetOrder={selectedDisplayTargets} />}
+                  {!referenceTargets.length ? <div className="empty-table">{l("请先在第 1 区选择至少一个内参基因。", "Select at least one reference target in section 1.")}</div> : <ResultExplorer results={relativeResults} sampleOrder={displaySamples} targetOrder={selectedDisplayTargets} />}
                 </>}
-                {resultSection === "quantification" && !hasQuantification && <div className="empty-table">当前仅导入了 Tm/熔解结果；添加单孔 Cq/Ct/Cp 后可进行相对定量。</div>}
+                {resultSection === "quantification" && !hasQuantification && <div className="empty-table">{l("当前仅导入了 Tm/熔解结果；添加单孔 Cq/Ct/Cp 后可进行相对定量。", "Only Tm/melt results are currently imported. Add well-level Cq/Ct/Cp data for relative quantification.")}</div>}
                 {resultSection === "melt" && hasMeltAnalysis && <MeltAnalysis wells={appliedWells} />}
-                {resultSection === "melt" && !hasMeltAnalysis && <div className="empty-table">当前没有 Tm 或熔解分组数据；可返回数据文件追加对应结果。</div>}
+                {resultSection === "melt" && !hasMeltAnalysis && <div className="empty-table">{l("当前没有 Tm 或熔解分组数据；可返回数据文件追加对应结果。", "No Tm or melt-group data are available. Return to Data files to add the corresponding result.")}</div>}
               </div>
             )}
           </section>
@@ -678,11 +703,11 @@ export default function QpcrAnalysisStudio() {
       {dataset && !dataManagerOpen && pendingCount > 0 && (
         <button className="recalculate-button" type="button" onClick={recalculate}>
           <span className="recalc-count">{pendingCount}</span>
-          <span><b>应用修改并重算</b><small>更新 QC、结果与审计记录</small></span>
+          <span><b>{l("应用修改并重算", "Apply changes & recalculate")}</b><small>{l("更新 QC、结果与审计记录", "Update QC, results, and audit trail")}</small></span>
           <span className="recalc-arrow">→</span>
         </button>
       )}
-      <footer><span>qPCR Analysis Studio · Research use only</span><span>原始数据仅在当前浏览器中处理</span></footer>
+      <footer><span>qPCR Analysis Studio · {l("仅供科研使用", "Research use only")}</span><span>{l("原始数据仅在当前浏览器中处理", "Raw data are processed only in this browser")}</span></footer>
     </main>
   );
 }

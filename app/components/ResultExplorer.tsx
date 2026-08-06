@@ -3,6 +3,7 @@
 import { useMemo, useRef, useState } from "react";
 import type { RelativeQuantificationResult } from "@/packages/schemas/src";
 import { buildLogRatioAxis, mapRatioToY } from "@/packages/qpcr-core/src";
+import { useLanguage } from "../i18n";
 
 type SortKey = "sampleName" | "targetName" | "targetMeanCq" | "targetSdCq" | "deltaCq" | "normalizedQuantity" | "relativeExpression";
 
@@ -32,6 +33,7 @@ function safeFileName(value: string): string {
 }
 
 function ExpressionChart({ rows, target, sampleOrder }: { rows: RelativeQuantificationResult[]; target: string; sampleOrder: string[] }) {
+  const { l } = useLanguage();
   const svgRef = useRef<SVGSVGElement>(null);
   const [theme, setTheme] = useState<ChartTheme>("paper");
   const [axisMode, setAxisMode] = useState<AxisMode>("log-ratio");
@@ -47,7 +49,7 @@ function ExpressionChart({ rows, target, sampleOrder }: { rows: RelativeQuantifi
     .sort((a, b) => sampleOrder.indexOf(a.label) - sampleOrder.indexOf(b.label))
     .slice(0, 40);
 
-  if (!chartRows.length) return <div className="empty-chart">当前筛选下没有可绘制的数据。</div>;
+  if (!chartRows.length) return <div className="empty-chart">{l("当前筛选下没有可绘制的数据。", "No plottable data are available for the current selection.")}</div>;
 
   const values = chartRows.map((row) => row.rawValue);
   const left = 92;
@@ -102,7 +104,7 @@ function ExpressionChart({ rows, target, sampleOrder }: { rows: RelativeQuantifi
     image.src = sourceUrl;
     await new Promise<void>((resolve, reject) => {
       image.onload = () => resolve();
-      image.onerror = () => reject(new Error("图表渲染失败"));
+      image.onerror = () => reject(new Error(l("图表渲染失败", "Chart rendering failed")));
     });
     const scale = 4;
     const canvas = document.createElement("canvas");
@@ -122,19 +124,19 @@ function ExpressionChart({ rows, target, sampleOrder }: { rows: RelativeQuantifi
   return (
     <div className={`chart-card publication-chart-card chart-theme-${theme}`}>
       <div className="chart-heading publication-chart-heading">
-        <div><p className="eyebrow">PUBLICATION FIGURE</p><h3>相对表达量</h3><p>论文白底 · 扁平配色 · 可编辑矢量导出</p></div>
+        <div><p className="eyebrow">PUBLICATION FIGURE</p><h3>{l("相对表达量", "Relative expression")}</h3><p>{l("论文白底 · 扁平配色 · 可编辑矢量导出", "Paper white · flat colors · editable vector export")}</p></div>
         <div className="chart-control-stack">
-          <div className="segmented-control" aria-label="图表主题">
-            <button type="button" className={theme === "paper" ? "active" : ""} onClick={() => setTheme("paper")}>论文白底</button>
-            <button type="button" className={theme === "dark" ? "active" : ""} onClick={() => setTheme("dark")}>屏幕深色</button>
+          <div className="segmented-control" aria-label={l("图表主题", "Chart theme")}>
+            <button type="button" className={theme === "paper" ? "active" : ""} onClick={() => setTheme("paper")}>{l("论文白底", "Paper")}</button>
+            <button type="button" className={theme === "dark" ? "active" : ""} onClick={() => setTheme("dark")}>{l("屏幕深色", "Dark")}</button>
           </div>
-          <div className="segmented-control" aria-label="纵轴模式">
-            <button type="button" className={axisMode === "log-ratio" ? "active" : ""} onClick={() => setAxisMode("log-ratio")}>2 的幂次轴</button>
-            <button type="button" className={axisMode === "linear" ? "active" : ""} onClick={() => setAxisMode("linear")}>线性轴</button>
+          <div className="segmented-control" aria-label={l("纵轴模式", "Y-axis mode")}>
+            <button type="button" className={axisMode === "log-ratio" ? "active" : ""} onClick={() => setAxisMode("log-ratio")}>{l("2 的幂次轴", "Power-of-2 axis")}</button>
+            <button type="button" className={axisMode === "linear" ? "active" : ""} onClick={() => setAxisMode("linear")}>{l("线性轴", "Linear axis")}</button>
           </div>
           <div className="chart-export-actions">
-            <button type="button" onClick={exportSvg}>导出 SVG</button>
-            <button type="button" onClick={() => void exportPng()}>导出 PNG 4×</button>
+            <button type="button" onClick={exportSvg}>{l("导出 SVG", "Export SVG")}</button>
+            <button type="button" onClick={() => void exportPng()}>{l("导出 PNG 4×", "Export PNG 4×")}</button>
           </div>
         </div>
       </div>
@@ -144,7 +146,7 @@ function ExpressionChart({ rows, target, sampleOrder }: { rows: RelativeQuantifi
           className="expression-chart publication-expression-chart"
           viewBox={`0 0 ${width} ${height}`}
           role="img"
-          aria-label={`${target} 相对表达量图`}
+          aria-label={l(`${target} 相对表达量图`, `${target} relative-expression chart`)}
           style={{ width: `${width}px`, minWidth: "100%", fontFamily: "Arial, Helvetica, 'PingFang SC', sans-serif", background: colors.background }}
         >
           <rect x="0" y="0" width={width} height={height} fill={colors.background} />
@@ -153,8 +155,8 @@ function ExpressionChart({ rows, target, sampleOrder }: { rows: RelativeQuantifi
           <text x={left} y="50" fill={colors.muted} fontSize="9">{metricLabel}</text>
           <g transform={`translate(${Math.max(left + 250, width - (usesCalibrator ? 410 : 330))}, 29)`}>
             <rect x="0" y="-7" width="11" height="11" fill={colors.bar} stroke={colors.axis} strokeWidth=".6" />
-            <text x="18" y="2" fill={colors.muted} fontSize="8.5">Biological sample</text>
-            {usesCalibrator && <><rect x="121" y="-7" width="11" height="11" fill={colors.calibrator} stroke={colors.calibratorStroke} strokeWidth=".8" /><text x="139" y="2" fill={colors.muted} fontSize="8.5">Calibrator</text></>}
+            <text x="18" y="2" fill={colors.muted} fontSize="8.5">{l("生物学样本", "Biological sample")}</text>
+            {usesCalibrator && <><rect x="121" y="-7" width="11" height="11" fill={colors.calibrator} stroke={colors.calibratorStroke} strokeWidth=".8" /><text x="139" y="2" fill={colors.muted} fontSize="8.5">{l("校准样本", "Calibrator")}</text></>}
             <line x1={usesCalibrator ? 210 : 132} x2={usesCalibrator ? 225 : 147} y1="-1" y2="-1" stroke={colors.reference} strokeDasharray="4 3" />
             <text x={usesCalibrator ? 232 : 154} y="2" fill={colors.muted} fontSize="8.5">Reference = 1</text>
           </g>
@@ -181,7 +183,7 @@ function ExpressionChart({ rows, target, sampleOrder }: { rows: RelativeQuantifi
             const label = row.label.length > 13 ? `${row.label.slice(0, 12)}…` : row.label;
             return (
               <g key={`${row.label}-${index}`}>
-                <title>{row.label}: {row.rawValue.toFixed(4)}{row.warning ? " · QC 提示" : ""}</title>
+                <title>{row.label}: {row.rawValue.toFixed(4)}{row.warning ? l(" · QC 提示", " · QC warning") : ""}</title>
                 <rect x={centerX - barWidth / 2} y={barTop} width={barWidth} height={barHeight} fill={row.calibrator ? colors.calibrator : colors.bar} fillOpacity=".9" stroke={row.warning ? colors.warning : row.calibrator ? colors.calibratorStroke : colors.axis} strokeWidth={row.warning ? 1.35 : .7} />
                 {row.warning && <circle cx={centerX} cy={Math.max(top + 4, barTop - 7)} r="3" fill={colors.background} stroke={colors.warning} strokeWidth="1.2" />}
                 <text
@@ -195,7 +197,7 @@ function ExpressionChart({ rows, target, sampleOrder }: { rows: RelativeQuantifi
               </g>
             );
           })}
-          <text x={(left + width - right) / 2} y={height - 20} textAnchor="middle" fill={colors.text} fontSize="10">Biological sample</text>
+          <text x={(left + width - right) / 2} y={height - 20} textAnchor="middle" fill={colors.text} fontSize="10">{l("生物学样本", "Biological sample")}</text>
           <text x="24" y={(top + bottom) / 2} textAnchor="middle" transform={`rotate(-90 24 ${(top + bottom) / 2})`} fill={colors.text} fontSize="10">
             {axisMode === "log-ratio" ? "Relative expression (log₂ ratio axis)" : "Relative expression"}
           </text>
@@ -203,7 +205,7 @@ function ExpressionChart({ rows, target, sampleOrder }: { rows: RelativeQuantifi
       </div>
       <div className="publication-note">
         <i>i</i>
-        <p><b>误差线不会自动伪造。</b>当前每根柱是一个生物学样本的技术复孔汇总值。只有后续提供生物学重复或分组信息，才计算并显示 SD、SEM 或 95% CI，并在图注中明确误差类型和 n。</p>
+        <p><b>{l("误差线不会自动伪造。", "Error bars are never fabricated.")}</b>{l("当前每根柱是一个生物学样本的技术复孔汇总值。只有后续提供生物学重复或分组信息，才计算并显示 SD、SEM 或 95% CI，并在图注中明确误差类型和 n。", "Each bar currently represents the technical-replicate summary of one biological sample. SD, SEM, or 95% CI will be calculated only after biological replicates or grouping information are provided, with error type and n stated explicitly.")}</p>
       </div>
     </div>
   );
@@ -216,6 +218,7 @@ interface ResultExplorerProps {
 }
 
 export default function ResultExplorer({ results, sampleOrder, targetOrder }: ResultExplorerProps) {
+  const { language, l } = useLanguage();
   const [warningOnly, setWarningOnly] = useState(false);
   const [sortKey, setSortKey] = useState<SortKey | null>(null);
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
@@ -231,10 +234,10 @@ export default function ResultExplorer({ results, sampleOrder, targetOrder }: Re
         }
         const av = a[sortKey] ?? Number.NEGATIVE_INFINITY;
         const bv = b[sortKey] ?? Number.NEGATIVE_INFINITY;
-        const comparison = typeof av === "string" && typeof bv === "string" ? av.localeCompare(bv, "zh-CN") : Number(av) - Number(bv);
+        const comparison = typeof av === "string" && typeof bv === "string" ? av.localeCompare(bv, language === "zh" ? "zh-CN" : "en") : Number(av) - Number(bv);
         return sortDirection === "asc" ? comparison : -comparison;
       });
-  }, [results, sampleOrder, sortDirection, sortKey, targetOrder, warningOnly]);
+  }, [language, results, sampleOrder, sortDirection, sortKey, targetOrder, warningOnly]);
   const chartTargets = useMemo(
     () => targetOrder.filter((target) => filtered.some((row) => row.targetName === target)),
     [filtered, targetOrder],
@@ -251,39 +254,39 @@ export default function ResultExplorer({ results, sampleOrder, targetOrder }: Re
   const sortMark = (key: SortKey) => sortKey === key ? (sortDirection === "asc" ? " ↑" : " ↓") : "";
 
   if (!sampleOrder.length || !targetOrder.length) {
-    return <div className="empty-table">请在第 2 区点选需要展示的基因和样本；点选样本的编号就是图中从左到右的顺序。</div>;
+    return <div className="empty-table">{l("请在第 2 区点选需要展示的基因和样本；点选样本的编号就是图中从左到右的顺序。", "Select the targets and samples to display in section 2. Sample numbers define their left-to-right chart order.")}</div>;
   }
 
   return (
     <div className="result-explorer">
       <div className="result-filterbar compact-result-filterbar">
-        <p>当前展示 {sampleOrder.length} 个样本、{chartTargets.length} 个目标基因；图表和表格使用同一选择。</p>
-        <button type="button" className={warningOnly ? "filter-chip warning-filter active" : "filter-chip warning-filter"} onClick={() => setWarningOnly((current) => !current)}>仅看 QC 提示</button>
-        <div className="visible-count"><b>{filtered.length}</b><span>条结果</span></div>
+        <p>{l(`当前展示 ${sampleOrder.length} 个样本、${chartTargets.length} 个目标基因；图表和表格使用同一选择。`, `Displaying ${sampleOrder.length} sample(s) and ${chartTargets.length} target(s); charts and the table share the same selection.`)}</p>
+        <button type="button" className={warningOnly ? "filter-chip warning-filter active" : "filter-chip warning-filter"} onClick={() => setWarningOnly((current) => !current)}>{l("仅看 QC 提示", "QC warnings only")}</button>
+        <div className="visible-count"><b>{filtered.length}</b><span>{l("条结果", "results")}</span></div>
       </div>
 
       <div className="result-chart-stack">
         {chartTargets.map((target) => <ExpressionChart key={target} rows={filtered} target={target} sampleOrder={sampleOrder} />)}
-        {chartTargets.length === 0 && <div className="empty-chart">当前展示选择下没有可绘制的数据。</div>}
+        {chartTargets.length === 0 && <div className="empty-chart">{l("当前展示选择下没有可绘制的数据。", "No plottable data are available for the current display selection.")}</div>}
       </div>
 
       <div className="table-section-heading">
-        <div><p className="eyebrow">FILTERABLE TABLE</p><h3>完整计算结果</h3></div>
-        <p>默认遵循上方基因与样本的点选顺序；点击列名可临时排序。</p>
+        <div><p className="eyebrow">FILTERABLE TABLE</p><h3>{l("完整计算结果", "Complete calculation results")}</h3></div>
+        <p>{l("默认遵循上方基因与样本的点选顺序；点击列名可临时排序。", "The default order follows the target and sample selection above. Select a column heading to sort temporarily.")}</p>
       </div>
       <div className="table-wrap result-table-wrap">
         <table>
           <thead><tr>
-            <th><button type="button" onClick={() => sortBy("sampleName")}>样本{sortMark("sampleName")}</button></th>
-            <th><button type="button" onClick={() => sortBy("targetName")}>目标基因{sortMark("targetName")}</button></th>
+            <th><button type="button" onClick={() => sortBy("sampleName")}>{l("样本", "Sample")}{sortMark("sampleName")}</button></th>
+            <th><button type="button" onClick={() => sortBy("targetName")}>{l("目标基因", "Target")}{sortMark("targetName")}</button></th>
             <th><button type="button" onClick={() => sortBy("targetMeanCq")}>Target Mean Cq{sortMark("targetMeanCq")}</button></th>
             <th><button type="button" onClick={() => sortBy("targetSdCq")}>Cq SD{sortMark("targetSdCq")}</button></th>
             <th>Reference Mean Cq</th>
             <th><button type="button" onClick={() => sortBy("deltaCq")}>ΔCq{sortMark("deltaCq")}</button></th>
             <th><button type="button" onClick={() => sortBy("normalizedQuantity")}>2^-ΔCq{sortMark("normalizedQuantity")}</button></th>
             <th>ΔΔCq</th>
-            <th><button type="button" onClick={() => sortBy("relativeExpression")}>相对表达量{sortMark("relativeExpression")}</button></th>
-            <th>提示</th>
+            <th><button type="button" onClick={() => sortBy("relativeExpression")}>{l("相对表达量", "Relative expression")}{sortMark("relativeExpression")}</button></th>
+            <th>{l("提示", "Warnings")}</th>
           </tr></thead>
           <tbody>
             {filtered.map((row) => (
@@ -293,7 +296,7 @@ export default function ResultExplorer({ results, sampleOrder, targetOrder }: Re
             ))}
           </tbody>
         </table>
-        {filtered.length === 0 && <div className="empty-table embedded">当前筛选条件下没有结果。</div>}
+        {filtered.length === 0 && <div className="empty-table embedded">{l("当前筛选条件下没有结果。", "No results match the current selection.")}</div>}
       </div>
     </div>
   );

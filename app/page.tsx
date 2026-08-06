@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import QpcrAnalysisStudio from "./QpcrAnalysisStudio";
+import { LanguageProvider } from "./i18n";
 
 export const metadata: Metadata = {
   title: "qPCR Analysis Studio | 实时定量 PCR 分析台",
@@ -13,5 +14,5 @@ export const metadata: Metadata = {
 };
 
 export default function Home() {
-  return <QpcrAnalysisStudio />;
+  return <LanguageProvider><QpcrAnalysisStudio /></LanguageProvider>;
 }

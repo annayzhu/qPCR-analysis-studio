@@ -7,22 +7,25 @@ import {
   type ImportReadiness,
   type ImportSourceRole,
 } from "@/packages/importers/src";
+import { localizeRuntimeMessage, useLanguage } from "../i18n";
 
 const FIELD_OPTIONS = Object.entries(CANONICAL_FIELD_LABELS) as [CanonicalField, string][];
 
 const INSTRUMENT_LABELS: Record<string, string> = {
-  generic: "通用表格",
+  generic: "Generic table",
   "roche-lightcycler-480": "Roche LightCycler 480",
   "quantstudio-5": "QuantStudio 5",
   "abi-7500": "ABI 7500 / Fast",
 };
 
-const ROLE_LABELS: Record<ImportSourceRole, string> = {
-  "primary-result": "Cq / Ct 结果",
-  "supplemental-result": "Tm / 熔解补充结果",
-  "plate-layout": "板布局",
-  unknown: "待确认",
-};
+function roleLabel(role: ImportSourceRole, l: (zh: string, en: string) => string): string {
+  return {
+    "primary-result": l("Cq / Ct 结果", "Cq / Ct result"),
+    "supplemental-result": l("Tm / 熔解补充结果", "Tm / melt supplemental result"),
+    "plate-layout": l("板布局", "Plate layout"),
+    unknown: l("待确认", "Needs confirmation"),
+  }[role];
+}
 
 interface ImportManagerProps {
   sources: ImportedSource[];
@@ -50,8 +53,10 @@ function SourceCard({
   onUpdateSelectedTable: (tableId: string) => void;
   onUpdateMapping: (sourceColumn: string, canonicalField: CanonicalField | null) => void;
 }) {
+  const { language, l } = useLanguage();
   const table = source.tables.find((item) => item.id === source.selectedTableId) ?? source.tables[0];
   const capabilities = getSourceCapabilities(source);
+  const sourceRole = roleLabel(capabilities.role, l);
   return (
     <article className="source-row">
       <div className={`source-type source-type-${capabilities.role}`} aria-hidden="true">
@@ -61,34 +66,34 @@ function SourceCard({
         <div className="source-title-row">
           <div>
             <h4>{source.fileName}</h4>
-            <p>{INSTRUMENT_LABELS[source.instrumentType]} · {ROLE_LABELS[capabilities.role]}</p>
+            <p>{source.instrumentType === "generic" ? l("通用表格", "Generic table") : INSTRUMENT_LABELS[source.instrumentType]} · {sourceRole}</p>
           </div>
           <div className="source-actions">
-            <span className={`role-badge role-${capabilities.role}`}>{ROLE_LABELS[capabilities.role]}</span>
-            <button className="icon-button" type="button" onClick={onRemove} aria-label={`移除 ${source.fileName}`}>×</button>
+            <span className={`role-badge role-${capabilities.role}`}>{sourceRole}</span>
+            <button className="icon-button" type="button" onClick={onRemove} aria-label={l(`移除 ${source.fileName}`, `Remove ${source.fileName}`)}>×</button>
           </div>
         </div>
 
         {source.tables.length > 1 && (
-          <label className="compact-field">使用工作表
+          <label className="compact-field">{l("使用工作表", "Worksheet")}
             <select value={source.selectedTableId} onChange={(event) => onUpdateSelectedTable(event.target.value)}>
               {source.tables.map((item) => (
-                <option key={item.id} value={item.id}>{item.sourceSheet} · {item.rawRows.length} 行</option>
+                <option key={item.id} value={item.id}>{item.sourceSheet} · {item.rawRows.length} {l("行", "rows")}</option>
               ))}
             </select>
           </label>
         )}
 
-        {source.warnings.map((warning) => <p className="inline-warning" key={warning}>△ {warning}</p>)}
+        {source.warnings.map((warning) => <p className="inline-warning" key={warning}>△ {localizeRuntimeMessage(warning, language)}</p>)}
 
         {table && (
           <details className="mapping-details">
             <summary>
-              查看字段识别
-              <span>{table.suggestedMappings.filter((item) => item.conflict).length ? "有字段需要确认" : `${table.suggestedMappings.length} 列已读取`}</span>
+              {l("查看字段识别", "Review field detection")}
+              <span>{table.suggestedMappings.filter((item) => item.conflict).length ? l("有字段需要确认", "Fields require confirmation") : l(`${table.suggestedMappings.length} 列已读取`, `${table.suggestedMappings.length} columns read`)}</span>
             </summary>
             <div className="mapping-list">
-              <div className="mapping-head"><span>输入列</span><span>统一字段</span><span>置信度</span></div>
+              <div className="mapping-head"><span>{l("输入列", "Input column")}</span><span>{l("统一字段", "Canonical field")}</span><span>{l("置信度", "Confidence")}</span></div>
               {table.suggestedMappings.map((mapping) => (
                 <div className={mapping.conflict ? "mapping-row conflict" : "mapping-row"} key={mapping.sourceColumn}>
                   <code>{mapping.sourceColumn}</code>
@@ -96,10 +101,10 @@ function SourceCard({
                     value={mapping.canonicalField ?? ""}
                     onChange={(event) => onUpdateMapping(mapping.sourceColumn, (event.target.value || null) as CanonicalField | null)}
                   >
-                    <option value="">不导入</option>
-                    {FIELD_OPTIONS.map(([field, label]) => <option value={field} key={field}>{label}</option>)}
+                    <option value="">{l("不导入", "Do not import")}</option>
+                    {FIELD_OPTIONS.map(([field, label]) => <option value={field} key={field}>{language === "en" && field === "cqMean" ? "Cq Mean (summary value)" : label}</option>)}
                   </select>
-                  <span>{Math.round(mapping.confidence * 100)}%{mapping.conflict ? " · 冲突" : ""}</span>
+                  <span>{Math.round(mapping.confidence * 100)}%{mapping.conflict ? l(" · 冲突", " · conflict") : ""}</span>
                 </div>
               ))}
             </div>
@@ -124,6 +129,7 @@ export default function ImportManager({
   onRebuild,
   onContinue,
 }: ImportManagerProps) {
+  const { language, l } = useLanguage();
   const resultSources = sources.filter((source) => getSourceCapabilities(source).role !== "plate-layout");
   const layoutSources = sources.filter((source) => getSourceCapabilities(source).role === "plate-layout");
 
@@ -132,29 +138,29 @@ export default function ImportManager({
       <div className="intake-heading">
         <div>
           <p className="eyebrow">DATA INTAKE</p>
-          <h2>分类型导入，再统一分析</h2>
-          <p>Cq 用于相对定量；Tm/熔解结果用于峰值与分组复核。系统读取结果后，只有缺少 Sample/Target 时才要求板布局。</p>
+          <h2>{l("分类型导入，再统一分析", "Import by type, then analyze together")}</h2>
+          <p>{l("Cq 用于相对定量；Tm/熔解结果用于峰值与分组复核。系统读取结果后，只有缺少 Sample/Target 时才要求板布局。", "Cq supports relative quantification; Tm/melt results support peak and grouping review. A separate plate layout is required only when Sample/Target information is missing.")}</p>
         </div>
         <div className={`readiness-badge readiness-${readiness.status}`}>
-          <span />{readiness.status === "ready" ? "分析已就绪" : readiness.status === "review-mapping" ? "需确认映射" : "等待数据"}
+          <span />{readiness.status === "ready" ? l("分析已就绪", "Ready") : readiness.status === "review-mapping" ? l("需确认映射", "Confirm mapping") : l("等待数据", "Waiting for data")}
         </div>
       </div>
 
-      {loading && <div className="notice">正在当前浏览器中解析文件…</div>}
-      {error && <div className="notice error">{error}</div>}
+      {loading && <div className="notice">{l("正在当前浏览器中解析文件…", "Parsing files in this browser…")}</div>}
+      {error && <div className="notice error">{localizeRuntimeMessage(error, language)}</div>}
 
-      <div className="import-stage-grid" aria-label="分阶段数据导入">
+      <div className="import-stage-grid" aria-label={l("分阶段数据导入", "Staged data import")}>
         <article className="import-stage primary-stage">
           <div className="stage-header">
             <div className="stage-number">01</div>
             <div className="stage-copy">
-              <div className="stage-title-line"><h3>仪器结果</h3><span className="stage-kicker">必需</span></div>
-              <p>可连续添加 Cq/Ct/Cp、Tm 或熔解分组文件；任一分析类型具备板信息后即可进入对应结果页。</p>
+              <div className="stage-title-line"><h3>{l("仪器结果", "Instrument results")}</h3><span className="stage-kicker">{l("必需", "Required")}</span></div>
+              <p>{l("可连续添加 Cq/Ct/Cp、Tm 或熔解分组文件；任一分析类型具备板信息后即可进入对应结果页。", "Add multiple Cq/Ct/Cp, Tm, or melt-group files. Each analysis becomes available when its data include plate information.")}</p>
             </div>
-            <button className="primary-button" type="button" onClick={onPickResults}>+ 添加结果</button>
+            <button className="primary-button" type="button" onClick={onPickResults}>+ {l("添加结果", "Add results")}</button>
           </div>
           <div className="stage-files">
-            {resultSources.length === 0 ? <div className="stage-empty">尚未添加仪器结果</div> : resultSources.map((source) => (
+            {resultSources.length === 0 ? <div className="stage-empty">{l("尚未添加仪器结果", "No instrument results added")}</div> : resultSources.map((source) => (
               <SourceCard
                 key={source.id}
                 source={source}
@@ -170,14 +176,14 @@ export default function ImportManager({
           <div className="stage-header">
             <div className="stage-number">02</div>
             <div className="stage-copy">
-              <div className="stage-title-line"><h3>板布局</h3><span className="stage-kicker">{readiness.layoutRequired ? "当前需要" : "按需"}</span></div>
-              <p>{readiness.resultIncludesPlateLayout ? "结果已带 Sample/Target，可跳过；如需纠正错位，仍可追加修正版。" : "结果缺少完整样本和基因信息时，导入修正后的布局表。"}</p>
+              <div className="stage-title-line"><h3>{l("板布局", "Plate layout")}</h3><span className="stage-kicker">{readiness.layoutRequired ? l("当前需要", "Required now") : l("按需", "If needed")}</span></div>
+              <p>{readiness.resultIncludesPlateLayout ? l("结果已带 Sample/Target，可跳过；如需纠正错位，仍可追加修正版。", "Sample/Target information is already present. Skip this step or add a corrected layout to fix offsets.") : l("结果缺少完整样本和基因信息时，导入修正后的布局表。", "Import the corrected layout when result files lack complete sample and target information.")}</p>
             </div>
-            <button className="secondary-button" type="button" onClick={onPickLayout}>+ 添加布局</button>
+            <button className="secondary-button" type="button" onClick={onPickLayout}>+ {l("添加布局", "Add layout")}</button>
           </div>
           <div className="stage-files">
             {layoutSources.length === 0 ? (
-              <div className="stage-empty">{readiness.resultIncludesPlateLayout ? "无需单独导入" : "尚未添加板布局"}</div>
+              <div className="stage-empty">{readiness.resultIncludesPlateLayout ? l("无需单独导入", "No separate layout required") : l("尚未添加板布局", "No plate layout added")}</div>
             ) : layoutSources.map((source) => (
               <SourceCard
                 key={source.id}
@@ -194,12 +200,12 @@ export default function ImportManager({
       <div className={`readiness-panel readiness-${readiness.status}`}>
         <div className="readiness-icon">{readiness.status === "ready" ? "✓" : readiness.status === "review-mapping" ? "!" : "→"}</div>
         <div>
-          <strong>{readiness.message}</strong>
-          <p>已读取 {readiness.primaryResultCount} 个 Cq 结果、{readiness.supplementalResultCount} 个 Tm/熔解结果、{readiness.layoutCount} 个布局文件。进入分析后仍可返回追加或替换。</p>
+          <strong>{localizeRuntimeMessage(readiness.message, language)}</strong>
+          <p>{l(`已读取 ${readiness.primaryResultCount} 个 Cq 结果、${readiness.supplementalResultCount} 个 Tm/熔解结果、${readiness.layoutCount} 个布局文件。进入分析后仍可返回追加或替换。`, `${readiness.primaryResultCount} Cq result(s), ${readiness.supplementalResultCount} Tm/melt result(s), and ${readiness.layoutCount} layout file(s) loaded. You can return later to add or replace files.`)}</p>
         </div>
         <div className="readiness-actions">
-          {readiness.canAnalyze && <button className="quiet-button bordered" type="button" onClick={onRebuild}>重新合并并计算</button>}
-          <button className="primary-button" type="button" disabled={!hasDataset} onClick={onContinue}>{readiness.analysisMode === "melt-only" ? "进入熔解分析" : "进入分析"} →</button>
+          {readiness.canAnalyze && <button className="quiet-button bordered" type="button" onClick={onRebuild}>{l("重新合并并计算", "Re-merge & calculate")}</button>}
+          <button className="primary-button" type="button" disabled={!hasDataset} onClick={onContinue}>{readiness.analysisMode === "melt-only" ? l("进入熔解分析", "Open melt analysis") : l("进入分析", "Open analysis")} →</button>
         </div>
       </div>
     </section>
