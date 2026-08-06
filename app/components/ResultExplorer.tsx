@@ -32,7 +32,17 @@ function safeFileName(value: string): string {
   return value.trim().replace(/[^\p{L}\p{N}._-]+/gu, "-") || "qpcr-expression";
 }
 
-function ExpressionChart({ rows, target, sampleOrder }: { rows: RelativeQuantificationResult[]; target: string; sampleOrder: string[] }) {
+function ExpressionChart({
+  rows,
+  target,
+  sampleOrder,
+  showTechnicalSd,
+}: {
+  rows: RelativeQuantificationResult[];
+  target: string;
+  sampleOrder: string[];
+  showTechnicalSd: boolean;
+}) {
   const { l } = useLanguage();
   const svgRef = useRef<SVGSVGElement>(null);
   const [theme, setTheme] = useState<ChartTheme>("paper");
@@ -42,6 +52,9 @@ function ExpressionChart({ rows, target, sampleOrder }: { rows: RelativeQuantifi
     .map((row) => ({
       label: row.sampleName,
       rawValue: row.relativeExpression ?? row.normalizedQuantity,
+      propagatedSd: row.relativeExpression !== null ? row.relativeExpressionSd : row.normalizedQuantitySd,
+      targetValidReplicates: row.targetValidReplicates,
+      referenceValidReplicates: row.referenceValidReplicates,
       warning: row.warningCodes.length > 0,
       calibrator: Boolean(row.calibratorValue && row.sampleName === row.calibratorValue),
     }))
@@ -51,7 +64,13 @@ function ExpressionChart({ rows, target, sampleOrder }: { rows: RelativeQuantifi
 
   if (!chartRows.length) return <div className="empty-chart">{l("当前筛选下没有可绘制的数据。", "No plottable data are available for the current selection.")}</div>;
 
-  const values = chartRows.map((row) => row.rawValue);
+  const values = chartRows.flatMap((row) => {
+    if (!showTechnicalSd || row.propagatedSd === null) return [row.rawValue];
+    const lower = row.rawValue - row.propagatedSd;
+    return lower > 0
+      ? [lower, row.rawValue, row.rawValue + row.propagatedSd]
+      : [row.rawValue, row.rawValue + row.propagatedSd];
+  });
   const left = 92;
   const right = 40;
   const top = 88;
@@ -80,6 +99,12 @@ function ExpressionChart({ rows, target, sampleOrder }: { rows: RelativeQuantifi
   };
   const usesCalibrator = chartRows.some((row) => row.calibrator);
   const metricLabel = rows.some((row) => row.relativeExpression !== null) ? "Relative expression · 2⁻ΔΔCq" : "Normalized quantity · 2⁻ΔCq";
+  const replicateSummary = chartRows.map((row) => {
+    const referenceCounts = Object.entries(row.referenceValidReplicates)
+      .map(([reference, count]) => `${reference} n=${count}`)
+      .join(", ");
+    return `${row.label}: ${target} n=${row.targetValidReplicates}${referenceCounts ? `; ${referenceCounts}` : ""}`;
+  }).join(" · ");
 
   function serializedSvg(): string | null {
     if (!svgRef.current) return null;
@@ -153,12 +178,18 @@ function ExpressionChart({ rows, target, sampleOrder }: { rows: RelativeQuantifi
           {theme === "dark" && <rect x="1" y="1" width={width - 2} height={height - 2} fill="none" stroke={colors.border} strokeWidth="1" />}
           <text x={left} y="32" fill={colors.text} fontSize="17" fontWeight="400" fontStyle="italic">{target || "Target"}</text>
           <text x={left} y="50" fill={colors.muted} fontSize="9">{metricLabel}</text>
-          <g transform={`translate(${Math.max(left + 250, width - (usesCalibrator ? 410 : 330))}, 29)`}>
+          <g transform={`translate(${Math.max(left + 180, width - (showTechnicalSd ? (usesCalibrator ? 540 : 455) : usesCalibrator ? 410 : 330))}, 29)`}>
             <rect x="0" y="-7" width="11" height="11" fill={colors.bar} stroke={colors.axis} strokeWidth=".6" />
             <text x="18" y="2" fill={colors.muted} fontSize="8.5">{l("生物学样本", "Biological sample")}</text>
             {usesCalibrator && <><rect x="121" y="-7" width="11" height="11" fill={colors.calibrator} stroke={colors.calibratorStroke} strokeWidth=".8" /><text x="139" y="2" fill={colors.muted} fontSize="8.5">{l("校准样本", "Calibrator")}</text></>}
             <line x1={usesCalibrator ? 210 : 132} x2={usesCalibrator ? 225 : 147} y1="-1" y2="-1" stroke={colors.reference} strokeDasharray="4 3" />
             <text x={usesCalibrator ? 232 : 154} y="2" fill={colors.muted} fontSize="8.5">Reference = 1</text>
+            {showTechnicalSd && <>
+              <line x1={usesCalibrator ? 330 : 250} x2={usesCalibrator ? 330 : 250} y1="-7" y2="5" stroke={colors.axis} strokeWidth="1" />
+              <line x1={usesCalibrator ? 325 : 245} x2={usesCalibrator ? 335 : 255} y1="-7" y2="-7" stroke={colors.axis} strokeWidth="1" />
+              <line x1={usesCalibrator ? 325 : 245} x2={usesCalibrator ? 335 : 255} y1="5" y2="5" stroke={colors.axis} strokeWidth="1" />
+              <text x={usesCalibrator ? 342 : 262} y="2" fill={colors.muted} fontSize="8.5">{l("技术复孔传播 SD", "Propagated technical SD")}</text>
+            </>}
           </g>
 
           {ticks.map((tick) => {
@@ -181,11 +212,23 @@ function ExpressionChart({ rows, target, sampleOrder }: { rows: RelativeQuantifi
             const barTop = y(row.rawValue);
             const barHeight = Math.max(1, bottom - barTop);
             const label = row.label.length > 13 ? `${row.label.slice(0, 12)}…` : row.label;
+            const lowerError = row.propagatedSd === null ? null : Math.max(0, row.rawValue - row.propagatedSd);
+            const upperError = row.propagatedSd === null ? null : row.rawValue + row.propagatedSd;
+            const errorTop = upperError === null ? null : y(upperError);
+            const errorBottom = lowerError === null ? null : axisMode === "log-ratio" && lowerError === 0 ? bottom : y(lowerError);
+            const replicateTitle = Object.entries(row.referenceValidReplicates)
+              .map(([reference, count]) => `${reference} n=${count}`)
+              .join(", ");
             return (
               <g key={`${row.label}-${index}`}>
-                <title>{row.label}: {row.rawValue.toFixed(4)}{row.warning ? l(" · QC 提示", " · QC warning") : ""}</title>
+                <title>{row.label}: {row.rawValue.toFixed(4)}{showTechnicalSd && row.propagatedSd !== null ? ` ± ${row.propagatedSd.toFixed(4)} ${l("技术复孔传播 SD", "propagated technical SD")}` : ""} · {target} n={row.targetValidReplicates}{replicateTitle ? `; ${replicateTitle}` : ""}{row.warning ? l(" · QC 提示", " · QC warning") : ""}</title>
                 <rect x={centerX - barWidth / 2} y={barTop} width={barWidth} height={barHeight} fill={row.calibrator ? colors.calibrator : colors.bar} fillOpacity=".9" stroke={row.warning ? colors.warning : row.calibrator ? colors.calibratorStroke : colors.axis} strokeWidth={row.warning ? 1.35 : .7} />
-                {row.warning && <circle cx={centerX} cy={Math.max(top + 4, barTop - 7)} r="3" fill={colors.background} stroke={colors.warning} strokeWidth="1.2" />}
+                {showTechnicalSd && errorTop !== null && errorBottom !== null && <g aria-label={l(`${row.label} 技术复孔传播 SD`, `${row.label} propagated technical-replicate SD`)}>
+                  <line x1={centerX} x2={centerX} y1={errorTop} y2={errorBottom} stroke={colors.axis} strokeWidth="1.15" />
+                  <line x1={centerX - 5} x2={centerX + 5} y1={errorTop} y2={errorTop} stroke={colors.axis} strokeWidth="1.15" />
+                  <line x1={centerX - 5} x2={centerX + 5} y1={errorBottom} y2={errorBottom} stroke={colors.axis} strokeWidth="1.15" />
+                </g>}
+                {row.warning && <circle cx={centerX} cy={Math.max(top + 4, (errorTop ?? barTop) - 7)} r="3" fill={colors.background} stroke={colors.warning} strokeWidth="1.2" />}
                 <text
                   x={centerX}
                   y={bottom + 20}
@@ -205,7 +248,13 @@ function ExpressionChart({ rows, target, sampleOrder }: { rows: RelativeQuantifi
       </div>
       <div className="publication-note">
         <i>i</i>
-        <p><b>{l("误差线不会自动伪造。", "Error bars are never fabricated.")}</b>{l("当前每根柱是一个生物学样本的技术复孔汇总值。只有后续提供生物学重复或分组信息，才计算并显示 SD、SEM 或 95% CI，并在图注中明确误差类型和 n。", "Each bar currently represents the technical-replicate summary of one biological sample. SD, SEM, or 95% CI will be calculated only after biological replicates or grouping information are provided, with error type and n stated explicitly.")}</p>
+        <p>
+          <b>{showTechnicalSd ? l("误差线：技术复孔传播 SD。", "Error bars: propagated technical-replicate SD.") : l("误差线默认关闭。", "Error bars are off by default.")}</b>
+          {showTechnicalSd
+            ? l("使用 delta method 将 Cq 样本 SD 传播至 2⁻ΔCq 或 2⁻ΔΔCq；仅当目标和全部内参各有至少 2 个有效复孔时显示。校准样本作为 1 的锚点，不显示自身误差。该误差仅描述技术重复性，不代表生物学重复、SEM、95% CI 或统计显著性。", "The delta method propagates the sample SD of technical-replicate Cq values to 2⁻ΔCq or 2⁻ΔΔCq. Bars are shown only when the target and every reference have at least two valid replicates. The calibrator is anchored at 1 and has no self-error bar. This error describes technical repeatability only; it is not biological replication, SEM, a 95% CI, or statistical significance.")
+            : l("可使用上方“技术复孔传播 SD”开关显示；这类误差仅描述技术重复性，不用于替代生物学重复。", "Use the “Propagated technical SD” control above to display them. This error describes technical repeatability and does not replace biological replication.")}
+          <span className="replicate-caption"><b>{l("有效技术复孔 n：", "Valid technical-replicate n: ")}</b>{replicateSummary}</span>
+        </p>
       </div>
     </div>
   );
@@ -220,6 +269,7 @@ interface ResultExplorerProps {
 export default function ResultExplorer({ results, sampleOrder, targetOrder }: ResultExplorerProps) {
   const { language, l } = useLanguage();
   const [warningOnly, setWarningOnly] = useState(false);
+  const [showTechnicalSd, setShowTechnicalSd] = useState(false);
   const [sortKey, setSortKey] = useState<SortKey | null>(null);
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
 
@@ -261,12 +311,13 @@ export default function ResultExplorer({ results, sampleOrder, targetOrder }: Re
     <div className="result-explorer">
       <div className="result-filterbar compact-result-filterbar">
         <p>{l(`当前展示 ${sampleOrder.length} 个样本、${chartTargets.length} 个目标基因；图表和表格使用同一选择。`, `Displaying ${sampleOrder.length} sample(s) and ${chartTargets.length} target(s); charts and the table share the same selection.`)}</p>
+        <button type="button" aria-pressed={showTechnicalSd} className={showTechnicalSd ? "filter-chip sd-filter active" : "filter-chip sd-filter"} onClick={() => setShowTechnicalSd((current) => !current)}>{l("技术复孔传播 SD", "Propagated technical SD")}</button>
         <button type="button" className={warningOnly ? "filter-chip warning-filter active" : "filter-chip warning-filter"} onClick={() => setWarningOnly((current) => !current)}>{l("仅看 QC 提示", "QC warnings only")}</button>
         <div className="visible-count"><b>{filtered.length}</b><span>{l("条结果", "results")}</span></div>
       </div>
 
       <div className="result-chart-stack">
-        {chartTargets.map((target) => <ExpressionChart key={target} rows={filtered} target={target} sampleOrder={sampleOrder} />)}
+        {chartTargets.map((target) => <ExpressionChart key={target} rows={filtered} target={target} sampleOrder={sampleOrder} showTechnicalSd={showTechnicalSd} />)}
         {chartTargets.length === 0 && <div className="empty-chart">{l("当前展示选择下没有可绘制的数据。", "No plottable data are available for the current display selection.")}</div>}
       </div>
 
@@ -286,12 +337,13 @@ export default function ResultExplorer({ results, sampleOrder, targetOrder }: Re
             <th><button type="button" onClick={() => sortBy("normalizedQuantity")}>2^-ΔCq{sortMark("normalizedQuantity")}</button></th>
             <th>ΔΔCq</th>
             <th><button type="button" onClick={() => sortBy("relativeExpression")}>{l("相对表达量", "Relative expression")}{sortMark("relativeExpression")}</button></th>
+            <th>{l("传播 SD", "Propagated SD")}</th>
             <th>{l("提示", "Warnings")}</th>
           </tr></thead>
           <tbody>
             {filtered.map((row) => (
               <tr key={`${row.sampleName}-${row.targetName}`} className={row.warningCodes.length ? "flagged-row" : ""}>
-                <td><b>{row.sampleName}</b></td><td>{row.targetName}</td><td>{formatNumber(row.targetMeanCq)}</td><td>{formatNumber(row.targetSdCq)}</td><td>{formatNumber(row.referenceMeanCq)}</td><td>{formatNumber(row.deltaCq)}</td><td>{formatNumber(row.normalizedQuantity, 4)}</td><td>{formatNumber(row.deltaDeltaCq)}</td><td><strong className="expression-value">{formatNumber(row.relativeExpression, 4)}</strong></td><td>{row.warningCodes.join(", ") || "—"}</td>
+                <td><b>{row.sampleName}</b></td><td>{row.targetName}</td><td>{formatNumber(row.targetMeanCq)}</td><td>{formatNumber(row.targetSdCq)}</td><td>{formatNumber(row.referenceMeanCq)}</td><td>{formatNumber(row.deltaCq)}</td><td>{formatNumber(row.normalizedQuantity, 4)}</td><td>{formatNumber(row.deltaDeltaCq)}</td><td><strong className="expression-value">{formatNumber(row.relativeExpression, 4)}</strong></td><td>{formatNumber(row.relativeExpressionSd ?? row.normalizedQuantitySd, 4)}</td><td>{row.warningCodes.join(", ") || "—"}</td>
               </tr>
             ))}
           </tbody>

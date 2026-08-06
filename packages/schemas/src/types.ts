@@ -195,11 +195,18 @@ export interface RelativeQuantificationResult {
   targetName: string;
   targetMeanCq: number;
   targetSdCq: number | null;
+  targetValidReplicates: number;
   referenceMeanCq: number;
+  referenceSdCq: number | null;
+  referenceValidReplicates: Record<string, number>;
   deltaCq: number;
+  deltaCqSd: number | null;
   normalizedQuantity: number;
+  normalizedQuantitySd: number | null;
   deltaDeltaCq: number | null;
+  deltaDeltaCqSd: number | null;
   relativeExpression: number | null;
+  relativeExpressionSd: number | null;
   calibratorValue: string;
   referenceTargets: string[];
   warningCodes: string[];

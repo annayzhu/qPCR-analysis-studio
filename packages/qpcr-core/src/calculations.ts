@@ -19,6 +19,17 @@ interface TargetMean {
   targetName: string;
   meanCq: number;
   sdCq: number | null;
+  validReplicates: number;
+}
+
+function propagatedSd(parts: Array<number | null>): number | null {
+  if (parts.some((value) => value === null)) return null;
+  const numericParts = parts.filter((value): value is number => value !== null);
+  return Math.sqrt(numericParts.reduce((sum, value) => sum + value ** 2, 0));
+}
+
+function exponentialSd(quantity: number, cqSd: number | null, base: number): number | null {
+  return cqSd === null ? null : Math.log(base) * quantity * cqSd;
 }
 
 function targetMeans(wells: WellRecord[]): TargetMean[] {
@@ -37,7 +48,13 @@ function targetMeans(wells: WellRecord[]): TargetMean[] {
   }
   return [...groups.entries()].map(([key, values]) => {
     const [sampleName, targetName] = key.split("\u241f");
-    return { sampleName, targetName, meanCq: mean(values)!, sdCq: sampleSd(values) };
+    return {
+      sampleName,
+      targetName,
+      meanCq: mean(values)!,
+      sdCq: sampleSd(values),
+      validReplicates: values.length,
+    };
   });
 }
 
@@ -66,6 +83,12 @@ export function calculateRelativeQuantification(
       .filter((item): item is TargetMean => item !== undefined);
     if (references.length !== settings.referenceTargets.length || !references.length) continue;
     const referenceMeanCq = mean(references.map((item) => item.meanCq))!;
+    const referenceSdCq = references.every((item) => item.sdCq !== null)
+      ? Math.sqrt(references.reduce((sum, item) => sum + item.sdCq! ** 2, 0)) / references.length
+      : null;
+    const referenceValidReplicates = Object.fromEntries(
+      references.map((item) => [item.targetName, item.validReplicates]),
+    );
     for (const [targetName, targetSummary] of targets) {
       if (settings.referenceTargets.includes(targetName)) continue;
       const targetMeanCq = targetSummary.meanCq;
@@ -74,17 +97,26 @@ export function calculateRelativeQuantification(
         ? 1 + (settings.efficiencyByTarget[targetName] ?? 1)
         : 2;
       const normalizedQuantity = base ** -deltaCq;
+      const deltaCqSd = propagatedSd([targetSummary.sdCq, referenceSdCq]);
+      const normalizedQuantitySd = exponentialSd(normalizedQuantity, deltaCqSd, base);
       normalized.set(`${sampleName}\u241f${targetName}`, normalizedQuantity);
       rows.push({
         sampleName,
         targetName,
         targetMeanCq,
         targetSdCq: targetSummary.sdCq,
+        targetValidReplicates: targetSummary.validReplicates,
         referenceMeanCq,
+        referenceSdCq,
+        referenceValidReplicates,
         deltaCq,
+        deltaCqSd,
         normalizedQuantity,
+        normalizedQuantitySd,
         deltaDeltaCq: null,
+        deltaDeltaCqSd: null,
         relativeExpression: null,
+        relativeExpressionSd: null,
         calibratorValue: settings.calibratorValue,
         referenceTargets: settings.referenceTargets,
         warningCodes:
@@ -105,10 +137,21 @@ export function calculateRelativeQuantification(
       (candidate) => candidate.sampleName === settings.calibratorValue && candidate.targetName === row.targetName,
     );
     const deltaDeltaCq = calibratorRow ? row.deltaCq - calibratorRow.deltaCq : null;
+    const deltaDeltaCqSd = calibratorRow
+      ? row.sampleName === settings.calibratorValue
+        ? 0
+        : propagatedSd([row.deltaCqSd, calibratorRow.deltaCqSd])
+      : null;
+    const relativeExpression = row.normalizedQuantity / calibratorQuantity;
+    const base = settings.calculationMode === "efficiency-corrected"
+      ? 1 + (settings.efficiencyByTarget[row.targetName] ?? 1)
+      : 2;
     return {
       ...row,
       deltaDeltaCq,
-      relativeExpression: row.normalizedQuantity / calibratorQuantity,
+      deltaDeltaCqSd,
+      relativeExpression,
+      relativeExpressionSd: exponentialSd(relativeExpression, deltaDeltaCqSd, base),
     };
   });
 }

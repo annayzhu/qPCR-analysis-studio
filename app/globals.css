@@ -369,6 +369,7 @@ tbody tr:hover { background: #f8fbfa; }
 .filter-chip { min-height: 32px; padding: 6px 9px; border: 1px solid var(--line); border-radius: 8px; color: #607076; background: #fafbfa; font-size: 8px; white-space: nowrap; }
 .filter-chip:hover { border-color: #a7c8c2; }.filter-chip.active { color: #106b63; border-color: #8cc4bb; background: #e8f4f1; font-weight: 750; }
 .warning-filter.active { color: #8b5b1f; border-color: #dfbf91; background: #fff4e3; }
+.sd-filter.active { color: #325e73; border-color: #94b9c8; background: #edf6f9; }
 .visible-count { text-align: right; }.visible-count b, .visible-count span { display: block; }.visible-count b { font-size: 20px; }.visible-count span { color: var(--muted); font-size: 8px; }
 .chart-card { padding: 20px; border: 1px solid var(--line); border-radius: 14px; background: white; box-shadow: var(--shadow-sm); }
 .publication-chart-heading { align-items: flex-start; }
@@ -389,6 +390,7 @@ tbody tr:hover { background: #f8fbfa; }
 .publication-note i { width: 22px; height: 22px; display: grid; place-items: center; border-radius: 50%; color: white; background: var(--teal); font-family: Georgia, serif; font-size: 11px; font-style: normal; }
 .publication-note p { margin: 0; color: #667671; font-size: 8px; line-height: 1.65; }
 .publication-note b { color: #40534f; }
+.replicate-caption { display: block; margin-top: 4px; color: #71817c; overflow-wrap: anywhere; }
 .table-section-heading { align-items: end; margin: 22px 0 10px; }.table-section-heading > p { margin: 0; color: var(--muted); font-size: 8px; }
 .expression-value { color: var(--teal); font-size: 11px; }
 
@@ -605,7 +607,7 @@ footer { display: flex; justify-content: space-between; padding: 19px clamp(20px
 .ordered-choice em { color: #806b4e; background: #eee5d8; }
 .calibrator-step .compact-field { display: grid; gap: 6px; color: #687873; font-size: 8px; font-weight: 730; }
 .calibrator-step select { font-size: 9px; }
-.compact-result-filterbar { grid-template-columns: minmax(0,1fr) auto 70px; align-items: center; padding: 10px 12px; }
+.compact-result-filterbar { grid-template-columns: minmax(0,1fr) auto auto 70px; align-items: center; padding: 10px 12px; }
 .compact-result-filterbar > p { margin: 0; color: #71807b; font-size: 8px; }
 .result-chart-stack { display: grid; gap: 12px; }
 

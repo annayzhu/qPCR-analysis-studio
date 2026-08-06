@@ -107,5 +107,65 @@ describe("relative quantification", () => {
     });
     expect(results[0].targetMeanCq).toBe(23);
     expect(results[0].targetSdCq).toBeCloseTo(Math.sqrt(2));
+    expect(results[0].targetValidReplicates).toBe(2);
+    expect(results[0].referenceValidReplicates).toEqual({ GAPDH: 2 });
+    expect(results[0].deltaCqSd).toBeCloseTo(Math.sqrt(2));
+    expect(results[0].normalizedQuantitySd).toBeCloseTo(Math.log(2) * 0.125 * Math.sqrt(2));
+  });
+
+  it("propagates technical-replicate SD through multiple-reference normalization", () => {
+    const wells = [
+      well("1", "A1", "S1", "REF1", 20), well("2", "A2", "S1", "REF1", 22),
+      well("3", "A3", "S1", "REF2", 19), well("4", "A4", "S1", "REF2", 19),
+      well("5", "A5", "S1", "GENE", 22), well("6", "A6", "S1", "GENE", 24),
+    ];
+    const [result] = calculateRelativeQuantification(wells, {
+      referenceTargets: ["REF1", "REF2"], calibratorType: "sample", calibratorValue: "",
+      replicateWarningThreshold: 0.5, tmWarningThreshold: 0.5, efficiencyByTarget: {}, calculationMode: "delta-cq",
+    });
+    const expectedReferenceSd = Math.sqrt(2) / 2;
+    const expectedDeltaSd = Math.sqrt(2 + expectedReferenceSd ** 2);
+    expect(result.referenceMeanCq).toBe(20);
+    expect(result.referenceSdCq).toBeCloseTo(expectedReferenceSd);
+    expect(result.referenceValidReplicates).toEqual({ REF1: 2, REF2: 2 });
+    expect(result.deltaCqSd).toBeCloseTo(expectedDeltaSd);
+    expect(result.normalizedQuantitySd).toBeCloseTo(Math.log(2) * 0.125 * expectedDeltaSd);
+  });
+
+  it("propagates sample and calibrator SD while keeping the calibrator anchor fixed", () => {
+    const wells = [
+      well("1", "A1", "Control", "REF", 19), well("2", "A2", "Control", "REF", 21),
+      well("3", "A3", "Control", "GENE", 22), well("4", "A4", "Control", "GENE", 24),
+      well("5", "B1", "Treat", "REF", 19), well("6", "B2", "Treat", "REF", 21),
+      well("7", "B3", "Treat", "GENE", 21), well("8", "B4", "Treat", "GENE", 23),
+    ];
+    const results = calculateRelativeQuantification(wells, {
+      referenceTargets: ["REF"], calibratorType: "sample", calibratorValue: "Control",
+      replicateWarningThreshold: 0.5, tmWarningThreshold: 0.5, efficiencyByTarget: {}, calculationMode: "delta-delta-cq",
+    });
+    const control = results.find((row) => row.sampleName === "Control")!;
+    const treated = results.find((row) => row.sampleName === "Treat")!;
+    const deltaSd = 2;
+    const deltaDeltaSd = Math.sqrt(deltaSd ** 2 + deltaSd ** 2);
+    expect(control.relativeExpression).toBe(1);
+    expect(control.deltaDeltaCqSd).toBe(0);
+    expect(control.relativeExpressionSd).toBe(0);
+    expect(treated.relativeExpression).toBe(2);
+    expect(treated.deltaDeltaCqSd).toBeCloseTo(deltaDeltaSd);
+    expect(treated.relativeExpressionSd).toBeCloseTo(Math.log(2) * 2 * deltaDeltaSd);
+  });
+
+  it("does not fabricate propagated SD when any required replicate group is a singleton", () => {
+    const wells = [
+      well("1", "A1", "S1", "REF", 20),
+      well("2", "A2", "S1", "GENE", 22), well("3", "A3", "S1", "GENE", 22.2),
+    ];
+    const [result] = calculateRelativeQuantification(wells, {
+      referenceTargets: ["REF"], calibratorType: "sample", calibratorValue: "",
+      replicateWarningThreshold: 0.5, tmWarningThreshold: 0.5, efficiencyByTarget: {}, calculationMode: "delta-cq",
+    });
+    expect(result.referenceSdCq).toBeNull();
+    expect(result.deltaCqSd).toBeNull();
+    expect(result.normalizedQuantitySd).toBeNull();
   });
 });
