@@ -4,7 +4,7 @@ import { useMemo, useRef, useState } from "react";
 import type { RelativeQuantificationResult } from "@/packages/schemas/src";
 import { buildLogRatioAxis, mapRatioToY } from "@/packages/qpcr-core/src";
 
-type SortKey = "sampleName" | "targetName" | "targetMeanCq" | "deltaCq" | "normalizedQuantity" | "relativeExpression";
+type SortKey = "sampleName" | "targetName" | "targetMeanCq" | "targetSdCq" | "deltaCq" | "normalizedQuantity" | "relativeExpression";
 
 function formatNumber(value: number | null, digits = 3): string {
   return value === null || !Number.isFinite(value) ? "—" : value.toFixed(digits);
@@ -277,6 +277,7 @@ export default function ResultExplorer({ results, sampleOrder, targetOrder }: Re
             <th><button type="button" onClick={() => sortBy("sampleName")}>样本{sortMark("sampleName")}</button></th>
             <th><button type="button" onClick={() => sortBy("targetName")}>目标基因{sortMark("targetName")}</button></th>
             <th><button type="button" onClick={() => sortBy("targetMeanCq")}>Target Mean Cq{sortMark("targetMeanCq")}</button></th>
+            <th><button type="button" onClick={() => sortBy("targetSdCq")}>Cq SD{sortMark("targetSdCq")}</button></th>
             <th>Reference Mean Cq</th>
             <th><button type="button" onClick={() => sortBy("deltaCq")}>ΔCq{sortMark("deltaCq")}</button></th>
             <th><button type="button" onClick={() => sortBy("normalizedQuantity")}>2^-ΔCq{sortMark("normalizedQuantity")}</button></th>
@@ -287,7 +288,7 @@ export default function ResultExplorer({ results, sampleOrder, targetOrder }: Re
           <tbody>
             {filtered.map((row) => (
               <tr key={`${row.sampleName}-${row.targetName}`} className={row.warningCodes.length ? "flagged-row" : ""}>
-                <td><b>{row.sampleName}</b></td><td>{row.targetName}</td><td>{formatNumber(row.targetMeanCq)}</td><td>{formatNumber(row.referenceMeanCq)}</td><td>{formatNumber(row.deltaCq)}</td><td>{formatNumber(row.normalizedQuantity, 4)}</td><td>{formatNumber(row.deltaDeltaCq)}</td><td><strong className="expression-value">{formatNumber(row.relativeExpression, 4)}</strong></td><td>{row.warningCodes.join(", ") || "—"}</td>
+                <td><b>{row.sampleName}</b></td><td>{row.targetName}</td><td>{formatNumber(row.targetMeanCq)}</td><td>{formatNumber(row.targetSdCq)}</td><td>{formatNumber(row.referenceMeanCq)}</td><td>{formatNumber(row.deltaCq)}</td><td>{formatNumber(row.normalizedQuantity, 4)}</td><td>{formatNumber(row.deltaDeltaCq)}</td><td><strong className="expression-value">{formatNumber(row.relativeExpression, 4)}</strong></td><td>{row.warningCodes.join(", ") || "—"}</td>
               </tr>
             ))}
           </tbody>

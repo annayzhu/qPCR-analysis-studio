@@ -194,6 +194,7 @@ export interface RelativeQuantificationResult {
   sampleName: string;
   targetName: string;
   targetMeanCq: number;
+  targetSdCq: number | null;
   referenceMeanCq: number;
   deltaCq: number;
   normalizedQuantity: number;

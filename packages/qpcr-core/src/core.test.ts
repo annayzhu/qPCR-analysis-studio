@@ -91,6 +91,21 @@ describe("relative quantification", () => {
       referenceTargets: ["GAPDH"], calibratorType: "sample", calibratorValue: "Control",
       replicateWarningThreshold: 0.5, tmWarningThreshold: 0.5, efficiencyByTarget: {}, calculationMode: "delta-delta-cq",
     });
-    expect(results.find((row) => row.sampleName === "Treat")?.relativeExpression).toBeCloseTo(2);
+    const treated = results.find((row) => row.sampleName === "Treat");
+    expect(treated?.relativeExpression).toBeCloseTo(2);
+    expect(treated?.targetSdCq).toBe(0);
+  });
+
+  it("reports the sample SD of active target technical replicates", () => {
+    const wells = [
+      well("1", "A1", "S1", "GAPDH", 20), well("2", "A2", "S1", "GAPDH", 20),
+      well("3", "A3", "S1", "GENE", 22), well("4", "A4", "S1", "GENE", 24),
+    ];
+    const results = calculateRelativeQuantification(wells, {
+      referenceTargets: ["GAPDH"], calibratorType: "sample", calibratorValue: "",
+      replicateWarningThreshold: 0.5, tmWarningThreshold: 0.5, efficiencyByTarget: {}, calculationMode: "delta-cq",
+    });
+    expect(results[0].targetMeanCq).toBe(23);
+    expect(results[0].targetSdCq).toBeCloseTo(Math.sqrt(2));
   });
 });

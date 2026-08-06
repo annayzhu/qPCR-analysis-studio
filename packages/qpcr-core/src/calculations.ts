@@ -8,10 +8,17 @@ function mean(values: number[]): number | null {
   return values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null;
 }
 
+function sampleSd(values: number[]): number | null {
+  if (values.length < 2) return null;
+  const average = mean(values)!;
+  return Math.sqrt(values.reduce((sum, value) => sum + (value - average) ** 2, 0) / (values.length - 1));
+}
+
 interface TargetMean {
   sampleName: string;
   targetName: string;
   meanCq: number;
+  sdCq: number | null;
 }
 
 function targetMeans(wells: WellRecord[]): TargetMean[] {
@@ -30,7 +37,7 @@ function targetMeans(wells: WellRecord[]): TargetMean[] {
   }
   return [...groups.entries()].map(([key, values]) => {
     const [sampleName, targetName] = key.split("\u241f");
-    return { sampleName, targetName, meanCq: mean(values)! };
+    return { sampleName, targetName, meanCq: mean(values)!, sdCq: sampleSd(values) };
   });
 }
 
@@ -44,10 +51,10 @@ export function calculateRelativeQuantification(
   settings: AnalysisSettings,
 ): RelativeQuantificationResult[] {
   const means = targetMeans(wells);
-  const bySample = new Map<string, Map<string, number>>();
+  const bySample = new Map<string, Map<string, TargetMean>>();
   for (const item of means) {
-    const targets = bySample.get(item.sampleName) ?? new Map<string, number>();
-    targets.set(item.targetName, item.meanCq);
+    const targets = bySample.get(item.sampleName) ?? new Map<string, TargetMean>();
+    targets.set(item.targetName, item);
     bySample.set(item.sampleName, targets);
   }
 
@@ -56,11 +63,12 @@ export function calculateRelativeQuantification(
   for (const [sampleName, targets] of bySample) {
     const references = settings.referenceTargets
       .map((target) => targets.get(target))
-      .filter((cq): cq is number => cq !== undefined);
+      .filter((item): item is TargetMean => item !== undefined);
     if (references.length !== settings.referenceTargets.length || !references.length) continue;
-    const referenceMeanCq = mean(references)!;
-    for (const [targetName, targetMeanCq] of targets) {
+    const referenceMeanCq = mean(references.map((item) => item.meanCq))!;
+    for (const [targetName, targetSummary] of targets) {
       if (settings.referenceTargets.includes(targetName)) continue;
+      const targetMeanCq = targetSummary.meanCq;
       const deltaCq = targetMeanCq - referenceMeanCq;
       const base = settings.calculationMode === "efficiency-corrected"
         ? 1 + (settings.efficiencyByTarget[targetName] ?? 1)
@@ -71,6 +79,7 @@ export function calculateRelativeQuantification(
         sampleName,
         targetName,
         targetMeanCq,
+        targetSdCq: targetSummary.sdCq,
         referenceMeanCq,
         deltaCq,
         normalizedQuantity,
