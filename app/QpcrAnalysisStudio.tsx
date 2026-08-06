@@ -79,6 +79,8 @@ export default function QpcrAnalysisStudio() {
   const [exclusionReason, setExclusionReason] = useState("技术复孔异常（人工判定）");
   const [referenceTargets, setReferenceTargets] = useState<string[]>([]);
   const [calibrator, setCalibrator] = useState("");
+  const [displaySamples, setDisplaySamples] = useState<string[]>([]);
+  const [displayTargets, setDisplayTargets] = useState<string[]>([]);
   const [qcSearch, setQcSearch] = useState("");
   const [qcIssueOnly, setQcIssueOnly] = useState(false);
 
@@ -86,6 +88,7 @@ export default function QpcrAnalysisStudio() {
   const pendingCount = pendingEditLogs.length + pendingExclusionLogs.length;
   const selectedWells = useMemo(() => draftWells.filter((well) => selected.includes(well.id)), [draftWells, selected]);
   const qc = useMemo(() => calculateReplicateQc(appliedWells), [appliedWells]);
+  const draftQc = useMemo(() => calculateReplicateQc(draftWells), [draftWells]);
   const targets = useMemo(
     () => [...new Set(appliedWells.map((well) => well.targetName).filter(Boolean))].sort(),
     [appliedWells],
@@ -107,6 +110,47 @@ export default function QpcrAnalysisStudio() {
     };
     return calculateRelativeQuantification(appliedWells, settings);
   }, [appliedWells, calibrator, referenceTargets]);
+  const plateQcState = useMemo(() => {
+    const groupWarnings = new Map<string, Set<string>>();
+    const specificWarnings = new Map<string, Set<string>>();
+    const wellByName = new Map(draftWells.map((well) => [well.well, well]));
+    const addWarning = (map: Map<string, Set<string>>, wellName: string, warning: string) => {
+      const warnings = map.get(wellName) ?? new Set<string>();
+      warnings.add(warning);
+      map.set(wellName, warnings);
+    };
+
+    for (const row of draftQc.filter((item) => item.warningCodes.length > 0)) {
+      for (const wellName of row.wells) {
+        for (const warning of row.warningCodes) addWarning(groupWarnings, wellName, warning);
+      }
+      if (row.suspectWell && row.warningCodes.includes("CQ_RANGE_HIGH")) {
+        addWarning(specificWarnings, row.suspectWell, "CQ_RANGE_HIGH");
+      }
+      if (row.warningCodes.includes("SECONDARY_MELT_PEAK")) {
+        for (const wellName of row.wells) {
+          if (wellByName.get(wellName)?.tm2 !== null) addWarning(specificWarnings, wellName, "SECONDARY_MELT_PEAK");
+        }
+      }
+      if (row.warningCodes.includes("EXCLUDED_OR_NON_DETECTED")) {
+        for (const wellName of row.wells) {
+          const well = wellByName.get(wellName);
+          if (well && (well.instrumentOmit || well.userExcluded || well.cqStatus === "not-detected")) {
+            addWarning(specificWarnings, wellName, "EXCLUDED_OR_NON_DETECTED");
+          }
+        }
+      }
+    }
+
+    for (const well of draftWells) {
+      for (const warning of well.qcFlags) addWarning(specificWarnings, well.well, warning.code);
+      if (well.tm2 !== null) addWarning(specificWarnings, well.well, "SECONDARY_MELT_PEAK");
+      if (well.instrumentOmit || well.userExcluded || well.cqStatus === "not-detected") {
+        addWarning(specificWarnings, well.well, "EXCLUDED_OR_NON_DETECTED");
+      }
+    }
+    return { groupWarnings, specificWarnings };
+  }, [draftQc, draftWells]);
   const filteredQc = useMemo(() => {
     const query = qcSearch.trim().toLocaleLowerCase();
     return qc.filter((row) => (!qcIssueOnly || row.warningCodes.length > 0)
@@ -143,6 +187,8 @@ export default function QpcrAnalysisStudio() {
       ?? builtTargets.find((target) => /gapdh|actb|18s|rplp0|b2m|hprt/i.test(target));
     setReferenceTargets(probableReference ? [probableReference] : []);
     setCalibrator("");
+    setDisplaySamples([...new Set(built.wells.map((well) => well.sampleName).filter(Boolean))].sort());
+    setDisplayTargets([...new Set(built.wells.map((well) => well.targetName).filter(Boolean))].sort());
   }
 
   async function importFiles(files: FileList | File[]) {
@@ -227,6 +273,8 @@ export default function QpcrAnalysisStudio() {
     setPendingExclusionLogs([]);
     setReferenceTargets([]);
     setCalibrator("");
+    setDisplaySamples([]);
+    setDisplayTargets([]);
     setView("overview");
     setDataManagerOpen(true);
     setNeedsRebuild(false);
@@ -326,10 +374,36 @@ export default function QpcrAnalysisStudio() {
   }
 
   function recalculate() {
+    const nextSamples = [...new Set(draftWells.map((well) => well.sampleName).filter(Boolean))].sort();
+    const nextTargets = [...new Set(draftWells.map((well) => well.targetName).filter(Boolean))].sort();
+    const hadAllSamplesSelected = samples.length > 0 && samples.every((sample) => displaySamples.includes(sample));
+    const hadAllTargetsSelected = targets.length > 0 && targets.every((target) => displayTargets.includes(target));
     setAppliedWells(draftWells);
+    setDataset((current) => current ? { ...current, wells: draftWells } : current);
     setAuditLogs((current) => [...current, ...pendingEditLogs, ...pendingExclusionLogs]);
     setPendingEditLogs([]);
     setPendingExclusionLogs([]);
+    setDisplaySamples((current) => {
+      const retained = current.filter((sample) => nextSamples.includes(sample));
+      return hadAllSamplesSelected ? [...retained, ...nextSamples.filter((sample) => !retained.includes(sample))] : retained;
+    });
+    setDisplayTargets((current) => {
+      const retained = current.filter((target) => nextTargets.includes(target));
+      return hadAllTargetsSelected ? [...retained, ...nextTargets.filter((target) => !retained.includes(target))] : retained;
+    });
+    setReferenceTargets((current) => current.filter((target) => nextTargets.includes(target)));
+    if (calibrator && !nextSamples.includes(calibrator)) setCalibrator("");
+  }
+
+  function switchWorkspaceView(nextView: WorkspaceView) {
+    if (pendingCount > 0 && nextView !== "plate") return;
+    setView(nextView);
+  }
+
+  function toggleOrderedSelection(value: string, selectedValues: string[], update: (values: string[]) => void) {
+    update(selectedValues.includes(value)
+      ? selectedValues.filter((item) => item !== value)
+      : [...selectedValues, value]);
   }
 
   const detectedCount = appliedWells.filter((well) => well.cqStatus === "detected" && !well.userExcluded).length;
@@ -339,6 +413,7 @@ export default function QpcrAnalysisStudio() {
   const hasMeltAnalysis = meltWellCount > 0;
   const namedReactionCount = draftWells.filter((well) => well.sampleName || well.targetName).length;
   const qcIssueCount = qc.filter((row) => row.warningCodes.length).length;
+  const selectedDisplayTargets = displayTargets.filter((target) => !referenceTargets.includes(target));
 
   return (
     <main className="app-shell">
@@ -346,7 +421,7 @@ export default function QpcrAnalysisStudio() {
       <input ref={layoutInput} hidden type="file" multiple accept=".xlsx,.csv,.txt,.tsv" onChange={(event) => event.target.files && importFiles(event.target.files)} />
 
       <header className="topbar">
-        <button className="brand-lockup" type="button" onClick={() => dataset ? setView("overview") : setDataManagerOpen(true)}>
+        <button className="brand-lockup" type="button" onClick={() => dataset ? switchWorkspaceView("overview") : setDataManagerOpen(true)}>
           <span className="brand-mark" aria-hidden="true"><i /><i /><i /><i /></span>
           <span><strong>qPCR Analysis Studio</strong><small>Relative quantification workspace</small></span>
         </button>
@@ -389,12 +464,19 @@ export default function QpcrAnalysisStudio() {
               <h1>{dataset.plate.plateFormat} 孔 qPCR 分析</h1>
               <p>{sources.length} 个来源文件 · {samples.length} 个样本 · {targets.length} 个靶标{hasQuantification ? ` · ${detectedCount} 个有效 Cq` : ""}{hasMeltAnalysis ? ` · ${meltWellCount} 个熔解记录` : ""}</p>
             </div>
-            <div className="analysis-state"><span />已自动计算</div>
+            <div className={pendingCount > 0 ? "analysis-state pending" : "analysis-state"}><span />{pendingCount > 0 ? `${pendingCount} 项修改待重算` : "概览、板布局与结果已同步"}</div>
           </section>
 
           <nav className="workspace-tabs" aria-label="分析工作区">
             {VIEW_ITEMS.map(([value, label, english]) => (
-              <button key={value} type="button" className={view === value ? "active" : ""} onClick={() => setView(value)}>
+              <button
+                key={value}
+                type="button"
+                className={view === value ? "active" : ""}
+                disabled={pendingCount > 0 && value !== "plate"}
+                title={pendingCount > 0 && value !== "plate" ? "请先应用板布局修改并重算" : undefined}
+                onClick={() => switchWorkspaceView(value)}
+              >
                 <span>{label}</span><small>{english}</small>
               </button>
             ))}
@@ -454,9 +536,10 @@ export default function QpcrAnalysisStudio() {
               <div className="plate-workspace">
                 <div className="section-heading plate-heading">
                   <div><p className="eyebrow">PLATE WORKSPACE</p><h2>{dataset.plate.plateFormat} 孔板 · {namedReactionCount} 个已定义反应</h2></div>
-                  <div className="legend"><span><i className="dot selected-dot" />已选</span><span><i className="dot warning-dot" />QC 提示</span><span><i className="dot excluded-dot" />已排除</span></div>
+                  <div className="legend"><span><i className="dot selected-dot" />已选</span><span><i className="dot group-warning-dot" />复孔组提示</span><span><i className="dot warning-dot" />疑似异常孔</span><span><i className="dot excluded-dot" />已排除</span></div>
                 </div>
                 {dataset.warnings.map((warning) => <div className="notice" key={warning}>{warning}</div>)}
+                {pendingCount > 0 && <div className="pending-recalculation-notice"><span>板布局草稿已改变</span><p>概览和结果暂时锁定；应用修改并重算后，三处会基于同一份孔数据同步更新。</p><button type="button" onClick={recalculate}>立即应用并重算</button></div>}
                 <div className="selection-guide">
                   <span>批量选择：</span>鼠标拖动框选 · Shift 选择矩形范围 · ⌘/Ctrl 追加或取消 · 点击行列标可整行/整列选择
                 </div>
@@ -473,14 +556,19 @@ export default function QpcrAnalysisStudio() {
                           const wellName = `${row}${column}`;
                           const well = draftWells.find((item) => item.well === wellName);
                           const isSelected = Boolean(well && selected.includes(well.id));
-                          const hasWarning = Boolean(well && (well.qcFlags.length || well.tm2 !== null));
+                          const hasGroupWarning = Boolean(well && plateQcState.groupWarnings.has(well.well));
+                          const hasSpecificWarning = Boolean(well && plateQcState.specificWarnings.has(well.well));
+                          const warningText = well ? [...new Set([
+                            ...(plateQcState.specificWarnings.get(well.well) ?? []),
+                            ...(plateQcState.groupWarnings.get(well.well) ?? []),
+                          ])].join(", ") : "";
                           return (
                             <button
                               type="button"
                               key={wellName}
-                              className={`well-cell ${isSelected ? "selected" : ""} ${hasWarning ? "warning" : ""} ${well?.userExcluded ? "excluded" : ""}`}
+                              className={`well-cell ${isSelected ? "selected" : ""} ${hasGroupWarning ? "qc-group-warning" : ""} ${hasSpecificWarning ? "warning" : ""} ${well?.userExcluded ? "excluded" : ""}`}
                               style={{ "--well-color": targetColor(well?.targetName ?? "") } as React.CSSProperties}
-                              title={well ? `${well.well} | ${well.sampleName || "未命名"} | ${well.targetName || "未命名"} | Cq ${formatNumber(well.cq)}` : wellName}
+                              title={well ? `${well.well} | ${well.sampleName || "未命名"} | ${well.targetName || "未命名"} | Cq ${formatNumber(well.cq)}${warningText ? ` | QC: ${warningText}` : ""}` : wellName}
                               onMouseDown={(event) => well && startWellSelection(well, event)}
                               onMouseEnter={(event) => well && extendWellSelection(well, event)}
                               onContextMenu={(event) => { event.preventDefault(); if (well) { setSelected([well.id]); setExclusion(true, [well.id]); } }}
@@ -544,12 +632,39 @@ export default function QpcrAnalysisStudio() {
                   </div>
                 </div>
                 {resultSection === "quantification" && hasQuantification && <>
-                  <div className="settings-card compact-settings-card">
-                    <div><p className="field-title">内参基因（可多选）</p><div className="choice-row">{targets.map((target) => <label className={referenceTargets.includes(target) ? "choice active" : "choice"} key={target}><input type="checkbox" checked={referenceTargets.includes(target)} onChange={() => setReferenceTargets((current) => current.includes(target) ? current.filter((item) => item !== target) : [...current, target])} />{target}</label>)}</div></div>
-                    <label className="compact-field">校准样本<select value={calibrator} onChange={(event) => setCalibrator(event.target.value)}><option value="">仅计算 ΔCq</option>{samples.map((sample) => <option key={sample} value={sample}>{sample}</option>)}</select></label>
-                    <p className="microcopy">多内参按相对量几何均值归一化；未提供扩增效率时暂按 100% 计算并保留假设。</p>
+                  <div className="result-settings-grid">
+                    <section className="result-setting-step reference-step">
+                      <div className="setting-step-heading"><span>1</span><div><p className="eyebrow">NORMALIZATION</p><h3>选择内参基因</h3></div><small>可多选</small></div>
+                      <div className="choice-row">{targets.map((target) => <label className={referenceTargets.includes(target) ? "choice active" : "choice"} key={target}><input type="checkbox" checked={referenceTargets.includes(target)} onChange={() => setReferenceTargets((current) => current.includes(target) ? current.filter((item) => item !== target) : [...current, target])} />{target}</label>)}</div>
+                      <p>多内参按相对量几何均值归一化。</p>
+                    </section>
+
+                    <section className="result-setting-step display-step">
+                      <div className="setting-step-heading"><span>2</span><div><p className="eyebrow">DISPLAY ORDER</p><h3>选择展示的基因和样本</h3></div><button className="clear-selection-button" type="button" onClick={() => { setDisplayTargets([]); setDisplaySamples([]); }} disabled={!displayTargets.length && !displaySamples.length}>Clear</button></div>
+                      <div className="display-choice-group">
+                        <div className="display-choice-label"><span>基因</span><small>{selectedDisplayTargets.length} 已选</small></div>
+                        <div className="ordered-choice-row">{targets.map((target) => {
+                          const isReference = referenceTargets.includes(target);
+                          const selectionIndex = selectedDisplayTargets.indexOf(target);
+                          return <button type="button" key={target} disabled={isReference} aria-pressed={selectionIndex >= 0 && !isReference} className={selectionIndex >= 0 && !isReference ? "ordered-choice active" : "ordered-choice"} onClick={() => toggleOrderedSelection(target, displayTargets, setDisplayTargets)}><span>{target}</span>{isReference ? <em>内参</em> : selectionIndex >= 0 ? <i>{selectionIndex + 1}</i> : null}</button>;
+                        })}</div>
+                      </div>
+                      <div className="display-choice-group sample-display-group">
+                        <div className="display-choice-label"><span>样本</span><small>{displaySamples.length} 已选 · 编号即图中从左到右顺序</small></div>
+                        <div className="ordered-choice-row">{samples.map((sample) => {
+                          const selectionIndex = displaySamples.indexOf(sample);
+                          return <button type="button" key={sample} aria-pressed={selectionIndex >= 0} className={selectionIndex >= 0 ? "ordered-choice active" : "ordered-choice"} onClick={() => toggleOrderedSelection(sample, displaySamples, setDisplaySamples)}><span>{sample}</span>{selectionIndex >= 0 && <i>{selectionIndex + 1}</i>}</button>;
+                        })}</div>
+                      </div>
+                    </section>
+
+                    <section className="result-setting-step calibrator-step">
+                      <div className="setting-step-heading"><span>3</span><div><p className="eyebrow">CALIBRATION</p><h3>选择校准样本</h3></div></div>
+                      <label className="compact-field">校准样本<select value={calibrator} onChange={(event) => setCalibrator(event.target.value)}><option value="">不设置，仅计算 ΔCq</option>{samples.map((sample) => <option key={sample} value={sample}>{sample}</option>)}</select></label>
+                      <p>设置后计算 ΔΔCq 与相对表达量；未提供扩增效率时按 100% 计算并记录假设。</p>
+                    </section>
                   </div>
-                  {!referenceTargets.length ? <div className="empty-table">请选择至少一个内参基因，系统随后生成可筛选结果表和发表级表达图。</div> : <ResultExplorer results={relativeResults} />}
+                  {!referenceTargets.length ? <div className="empty-table">请先在第 1 区选择至少一个内参基因。</div> : <ResultExplorer results={relativeResults} sampleOrder={displaySamples} targetOrder={selectedDisplayTargets} />}
                 </>}
                 {resultSection === "quantification" && !hasQuantification && <div className="empty-table">当前仅导入了 Tm/熔解结果；添加单孔 Cq/Ct/Cp 后可进行相对定量。</div>}
                 {resultSection === "melt" && hasMeltAnalysis && <MeltAnalysis wells={appliedWells} />}

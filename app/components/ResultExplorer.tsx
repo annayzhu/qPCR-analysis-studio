@@ -31,7 +31,7 @@ function safeFileName(value: string): string {
   return value.trim().replace(/[^\p{L}\p{N}._-]+/gu, "-") || "qpcr-expression";
 }
 
-function ExpressionChart({ rows, target }: { rows: RelativeQuantificationResult[]; target: string }) {
+function ExpressionChart({ rows, target, sampleOrder }: { rows: RelativeQuantificationResult[]; target: string; sampleOrder: string[] }) {
   const svgRef = useRef<SVGSVGElement>(null);
   const [theme, setTheme] = useState<ChartTheme>("paper");
   const [axisMode, setAxisMode] = useState<AxisMode>("log-ratio");
@@ -44,7 +44,7 @@ function ExpressionChart({ rows, target }: { rows: RelativeQuantificationResult[
       calibrator: Boolean(row.calibratorValue && row.sampleName === row.calibratorValue),
     }))
     .filter((row) => Number.isFinite(row.rawValue) && row.rawValue > 0)
-    .sort((a, b) => b.rawValue - a.rawValue)
+    .sort((a, b) => sampleOrder.indexOf(a.label) - sampleOrder.indexOf(b.label))
     .slice(0, 40);
 
   if (!chartRows.length) return <div className="empty-chart">当前筛选下没有可绘制的数据。</div>;
@@ -209,28 +209,36 @@ function ExpressionChart({ rows, target }: { rows: RelativeQuantificationResult[
   );
 }
 
-export default function ResultExplorer({ results }: { results: RelativeQuantificationResult[] }) {
-  const [search, setSearch] = useState("");
-  const [targetFilter, setTargetFilter] = useState("全部");
+interface ResultExplorerProps {
+  results: RelativeQuantificationResult[];
+  sampleOrder: string[];
+  targetOrder: string[];
+}
+
+export default function ResultExplorer({ results, sampleOrder, targetOrder }: ResultExplorerProps) {
   const [warningOnly, setWarningOnly] = useState(false);
-  const [sortKey, setSortKey] = useState<SortKey>("sampleName");
+  const [sortKey, setSortKey] = useState<SortKey | null>(null);
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
-  const targets = useMemo(() => [...new Set(results.map((row) => row.targetName))].sort(), [results]);
-  const chartTarget = targetFilter === "全部" ? targets[0] ?? "" : targetFilter;
 
   const filtered = useMemo(() => {
-    const query = search.trim().toLocaleLowerCase();
     return results
-      .filter((row) => targetFilter === "全部" || row.targetName === targetFilter)
+      .filter((row) => sampleOrder.includes(row.sampleName) && targetOrder.includes(row.targetName))
       .filter((row) => !warningOnly || row.warningCodes.length > 0)
-      .filter((row) => !query || `${row.sampleName} ${row.targetName}`.toLocaleLowerCase().includes(query))
       .sort((a, b) => {
+        if (sortKey === null) {
+          const targetComparison = targetOrder.indexOf(a.targetName) - targetOrder.indexOf(b.targetName);
+          return targetComparison || sampleOrder.indexOf(a.sampleName) - sampleOrder.indexOf(b.sampleName);
+        }
         const av = a[sortKey] ?? Number.NEGATIVE_INFINITY;
         const bv = b[sortKey] ?? Number.NEGATIVE_INFINITY;
         const comparison = typeof av === "string" && typeof bv === "string" ? av.localeCompare(bv, "zh-CN") : Number(av) - Number(bv);
         return sortDirection === "asc" ? comparison : -comparison;
       });
-  }, [results, search, sortDirection, sortKey, targetFilter, warningOnly]);
+  }, [results, sampleOrder, sortDirection, sortKey, targetOrder, warningOnly]);
+  const chartTargets = useMemo(
+    () => targetOrder.filter((target) => filtered.some((row) => row.targetName === target)),
+    [filtered, targetOrder],
+  );
 
   function sortBy(key: SortKey) {
     if (sortKey === key) setSortDirection((current) => current === "asc" ? "desc" : "asc");
@@ -242,27 +250,26 @@ export default function ResultExplorer({ results }: { results: RelativeQuantific
 
   const sortMark = (key: SortKey) => sortKey === key ? (sortDirection === "asc" ? " ↑" : " ↓") : "";
 
+  if (!sampleOrder.length || !targetOrder.length) {
+    return <div className="empty-table">请在第 2 区点选需要展示的基因和样本；点选样本的编号就是图中从左到右的顺序。</div>;
+  }
+
   return (
     <div className="result-explorer">
-      <div className="result-filterbar">
-        <label className="search-field"><span>搜索结果</span><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="样本或基因名称" /></label>
-        <div className="filter-group">
-          <span>基因</span>
-          <div className="filter-chips">
-            {["全部", ...targets].map((target) => (
-              <button type="button" key={target} onClick={() => setTargetFilter(target)} className={targetFilter === target ? "filter-chip active" : "filter-chip"}>{target}</button>
-            ))}
-          </div>
-        </div>
+      <div className="result-filterbar compact-result-filterbar">
+        <p>当前展示 {sampleOrder.length} 个样本、{chartTargets.length} 个目标基因；图表和表格使用同一选择。</p>
         <button type="button" className={warningOnly ? "filter-chip warning-filter active" : "filter-chip warning-filter"} onClick={() => setWarningOnly((current) => !current)}>仅看 QC 提示</button>
         <div className="visible-count"><b>{filtered.length}</b><span>条结果</span></div>
       </div>
 
-      <ExpressionChart rows={filtered} target={chartTarget} />
+      <div className="result-chart-stack">
+        {chartTargets.map((target) => <ExpressionChart key={target} rows={filtered} target={target} sampleOrder={sampleOrder} />)}
+        {chartTargets.length === 0 && <div className="empty-chart">当前展示选择下没有可绘制的数据。</div>}
+      </div>
 
       <div className="table-section-heading">
         <div><p className="eyebrow">FILTERABLE TABLE</p><h3>完整计算结果</h3></div>
-        <p>点击列名可排序；筛选同时作用于图表和表格。</p>
+        <p>默认遵循上方基因与样本的点选顺序；点击列名可临时排序。</p>
       </div>
       <div className="table-wrap result-table-wrap">
         <table>
