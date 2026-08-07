@@ -4,7 +4,7 @@ import type { RawImportedRow, WellRecord } from "../../schemas/src";
 import { calculateRelativeQuantification } from "./calculations";
 import { buildQcWorkspaceState, calculateReplicateQc } from "./qc";
 import { summarizeMeltWells } from "./melt";
-import { setWellExclusion, updateWellFields } from "./audit";
+import { restoreWellsToBaseline, setWellExclusion, updateWellFields } from "./audit";
 
 const raw: RawImportedRow = {
   sourceId: "s", sourceFileName: "demo.tsv", sourceSheet: "Sheet1", sourceRowNumber: 2,
@@ -139,6 +139,21 @@ describe("audited edits", () => {
     const excluded = setWellExclusion(edited.wells, ["1"], true, "manual", "2026-08-04T00:01:00Z");
     expect(excluded.wells[0].userExcluded).toBe(true);
     expect(excluded.logs[0].action).toBe("exclude");
+  });
+
+  it("restores selected plate annotations and exclusion state to the imported baseline", () => {
+    const baseline = [well("1", "A1", "Imported-S1", "GAPDH", 20), well("2", "A2", "Imported-S2", "GENE1", 22)];
+    const edited = baseline.map((item) => ({ ...item }));
+    edited[0] = { ...edited[0], sampleName: "Edited", targetName: "GENE2", taskType: "Positive", userExcluded: true, exclusionReason: "manual" };
+    const restored = restoreWellsToBaseline(edited, baseline, ["1"], "恢复为导入值", "2026-08-07T12:00:00Z");
+    expect(restored.wells[0].sampleName).toBe("Imported-S1");
+    expect(restored.wells[0].targetName).toBe("GAPDH");
+    expect(restored.wells[0].taskType).toBe("Unknown");
+    expect(restored.wells[0].userExcluded).toBe(false);
+    expect(restored.wells[0].exclusionReason).toBe("");
+    expect(restored.wells[1]).toEqual(edited[1]);
+    expect(restored.editLogs).toHaveLength(3);
+    expect(restored.exclusionLogs).toHaveLength(1);
   });
 });
 

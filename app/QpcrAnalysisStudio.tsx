@@ -20,6 +20,7 @@ import {
 import {
   buildQcWorkspaceState,
   calculateRelativeQuantification,
+  restoreWellsToBaseline,
   setWellExclusion,
   updateWellFields,
 } from "@/packages/qpcr-core/src";
@@ -134,6 +135,7 @@ export default function QpcrAnalysisStudio() {
   const layoutInput = useRef<HTMLInputElement>(null);
   const [sources, setSources] = useState<ImportedSource[]>([]);
   const [dataset, setDataset] = useState<CanonicalDataset | null>(null);
+  const [importedWells, setImportedWells] = useState<WellRecord[]>([]);
   const [draftWells, setDraftWells] = useState<WellRecord[]>([]);
   const [appliedWells, setAppliedWells] = useState<WellRecord[]>([]);
   const [selected, setSelected] = useState<string[]>([]);
@@ -163,6 +165,16 @@ export default function QpcrAnalysisStudio() {
   const readiness = useMemo(() => assessImportReadiness(sources), [sources]);
   const pendingCount = pendingEditLogs.length + pendingExclusionLogs.length;
   const selectedWells = useMemo(() => draftWells.filter((well) => selected.includes(well.id)), [draftWells, selected]);
+  const importedWellById = useMemo(() => new Map(importedWells.map((well) => [well.id, well])), [importedWells]);
+  const selectedRestorableCount = useMemo(() => selectedWells.filter((well) => {
+    const baseline = importedWellById.get(well.id);
+    return baseline && (
+      well.sampleName !== baseline.sampleName ||
+      well.targetName !== baseline.targetName ||
+      well.taskType !== baseline.taskType ||
+      well.userExcluded !== baseline.userExcluded
+    );
+  }).length, [importedWellById, selectedWells]);
   const appliedQcState = useMemo(() => buildQcWorkspaceState(appliedWells), [appliedWells]);
   const draftQcState = useMemo(() => buildQcWorkspaceState(draftWells), [draftWells]);
   const qc = appliedQcState.replicateQc;
@@ -206,6 +218,7 @@ export default function QpcrAnalysisStudio() {
   function buildAndApply(sourceList: ImportedSource[]) {
     const built = buildCanonicalDataset(sourceList);
     setDataset(built);
+    setImportedWells(built.wells);
     setDraftWells(built.wells);
     setAppliedWells(built.wells);
     const firstDefined = built.wells.find((well) => well.sampleName || well.targetName);
@@ -240,6 +253,7 @@ export default function QpcrAnalysisStudio() {
       if (nextReadiness.canAnalyze) buildAndApply(nextSources);
       else {
         setDataset(null);
+        setImportedWells([]);
         setDraftWells([]);
         setAppliedWells([]);
         setNeedsRebuild(false);
@@ -287,6 +301,7 @@ export default function QpcrAnalysisStudio() {
     if (nextReadiness.canAnalyze) buildAndApply(nextSources);
     else {
       setDataset(null);
+      setImportedWells([]);
       setDraftWells([]);
       setAppliedWells([]);
       setNeedsRebuild(false);
@@ -301,6 +316,7 @@ export default function QpcrAnalysisStudio() {
   function clearProject() {
     setSources([]);
     setDataset(null);
+    setImportedWells([]);
     setDraftWells([]);
     setAppliedWells([]);
     setSelected([]);
@@ -413,6 +429,24 @@ export default function QpcrAnalysisStudio() {
     );
     setDraftWells(updated.wells);
     setPendingExclusionLogs((current) => [...current, ...updated.logs]);
+  }
+
+  function restoreSelectedWells() {
+    if (!selected.length) return;
+    const restored = restoreWellsToBaseline(
+      draftWells,
+      importedWells,
+      selected,
+      l("恢复为本次导入值", "Restore values from this import"),
+    );
+    setDraftWells(restored.wells);
+    setPendingEditLogs((current) => [...current, ...restored.editLogs]);
+    setPendingExclusionLogs((current) => [...current, ...restored.exclusionLogs]);
+    setBatchSample("");
+    setBatchTarget("");
+    setBatchTask("");
+    setPasteBlock("");
+    setExclusionReason("");
   }
 
   function recalculate() {
@@ -669,6 +703,7 @@ export default function QpcrAnalysisStudio() {
                       <button type="button" onClick={() => selectByField("sampleName")} disabled={!selectedWells.some((well) => well.sampleName)}>{l("选中同一样本", "Same sample")}</button>
                       <button type="button" onClick={() => selectByField("targetName")} disabled={!selectedWells.some((well) => well.targetName)}>{l("选中同一基因", "Same target")}</button>
                       <button type="button" onClick={() => setSelected([])} disabled={!selected.length}>{l("清空", "Clear")}</button>
+                      <button className="restore-import-button" type="button" onClick={restoreSelectedWells} disabled={!selectedRestorableCount} title={l("恢复 Sample、Target、反应角色和人工排除状态", "Restore Sample, Target, reaction role, and manual-exclusion state")}><span>↺</span>{l(`一键复原${selectedRestorableCount ? `（${selectedRestorableCount}）` : ""}`, `Restore imported${selectedRestorableCount ? ` (${selectedRestorableCount})` : ""}`)}</button>
                     </div>
                     <div className="selection-summary">
                       <div><span>Sample</span><b>{commonValue(selectedWells, "sampleName", l)}</b></div>
@@ -709,7 +744,7 @@ export default function QpcrAnalysisStudio() {
                       <button className="danger-button" type="button" onClick={() => setExclusion(true)} disabled={!selected.length}>{l("排除已选孔", "Exclude selected")}</button>
                       <button className="quiet-button bordered" type="button" onClick={() => setExclusion(false)} disabled={!selected.length}>{l("恢复", "Restore")}</button>
                     </div>
-                    <p className="microcopy">{l("所有修改先保留为草稿；点击右下角“应用修改并重算”后才进入结果和审计记录。", "Edits remain in draft until you select “Apply changes & recalculate”; then QC, results, and the audit trail are updated.")}</p>
+                    <p className="microcopy">{l("“一键复原”恢复本次导入后的值。所有修改先保留为草稿；点击右下角“应用修改并重算”后才进入结果和审计记录。", "“Restore imported” returns selected wells to values from this import. Edits remain in draft until you select “Apply changes & recalculate”; then QC, results, and the audit trail are updated.")}</p>
                   </aside>
                 </div>
               </div>

@@ -58,3 +58,42 @@ export function setWellExclusion(
   return { wells: next, logs };
 }
 
+export function restoreWellsToBaseline(
+  wells: WellRecord[],
+  baselineWells: WellRecord[],
+  wellIds: string[],
+  reason: string,
+  timestamp = new Date().toISOString(),
+): { wells: WellRecord[]; editLogs: EditLog[]; exclusionLogs: ExclusionLog[] } {
+  const baselineById = new Map(baselineWells.map((well) => [well.id, well]));
+  let nextWells = wells;
+  const editLogs: EditLog[] = [];
+  const exclusionLogs: ExclusionLog[] = [];
+
+  for (const wellId of wellIds) {
+    const baseline = baselineById.get(wellId);
+    if (!baseline) continue;
+    const fieldRestore = updateWellFields(nextWells, [wellId], {
+      sampleName: baseline.sampleName,
+      targetName: baseline.targetName,
+      taskType: baseline.taskType,
+    }, timestamp);
+    nextWells = fieldRestore.wells;
+    editLogs.push(...fieldRestore.logs);
+
+    const current = nextWells.find((well) => well.id === wellId);
+    if (current && current.userExcluded !== baseline.userExcluded) {
+      const exclusionRestore = setWellExclusion(
+        nextWells,
+        [wellId],
+        baseline.userExcluded,
+        reason,
+        timestamp,
+      );
+      nextWells = exclusionRestore.wells;
+      exclusionLogs.push(...exclusionRestore.logs);
+    }
+  }
+
+  return { wells: nextWells, editLogs, exclusionLogs };
+}
