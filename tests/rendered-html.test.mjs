@@ -22,5 +22,8 @@ test("server-renders the staged qPCR analysis application", async () => {
   assert.match(html, /板布局/);
   assert.match(html, /添加结果/);
   assert.match(html, /添加布局/);
+  assert.match(html, /拖入仪器结果文件/);
+  assert.match(html, /拖入板布局文件/);
+  assert.match(html, /XLSX · CSV · TXT · TSV/);
   assert.doesNotMatch(html, /codex-preview|Building your site|react-loading-skeleton/i);
 });

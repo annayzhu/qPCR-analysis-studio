@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import { basename } from "node:path";
 import { buildCanonicalDataset } from "../packages/importers/src/canonicalize";
 import { parseDelimitedText, parseWorkbookBytes } from "../packages/importers/src/workbook";
+import { buildQcWorkspaceState } from "../packages/qpcr-core/src/qc";
 
 const [cqPath, tmPath, meltPath, layoutPath] = process.argv.slice(2);
 if (!cqPath || !tmPath || !meltPath || !layoutPath) {
@@ -41,6 +42,10 @@ assert.equal(dataset.wells.find((well) => well.well === "A14")?.sampleName, "NC-
 assert.equal(dataset.wells.find((well) => well.well === "A14")?.targetName, "FBN2-2");
 assert.equal(dataset.wells.find((well) => well.well === "F1")?.cq, null);
 
+const qcWorkspace = buildQcWorkspaceState(dataset.wells);
+assert.ok([...qcWorkspace.specificWarnings.values()].every((warnings) => warnings.size > 0));
+assert.ok([...qcWorkspace.groupWarnings.values()].every((warnings) => warnings.size > 0));
+
 console.log(JSON.stringify({
   adapters: sources.slice(0, 3).map((source) => source.adapterId),
   selectedLayoutSheet: layoutTable?.sourceSheet,
@@ -49,6 +54,7 @@ console.log(JSON.stringify({
   definedReactions: dataset.wells.filter((well) => well.sampleName || well.targetName).length,
   secondaryTmPeaks: dataset.wells.filter((well) => well.tm2 !== null).length,
   unknownMeltGroups: dataset.wells.filter((well) => well.meltGroup === "Unknown").length,
+  replicateReviewGroups: qcWorkspace.replicateQc.filter((group) => group.warningCodes.length > 0).length,
+  wellLevelAlerts: qcWorkspace.specificWarnings.size,
   capturedPlateNotes: dataset.assumptions.filter((note) => note.startsWith("板布局备注")).length,
 }, null, 2));
-

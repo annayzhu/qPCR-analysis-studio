@@ -8,6 +8,7 @@ import type {
   EditLog,
   ExclusionLog,
   ImportedSource,
+  ReplicateQc,
   WellRecord,
 } from "@/packages/schemas/src";
 import { normalizeWell } from "@/packages/schemas/src";
@@ -17,8 +18,8 @@ import {
   parseBrowserFile,
 } from "@/packages/importers/src";
 import {
+  buildQcWorkspaceState,
   calculateRelativeQuantification,
-  calculateReplicateQc,
   setWellExclusion,
   updateWellFields,
 } from "@/packages/qpcr-core/src";
@@ -52,6 +53,79 @@ function commonValue(
   if (values.length === 1) return values[0];
   if (values.length > 1) return l("多个不同值（留空则保留）", "Multiple values (leave blank to keep)");
   return l("未设置", "Not set");
+}
+
+type Localizer = (zh: string, en: string) => string;
+
+function warningLabel(code: string, l: Localizer): string {
+  const labels: Record<string, [string, string]> = {
+    CQ_RANGE_HIGH: ["Cq 复孔极差偏高", "High replicate Cq range"],
+    TM_RANGE_HIGH: ["Tm1 复孔极差偏高", "High replicate Tm1 range"],
+    SECONDARY_MELT_PEAK: ["检测到第二熔解峰", "Secondary melt peak detected"],
+    EXCLUDED_OR_NON_DETECTED: ["排除或未检出", "Excluded or not detected"],
+    INVALID_CQ: ["Cq 值无效", "Invalid Cq value"],
+    INSTRUMENT_FLAG: ["仪器状态提醒", "Instrument status warning"],
+    UNKNOWN_MELT_GROUP: ["未知熔解分组", "Unknown melt group"],
+    TM_SHIFT_FROM_TARGET_MEDIAN: ["Tm 偏离目标中位数", "Tm shifted from target median"],
+  };
+  const label = labels[code];
+  return label ? l(...label) : code;
+}
+
+function warningMessage(code: string, well: WellRecord, group: ReplicateQc | undefined, l: Localizer): string {
+  const importedFlag = well.qcFlags.find((flag) => flag.code === code);
+  if (code === "CQ_RANGE_HIGH") {
+    const suspect = group?.suspectWell === well.well;
+    return l(
+      `该复孔组 Cq 极差为 ${formatNumber(group?.cqRange ?? null, 3)}，超过 0.5${suspect ? "；此孔距离组内中位数最远" : ""}。`,
+      `This replicate group has a Cq range of ${formatNumber(group?.cqRange ?? null, 3)}, above 0.5${suspect ? "; this well is farthest from the group median" : ""}.`,
+    );
+  }
+  if (code === "TM_RANGE_HIGH") {
+    return l(
+      `该复孔组 Tm1 极差为 ${formatNumber(group?.tm1Range ?? null, 3)}，超过 0.5。`,
+      `This replicate group has a Tm1 range of ${formatNumber(group?.tm1Range ?? null, 3)}, above 0.5.`,
+    );
+  }
+  if (code === "SECONDARY_MELT_PEAK") {
+    if (well.tm2 !== null) {
+      return l(`该孔检测到第二熔解峰，Tm2 = ${formatNumber(well.tm2, 2)}。`, `A secondary melt peak was detected in this well (Tm2 = ${formatNumber(well.tm2, 2)}).`);
+    }
+    return l(
+      `该复孔组有 ${group?.secondaryPeakCount ?? 1} 个孔检测到第二熔解峰；当前选中孔不是第二峰所在孔。`,
+      `${group?.secondaryPeakCount ?? 1} well(s) in this replicate group have a secondary melt peak; the selected well is not one of them.`,
+    );
+  }
+  if (code === "EXCLUDED_OR_NON_DETECTED") {
+    const zhReasons = [
+      well.instrumentOmit ? "仪器标记排除" : "",
+      well.userExcluded ? `人工排除${well.exclusionReason ? `：${well.exclusionReason}` : ""}` : "",
+      well.cqStatus === "not-detected" ? `Cq 未检出${well.cqReason ? `：${well.cqReason}` : ""}` : "",
+    ].filter(Boolean);
+    const enReasons = [
+      well.instrumentOmit ? "excluded by the instrument" : "",
+      well.userExcluded ? `excluded by the user${well.exclusionReason ? `: ${well.exclusionReason}` : ""}` : "",
+      well.cqStatus === "not-detected" ? "Cq not detected" : "",
+    ].filter(Boolean);
+    return l(zhReasons.join("；") || "该复孔组包含排除或未检出的反应。", enReasons.join("; ") || "This replicate group contains an excluded or non-detected reaction.");
+  }
+  if (code === "INVALID_CQ") {
+    const rawValue = well.cqReason.split(":").slice(1).join(":").trim();
+    return l(importedFlag?.message || well.cqReason || "导入的 Cq 值无效。", `The imported Cq value is invalid${rawValue ? `: ${rawValue}` : "."}`);
+  }
+  if (code === "INSTRUMENT_FLAG") {
+    return l(importedFlag?.message || `仪器状态: ${well.instrumentFlag || "需复核"}`, `Instrument status: ${well.instrumentFlag || "review required"}.`);
+  }
+  return l(importedFlag?.message || code, importedFlag ? `${warningLabel(code, l)}.` : code);
+}
+
+function warningSource(code: string, well: WellRecord, l: Localizer): string {
+  const source = well.qcFlags.find((flag) => flag.code === code)?.source;
+  if (source === "instrument" || well.instrumentOmit) return l("仪器", "Instrument");
+  if (source === "import") return l("导入检查", "Import check");
+  if (source === "user" || well.userExcluded) return l("人工操作", "User action");
+  if (source === "melt" || code.includes("MELT") || code.startsWith("TM_")) return l("熔解分析", "Melt analysis");
+  return l("复孔 QC", "Replicate QC");
 }
 
 export default function QpcrAnalysisStudio() {
@@ -89,8 +163,10 @@ export default function QpcrAnalysisStudio() {
   const readiness = useMemo(() => assessImportReadiness(sources), [sources]);
   const pendingCount = pendingEditLogs.length + pendingExclusionLogs.length;
   const selectedWells = useMemo(() => draftWells.filter((well) => selected.includes(well.id)), [draftWells, selected]);
-  const qc = useMemo(() => calculateReplicateQc(appliedWells), [appliedWells]);
-  const draftQc = useMemo(() => calculateReplicateQc(draftWells), [draftWells]);
+  const appliedQcState = useMemo(() => buildQcWorkspaceState(appliedWells), [appliedWells]);
+  const draftQcState = useMemo(() => buildQcWorkspaceState(draftWells), [draftWells]);
+  const qc = appliedQcState.replicateQc;
+  const draftQc = draftQcState.replicateQc;
   const targets = useMemo(
     () => [...new Set(appliedWells.map((well) => well.targetName).filter(Boolean))].sort(),
     [appliedWells],
@@ -112,47 +188,6 @@ export default function QpcrAnalysisStudio() {
     };
     return calculateRelativeQuantification(appliedWells, settings);
   }, [appliedWells, calibrator, referenceTargets]);
-  const plateQcState = useMemo(() => {
-    const groupWarnings = new Map<string, Set<string>>();
-    const specificWarnings = new Map<string, Set<string>>();
-    const wellByName = new Map(draftWells.map((well) => [well.well, well]));
-    const addWarning = (map: Map<string, Set<string>>, wellName: string, warning: string) => {
-      const warnings = map.get(wellName) ?? new Set<string>();
-      warnings.add(warning);
-      map.set(wellName, warnings);
-    };
-
-    for (const row of draftQc.filter((item) => item.warningCodes.length > 0)) {
-      for (const wellName of row.wells) {
-        for (const warning of row.warningCodes) addWarning(groupWarnings, wellName, warning);
-      }
-      if (row.suspectWell && row.warningCodes.includes("CQ_RANGE_HIGH")) {
-        addWarning(specificWarnings, row.suspectWell, "CQ_RANGE_HIGH");
-      }
-      if (row.warningCodes.includes("SECONDARY_MELT_PEAK")) {
-        for (const wellName of row.wells) {
-          if (wellByName.get(wellName)?.tm2 !== null) addWarning(specificWarnings, wellName, "SECONDARY_MELT_PEAK");
-        }
-      }
-      if (row.warningCodes.includes("EXCLUDED_OR_NON_DETECTED")) {
-        for (const wellName of row.wells) {
-          const well = wellByName.get(wellName);
-          if (well && (well.instrumentOmit || well.userExcluded || well.cqStatus === "not-detected")) {
-            addWarning(specificWarnings, wellName, "EXCLUDED_OR_NON_DETECTED");
-          }
-        }
-      }
-    }
-
-    for (const well of draftWells) {
-      for (const warning of well.qcFlags) addWarning(specificWarnings, well.well, warning.code);
-      if (well.tm2 !== null) addWarning(specificWarnings, well.well, "SECONDARY_MELT_PEAK");
-      if (well.instrumentOmit || well.userExcluded || well.cqStatus === "not-detected") {
-        addWarning(specificWarnings, well.well, "EXCLUDED_OR_NON_DETECTED");
-      }
-    }
-    return { groupWarnings, specificWarnings };
-  }, [draftQc, draftWells]);
   const filteredQc = useMemo(() => {
     const query = qcSearch.trim().toLocaleLowerCase();
     return qc.filter((row) => (!qcIssueOnly || row.warningCodes.length > 0)
@@ -420,6 +455,26 @@ export default function QpcrAnalysisStudio() {
   const hasMeltAnalysis = meltWellCount > 0;
   const namedReactionCount = draftWells.filter((well) => well.sampleName || well.targetName).length;
   const qcIssueCount = qc.filter((row) => row.warningCodes.length).length;
+  const qcWellIssueCount = appliedQcState.specificWarnings.size;
+  const selectedQcNotices = selectedWells.flatMap((well) => {
+    const specificCodes = draftQcState.specificWarnings.get(well.well) ?? new Set<string>();
+    const groupCodes = draftQcState.groupWarnings.get(well.well) ?? new Set<string>();
+    return [...new Set([...specificCodes, ...groupCodes])].map((code) => {
+      const group = draftQc.find((row) => row.wells.includes(well.well) && row.warningCodes.includes(code));
+      const isSpecific = specificCodes.has(code);
+      const isGroup = groupCodes.has(code);
+      return {
+        code,
+        well,
+        group,
+        scope: isSpecific && isGroup
+          ? l("孔级 + 复孔组", "Well + replicate group")
+          : isSpecific
+            ? l("孔级", "Well level")
+            : l("复孔组", "Replicate group"),
+      };
+    });
+  });
   const selectedDisplayTargets = displayTargets.filter((target) => !referenceTargets.includes(target));
   const viewLabels: Record<WorkspaceView, [string, string]> = {
     overview: [l("概览与 QC", "Overview & QC"), "Overview + QC"],
@@ -465,6 +520,7 @@ export default function QpcrAnalysisStudio() {
             hasDataset={Boolean(dataset && !needsRebuild)}
             onPickResults={() => resultInput.current?.click()}
             onPickLayout={() => layoutInput.current?.click()}
+            onImportFiles={importFiles}
             onRemoveSource={removeSource}
             onUpdateSelectedTable={updateSelectedTable}
             onUpdateMapping={updateMapping}
@@ -509,15 +565,15 @@ export default function QpcrAnalysisStudio() {
               <div className="overview-layout">
                 <div className="section-heading overview-heading">
                   <div><p className="eyebrow">OVERVIEW + QUALITY CONTROL</p><h2>{l("概览与复孔质控", "Overview & replicate QC")}</h2><p className="section-summary">{l(
-                    `${dataset.plate.plateFormat} 孔板中定义 ${namedReactionCount} 个反应；当前 ${qcIssueCount} 个复孔组需要复核${secondaryPeakCount ? `，${secondaryPeakCount} 个孔检测到第二熔解峰` : ""}。`,
-                    `${namedReactionCount} reactions are defined on the ${dataset.plate.plateFormat}-well plate; ${qcIssueCount} replicate group(s) require review${secondaryPeakCount ? `, with secondary melt peaks in ${secondaryPeakCount} well(s)` : ""}.`,
+                    `${dataset.plate.plateFormat} 孔板中定义 ${namedReactionCount} 个反应；当前 ${qcIssueCount} 个复孔组需要复核，${qcWellIssueCount} 个孔有孔级提醒${secondaryPeakCount ? `，其中 ${secondaryPeakCount} 个孔检测到第二熔解峰` : ""}。`,
+                    `${namedReactionCount} reactions are defined on the ${dataset.plate.plateFormat}-well plate; ${qcIssueCount} replicate group(s) require review and ${qcWellIssueCount} well(s) have well-level alerts${secondaryPeakCount ? `, including secondary melt peaks in ${secondaryPeakCount} well(s)` : ""}.`,
                   )}</p></div>
                   <button className="quiet-button bordered" type="button" onClick={() => setDataManagerOpen(true)}>{l("管理导入文件", "Manage imported files")}</button>
                 </div>
                 <div className="overview-qc-grid">
                   <article className="qc-workbench">
                     <div className="card-heading compact-card-heading">
-                      <div><p className="eyebrow">REPLICATE QC</p><h3>{l("技术复孔", "Technical replicates")}</h3></div>
+                      <div><p className="eyebrow">REPLICATE QC</p><h3>{l("技术复孔", "Technical replicates")}</h3><div className="qc-scope-counts"><span>{l(`复孔组 ${qcIssueCount}`, `${qcIssueCount} replicate group(s)`)}</span><span>{l(`孔级 ${qcWellIssueCount}`, `${qcWellIssueCount} well alert(s)`)}</span></div></div>
                       <details className="inline-rules"><summary>{l("规则：Cq/Tm 极差 > 0.5", "Rule: Cq/Tm range > 0.5")}</summary><p>{l("仅提示，不自动排除；单孔不计算 SD/CV；Tm 偏移需结合曲线和实验设计人工判断。", "Warnings do not automatically exclude wells. SD/CV are not calculated for a single well. Interpret Tm shifts with the curve and experimental design.")}</p></details>
                     </div>
                     <div className="table-filterbar compact-filterbar">
@@ -561,7 +617,7 @@ export default function QpcrAnalysisStudio() {
               <div className="plate-workspace">
                 <div className="section-heading plate-heading">
                   <div><p className="eyebrow">PLATE WORKSPACE</p><h2>{l(`${dataset.plate.plateFormat} 孔板 · ${namedReactionCount} 个已定义反应`, `${dataset.plate.plateFormat}-well plate · ${namedReactionCount} defined reactions`)}</h2></div>
-                  <div className="legend"><span><i className="dot selected-dot" />{l("已选", "Selected")}</span><span><i className="dot group-warning-dot" />{l("复孔组提示", "Replicate-group warning")}</span><span><i className="dot warning-dot" />{l("疑似异常孔", "Suspect well")}</span><span><i className="dot excluded-dot" />{l("已排除", "Excluded")}</span></div>
+                  <div className="legend"><span><i className="dot selected-dot" />{l("已选", "Selected")}</span><span><i className="dot group-warning-dot" />{l("复孔组提示", "Replicate-group warning")}</span><span><i className="dot warning-dot" />{l("孔级提示", "Well-level alert")}</span><span><i className="dot excluded-dot" />{l("已排除", "Excluded")}</span></div>
                 </div>
                 {dataset.warnings.map((warning) => <div className="notice" key={warning}>{localizeRuntimeMessage(warning, language)}</div>)}
                 {pendingCount > 0 && <div className="pending-recalculation-notice"><span>{l("板布局草稿已改变", "Plate draft changed")}</span><p>{l("概览和结果暂时锁定；应用修改并重算后，三处会基于同一份孔数据同步更新。", "Overview and results are temporarily locked. Apply changes and recalculate to synchronize all three views from the same well data.")}</p><button type="button" onClick={recalculate}>{l("立即应用并重算", "Apply & recalculate")}</button></div>}
@@ -581,12 +637,12 @@ export default function QpcrAnalysisStudio() {
                           const wellName = `${row}${column}`;
                           const well = draftWells.find((item) => item.well === wellName);
                           const isSelected = Boolean(well && selected.includes(well.id));
-                          const hasGroupWarning = Boolean(well && plateQcState.groupWarnings.has(well.well));
-                          const hasSpecificWarning = Boolean(well && plateQcState.specificWarnings.has(well.well));
+                          const hasGroupWarning = Boolean(well && draftQcState.groupWarnings.has(well.well));
+                          const hasSpecificWarning = Boolean(well && draftQcState.specificWarnings.has(well.well));
                           const warningText = well ? [...new Set([
-                            ...(plateQcState.specificWarnings.get(well.well) ?? []),
-                            ...(plateQcState.groupWarnings.get(well.well) ?? []),
-                          ])].join(", ") : "";
+                            ...(draftQcState.specificWarnings.get(well.well) ?? []),
+                            ...(draftQcState.groupWarnings.get(well.well) ?? []),
+                          ])].map((code) => warningLabel(code, l)).join(", ") : "";
                           return (
                             <button
                               type="button"
@@ -619,6 +675,18 @@ export default function QpcrAnalysisStudio() {
                       <div><span>Target</span><b>{commonValue(selectedWells, "targetName", l)}</b></div>
                       <div><span>Detected Cq</span><b>{selectedWells.filter((well) => well.cqStatus === "detected").length} / {selectedWells.length}</b></div>
                     </div>
+                    {selectedWells.length > 0 && (
+                      <section className={selectedQcNotices.length ? "selection-qc-alerts has-alerts" : "selection-qc-alerts is-clear"} aria-live="polite">
+                        <div className="selection-qc-heading"><span>QC</span><b>{selectedQcNotices.length ? l(`${selectedQcNotices.length} 条提示`, `${selectedQcNotices.length} alert(s)`) : l("无提示", "No alerts")}</b></div>
+                        {selectedQcNotices.length ? <div className="selection-qc-list">{selectedQcNotices.map(({ code, well, group, scope }) => (
+                          <article key={`${well.id}-${code}`}>
+                            <div><strong>{well.well} · {warningLabel(code, l)}</strong><span>{scope} · {warningSource(code, well, l)}</span></div>
+                            <p>{warningMessage(code, well, group, l)}</p>
+                            {group && <small>{l(`关联复孔：${group.wells.join(", ")}`, `Replicate group: ${group.wells.join(", ")}`)}</small>}
+                          </article>
+                        ))}</div> : <p>{l("当前选中孔没有黄色孔级提示或复孔组提醒。", "The selected wells have no yellow well-level alerts or replicate-group warnings.")}</p>}
+                      </section>
+                    )}
                     <div className="form-stack batch-form">
                       <label>{l("统一修改 Sample Name", "Set Sample Name for selection")}<input value={batchSample} placeholder={commonValue(selectedWells, "sampleName", l)} onChange={(event) => setBatchSample(event.target.value)} /></label>
                       <label>{l("统一修改 Target Name", "Set Target Name for selection")}<input value={batchTarget} placeholder={commonValue(selectedWells, "targetName", l)} onChange={(event) => setBatchTarget(event.target.value)} /></label>

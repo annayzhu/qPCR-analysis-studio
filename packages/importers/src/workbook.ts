@@ -123,5 +123,5 @@ export function parseDelimitedText(
 export async function parseBrowserFile(file: File): Promise<ImportedSource> {
   if (/\.xlsx$/i.test(file.name)) return parseWorkbookBytes(await file.arrayBuffer(), file.name);
   if (/\.(csv|txt|tsv)$/i.test(file.name)) return parseDelimitedText(await file.text(), file.name);
-  throw new Error(`暂不支持 ${file.name}；请选择 XLSX、CSV 或 TXT。`);
+  throw new Error(`暂不支持 ${file.name}；请选择 XLSX、CSV、TXT 或 TSV。`);
 }

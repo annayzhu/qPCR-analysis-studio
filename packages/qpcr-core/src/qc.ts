@@ -32,6 +32,29 @@ export interface ReplicateQcOptions {
   tmRangeWarning?: number;
 }
 
+export interface QcWorkspaceState {
+  replicateQc: ReplicateQc[];
+  groupWarnings: Map<string, Set<string>>;
+  specificWarnings: Map<string, Set<string>>;
+}
+
+function isQcRelevantWell(well: WellRecord): boolean {
+  return Boolean(
+    well.sampleName ||
+    well.targetName ||
+    well.cq !== null ||
+    well.cqStatus === "invalid" ||
+    well.tm1 !== null ||
+    well.tm2 !== null ||
+    well.meltGroup ||
+    well.meltScore !== null ||
+    well.meltResolution !== null ||
+    well.instrumentOmit ||
+    well.userExcluded ||
+    well.qcFlags.some((flag) => flag.severity !== "info")
+  );
+}
+
 export function calculateReplicateQc(
   wells: WellRecord[],
   options: ReplicateQcOptions = {},
@@ -55,12 +78,15 @@ export function calculateReplicateQc(
     const cqRange = range(cqs);
     const tm1s = active.map((well) => well.tm1).filter((value): value is number => value !== null);
     const tm1Range = range(tm1s);
-    const warnings: string[] = [];
+    const warnings = new Set<string>();
     const hasQuantificationData = group.some((well) => well.cq !== null || well.cqStatus === "not-detected");
-    if (active.length < group.length || (hasQuantificationData && valid.length < active.length)) warnings.push("EXCLUDED_OR_NON_DETECTED");
-    if (cqRange !== null && cqRange > cqRangeWarning) warnings.push("CQ_RANGE_HIGH");
-    if (tm1Range !== null && tm1Range > tmRangeWarning) warnings.push("TM_RANGE_HIGH");
-    if (group.some((well) => well.tm2 !== null)) warnings.push("SECONDARY_MELT_PEAK");
+    if (active.length < group.length || (hasQuantificationData && valid.length < active.length)) warnings.add("EXCLUDED_OR_NON_DETECTED");
+    if (cqRange !== null && cqRange > cqRangeWarning) warnings.add("CQ_RANGE_HIGH");
+    if (tm1Range !== null && tm1Range > tmRangeWarning) warnings.add("TM_RANGE_HIGH");
+    if (group.some((well) => well.tm2 !== null)) warnings.add("SECONDARY_MELT_PEAK");
+    for (const flag of group.flatMap((well) => well.qcFlags)) {
+      if (flag.severity !== "info") warnings.add(flag.code);
+    }
     const cqMedian = cqs.length ? median(cqs) : null;
     const suspectWell =
       cqs.length >= 3 && cqMedian !== null
@@ -88,8 +114,72 @@ export function calculateReplicateQc(
       tm1Range,
       secondaryPeakCount: group.filter((well) => well.tm2 !== null).length,
       meltGroups: [...new Set(group.map((well) => well.meltGroup).filter(Boolean))],
-      warningCodes: warnings,
+      warningCodes: [...warnings],
       suspectWell,
     };
   });
+}
+
+/**
+ * Builds the shared QC state used by both the overview and plate workspace.
+ * Group outlines and well-level dots are intentionally separate, but every
+ * dot is backed by a warning code that can be explained in the selection panel.
+ */
+export function buildQcWorkspaceState(
+  wells: WellRecord[],
+  options: ReplicateQcOptions = {},
+): QcWorkspaceState {
+  const replicateQc = calculateReplicateQc(wells, options);
+  const groupLevelWarnings = new Set([
+    "CQ_RANGE_HIGH",
+    "TM_RANGE_HIGH",
+    "SECONDARY_MELT_PEAK",
+    "EXCLUDED_OR_NON_DETECTED",
+  ]);
+  const groupWarnings = new Map<string, Set<string>>();
+  const specificWarnings = new Map<string, Set<string>>();
+  const wellByName = new Map(wells.map((well) => [well.well, well]));
+  const addWarning = (map: Map<string, Set<string>>, wellName: string, warning: string) => {
+    const warnings = map.get(wellName) ?? new Set<string>();
+    warnings.add(warning);
+    map.set(wellName, warnings);
+  };
+
+  for (const row of replicateQc.filter((item) => item.warningCodes.length > 0)) {
+    for (const wellName of row.wells) {
+      for (const warning of row.warningCodes) {
+        if (groupLevelWarnings.has(warning)) {
+          addWarning(groupWarnings, wellName, warning);
+        }
+      }
+    }
+    if (row.suspectWell && row.warningCodes.includes("CQ_RANGE_HIGH")) {
+      addWarning(specificWarnings, row.suspectWell, "CQ_RANGE_HIGH");
+    }
+    if (row.warningCodes.includes("SECONDARY_MELT_PEAK")) {
+      for (const wellName of row.wells) {
+        if (wellByName.get(wellName)?.tm2 !== null) addWarning(specificWarnings, wellName, "SECONDARY_MELT_PEAK");
+      }
+    }
+    if (row.warningCodes.includes("EXCLUDED_OR_NON_DETECTED")) {
+      for (const wellName of row.wells) {
+        const well = wellByName.get(wellName);
+        if (well && (well.instrumentOmit || well.userExcluded || well.cqStatus === "not-detected")) {
+          addWarning(specificWarnings, wellName, "EXCLUDED_OR_NON_DETECTED");
+        }
+      }
+    }
+  }
+
+  for (const well of wells.filter(isQcRelevantWell)) {
+    for (const flag of well.qcFlags) {
+      if (flag.severity !== "info") addWarning(specificWarnings, well.well, flag.code);
+    }
+    if (well.tm2 !== null) addWarning(specificWarnings, well.well, "SECONDARY_MELT_PEAK");
+    if (well.instrumentOmit || well.userExcluded || well.cqStatus === "not-detected") {
+      addWarning(specificWarnings, well.well, "EXCLUDED_OR_NON_DETECTED");
+    }
+  }
+
+  return { replicateQc, groupWarnings, specificWarnings };
 }

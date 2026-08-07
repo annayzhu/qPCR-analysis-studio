@@ -80,7 +80,7 @@ export function localizeRuntimeMessage(message: string, language: Language): str
   if (mappingConflict) return `${mappingConflict[1]}: ${mappingConflict[2]} field mapping conflict(s) require confirmation.`;
   const plateNote = message.match(/^板布局备注（(.+)）: (.+)$/);
   if (plateNote) return `Plate layout note (${plateNote[1]}): ${plateNote[2]}`;
-  const unsupported = message.match(/^暂不支持 (.+)；请选择 XLSX、CSV 或 TXT。$/);
-  if (unsupported) return `${unsupported[1]} is not supported. Choose an XLSX, CSV, or TXT file.`;
+  const unsupported = message.match(/^暂不支持 (.+)；请选择 XLSX、CSV、TXT 或 TSV。$/);
+  if (unsupported) return `${unsupported[1]} is not supported. Choose an XLSX, CSV, TXT, or TSV file.`;
   return message;
 }

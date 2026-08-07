@@ -1,5 +1,6 @@
 "use client";
 
+import { useRef, useState, type DragEvent } from "react";
 import type { CanonicalField, ImportedSource } from "@/packages/schemas/src";
 import {
   CANONICAL_FIELD_LABELS,
@@ -27,6 +28,73 @@ function roleLabel(role: ImportSourceRole, l: (zh: string, en: string) => string
   }[role];
 }
 
+function FileDropzone({
+  kind,
+  loading,
+  onPick,
+  onFiles,
+}: {
+  kind: "results" | "layout";
+  loading: boolean;
+  onPick: () => void;
+  onFiles: (files: FileList | File[]) => void | Promise<void>;
+}) {
+  const { l } = useLanguage();
+  const [dragActive, setDragActive] = useState(false);
+  const dragDepth = useRef(0);
+  const hasFiles = (event: DragEvent<HTMLButtonElement>) => Array.from(event.dataTransfer.types).includes("Files");
+
+  function handleDragEnter(event: DragEvent<HTMLButtonElement>) {
+    if (!hasFiles(event)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    dragDepth.current += 1;
+    setDragActive(true);
+  }
+
+  function handleDragOver(event: DragEvent<HTMLButtonElement>) {
+    if (!hasFiles(event)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    event.dataTransfer.dropEffect = "copy";
+  }
+
+  function handleDragLeave(event: DragEvent<HTMLButtonElement>) {
+    event.preventDefault();
+    event.stopPropagation();
+    dragDepth.current = Math.max(0, dragDepth.current - 1);
+    if (dragDepth.current === 0) setDragActive(false);
+  }
+
+  function handleDrop(event: DragEvent<HTMLButtonElement>) {
+    if (!hasFiles(event)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    dragDepth.current = 0;
+    setDragActive(false);
+    if (!loading && event.dataTransfer.files.length) void onFiles(event.dataTransfer.files);
+  }
+
+  const isResults = kind === "results";
+  return (
+    <button
+      className={`file-dropzone ${dragActive ? "is-dragging" : ""} ${loading ? "is-loading" : ""}`}
+      type="button"
+      aria-busy={loading}
+      aria-disabled={loading}
+      onClick={() => { if (!loading) onPick(); }}
+      onDragEnter={handleDragEnter}
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
+    >
+      <span className="dropzone-icon" aria-hidden="true">↓</span>
+      <span><b>{isResults ? l("拖入仪器结果文件", "Drop instrument result files") : l("拖入板布局文件", "Drop a plate-layout file")}</b><small>{l("拖到这里，或点击选择", "Drop here, or click to browse")}</small></span>
+      <em>XLSX · CSV · TXT · TSV</em>
+    </button>
+  );
+}
+
 interface ImportManagerProps {
   sources: ImportedSource[];
   readiness: ImportReadiness;
@@ -35,6 +103,7 @@ interface ImportManagerProps {
   hasDataset: boolean;
   onPickResults: () => void;
   onPickLayout: () => void;
+  onImportFiles: (files: FileList | File[]) => void | Promise<void>;
   onRemoveSource: (sourceId: string) => void;
   onUpdateSelectedTable: (sourceId: string, tableId: string) => void;
   onUpdateMapping: (sourceId: string, sourceColumn: string, canonicalField: CanonicalField | null) => void;
@@ -123,6 +192,7 @@ export default function ImportManager({
   hasDataset,
   onPickResults,
   onPickLayout,
+  onImportFiles,
   onRemoveSource,
   onUpdateSelectedTable,
   onUpdateMapping,
@@ -157,9 +227,10 @@ export default function ImportManager({
               <div className="stage-title-line"><h3>{l("仪器结果", "Instrument results")}</h3><span className="stage-kicker">{l("必需", "Required")}</span></div>
               <p>{l("可连续添加 Cq/Ct/Cp、Tm 或熔解分组文件；任一分析类型具备板信息后即可进入对应结果页。", "Add multiple Cq/Ct/Cp, Tm, or melt-group files. Each analysis becomes available when its data include plate information.")}</p>
             </div>
-            <button className="primary-button" type="button" onClick={onPickResults}>+ {l("添加结果", "Add results")}</button>
+            <button className="primary-button" type="button" disabled={loading} onClick={onPickResults}>+ {l("添加结果", "Add results")}</button>
           </div>
           <div className="stage-files">
+            <FileDropzone kind="results" loading={loading} onPick={onPickResults} onFiles={onImportFiles} />
             {resultSources.length === 0 ? <div className="stage-empty">{l("尚未添加仪器结果", "No instrument results added")}</div> : resultSources.map((source) => (
               <SourceCard
                 key={source.id}
@@ -179,9 +250,10 @@ export default function ImportManager({
               <div className="stage-title-line"><h3>{l("板布局", "Plate layout")}</h3><span className="stage-kicker">{readiness.layoutRequired ? l("当前需要", "Required now") : l("按需", "If needed")}</span></div>
               <p>{readiness.resultIncludesPlateLayout ? l("结果已带 Sample/Target，可跳过；如需纠正错位，仍可追加修正版。", "Sample/Target information is already present. Skip this step or add a corrected layout to fix offsets.") : l("结果缺少完整样本和基因信息时，导入修正后的布局表。", "Import the corrected layout when result files lack complete sample and target information.")}</p>
             </div>
-            <button className="secondary-button" type="button" onClick={onPickLayout}>+ {l("添加布局", "Add layout")}</button>
+            <button className="secondary-button" type="button" disabled={loading} onClick={onPickLayout}>+ {l("添加布局", "Add layout")}</button>
           </div>
           <div className="stage-files">
+            <FileDropzone kind="layout" loading={loading} onPick={onPickLayout} onFiles={onImportFiles} />
             {layoutSources.length === 0 ? (
               <div className="stage-empty">{readiness.resultIncludesPlateLayout ? l("无需单独导入", "No separate layout required") : l("尚未添加板布局", "No plate layout added")}</div>
             ) : layoutSources.map((source) => (

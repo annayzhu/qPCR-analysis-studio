@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { buildLogRatioAxis, mapRatioToY } from "./charting";
 import type { RawImportedRow, WellRecord } from "../../schemas/src";
 import { calculateRelativeQuantification } from "./calculations";
-import { calculateReplicateQc } from "./qc";
+import { buildQcWorkspaceState, calculateReplicateQc } from "./qc";
 import { summarizeMeltWells } from "./melt";
 import { setWellExclusion, updateWellFields } from "./audit";
 
@@ -32,6 +32,60 @@ describe("replicate QC", () => {
     const [singleton] = calculateReplicateQc([well("4", "B1", "S2", "G1", 23)]);
     expect(singleton.sdCq).toBeNull();
     expect(singleton.linearQuantityCvPercent).toBeNull();
+
+    const workspace = buildQcWorkspaceState(wells);
+    expect(workspace.groupWarnings.get("A1")).toContain("CQ_RANGE_HIGH");
+    expect(workspace.groupWarnings.get("A2")).toContain("CQ_RANGE_HIGH");
+    expect(workspace.groupWarnings.get("A3")).toContain("CQ_RANGE_HIGH");
+    expect(workspace.specificWarnings.has("A1")).toBe(false);
+    expect(workspace.specificWarnings.get("A3")).toContain("CQ_RANGE_HIGH");
+  });
+
+  it("keeps overview and plate warnings synchronized for imported well flags", () => {
+    const instrumentFlagged = well("1", "A1", "S1", "G1", 20);
+    instrumentFlagged.instrumentFlag = "Review";
+    instrumentFlagged.qcFlags.push({
+      code: "INSTRUMENT_FLAG",
+      severity: "warning",
+      message: "仪器状态: Review",
+      source: "instrument",
+    });
+    const invalid = well("2", "A2", "S2", "G1", null);
+    invalid.cqStatus = "invalid";
+    invalid.cqReason = "无效 Cq: bad";
+    invalid.qcFlags.push({ code: "INVALID_CQ", severity: "error", message: invalid.cqReason, source: "import" });
+
+    const workspace = buildQcWorkspaceState([instrumentFlagged, invalid]);
+    expect(workspace.replicateQc.find((row) => row.sampleName === "S1")?.warningCodes).toContain("INSTRUMENT_FLAG");
+    expect(workspace.replicateQc.find((row) => row.sampleName === "S2")?.warningCodes).toContain("INVALID_CQ");
+    expect(workspace.specificWarnings.get("A1")).toContain("INSTRUMENT_FLAG");
+    expect(workspace.specificWarnings.get("A2")).toContain("INVALID_CQ");
+    expect(workspace.groupWarnings.has("A1")).toBe(false);
+    expect(workspace.groupWarnings.has("A2")).toBe(false);
+    expect([...workspace.specificWarnings.values()].every((warnings) => warnings.size > 0)).toBe(true);
+  });
+
+  it("does not mark an intentional empty non-detected well as a yellow QC alert", () => {
+    const empty = well("1", "P24", "", "", null);
+    empty.cqStatus = "not-detected";
+    empty.cqReason = "Roche 480 导出的 0 值按未检出处理";
+    const workspace = buildQcWorkspaceState([empty]);
+    expect(workspace.replicateQc).toHaveLength(0);
+    expect(workspace.specificWarnings.has("P24")).toBe(false);
+  });
+
+  it("keeps an unnamed instrument warning visible as a well-level alert", () => {
+    const unnamed = well("1", "P23", "", "", null);
+    unnamed.instrumentFlag = "Review";
+    unnamed.qcFlags.push({
+      code: "INSTRUMENT_FLAG",
+      severity: "warning",
+      message: "仪器状态: Review",
+      source: "instrument",
+    });
+    const workspace = buildQcWorkspaceState([unnamed]);
+    expect(workspace.replicateQc).toHaveLength(0);
+    expect(workspace.specificWarnings.get("P23")).toContain("INSTRUMENT_FLAG");
   });
 });
 
