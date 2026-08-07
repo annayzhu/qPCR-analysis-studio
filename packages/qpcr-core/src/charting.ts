@@ -5,6 +5,39 @@ export interface LogRatioAxis {
   tickValues: number[];
 }
 
+function chartLabelUnit(character: string): number {
+  return /[^\u0000-\u00ff]/.test(character) ? 2 : 1;
+}
+
+export function chartLabelVisualUnits(value: string): number {
+  return Array.from(value).reduce((total, character) => total + chartLabelUnit(character), 0);
+}
+
+/**
+ * Wraps a sample identifier without abbreviating or discarding any characters.
+ * CJK characters count as two visual units so mixed Chinese/Latin labels remain
+ * readable in exported SVG and PNG figures.
+ */
+export function wrapChartLabel(value: string, maxVisualUnits = 18): string[] {
+  const lines: string[] = [];
+  let current = "";
+  let currentUnits = 0;
+
+  for (const character of Array.from(value)) {
+    const units = chartLabelUnit(character);
+    if (current && currentUnits + units > maxVisualUnits) {
+      lines.push(current);
+      current = character;
+      currentUnits = units;
+    } else {
+      current += character;
+      currentUnits += units;
+    }
+  }
+  if (current || lines.length === 0) lines.push(current);
+  return lines;
+}
+
 /**
  * Builds a base-2 ratio axis for fold-change style qPCR plots.
  * The reference value 1 is always present, while the domain expands to contain

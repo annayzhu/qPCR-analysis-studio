@@ -406,7 +406,7 @@ tbody tr:hover { background: #f8fbfa; }
 .chart-scroll { overflow: auto; margin-top: 15px; border-radius: 12px; background: #06161a; }
 .chart-theme-paper .chart-scroll { border: 1px solid #d4dcd8; background: white; }
 .expression-chart { height: auto; display: block; }
-.publication-expression-chart { max-height: 560px; }
+.publication-expression-chart { max-height: none; }
 .publication-note { display: grid; grid-template-columns: 24px 1fr; gap: 10px; align-items: start; margin-top: 12px; padding: 11px 12px; border: 1px solid #d8e3df; border-radius: 9px; background: #f6f9f8; }
 .publication-note i { width: 22px; height: 22px; display: grid; place-items: center; border-radius: 50%; color: white; background: var(--teal); font-family: Georgia, serif; font-size: 11px; font-style: normal; }
 .publication-note p { margin: 0; color: #667671; font-size: 8px; line-height: 1.65; }

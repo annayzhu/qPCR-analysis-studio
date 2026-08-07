@@ -2,7 +2,7 @@
 
 import { useMemo, useRef, useState } from "react";
 import type { RelativeQuantificationResult } from "@/packages/schemas/src";
-import { buildLogRatioAxis, mapRatioToY } from "@/packages/qpcr-core/src";
+import { buildLogRatioAxis, chartLabelVisualUnits, mapRatioToY, wrapChartLabel } from "@/packages/qpcr-core/src";
 import { useLanguage } from "../i18n";
 
 type SortKey = "sampleName" | "targetName" | "targetMeanCq" | "targetSdCq" | "deltaCq" | "normalizedQuantity" | "relativeExpression";
@@ -75,8 +75,16 @@ function ExpressionChart({
   const right = 40;
   const top = 88;
   const bottom = 350;
-  const height = 440;
-  const width = Math.max(860, left + right + chartRows.length * 72);
+  const maxLabelUnitsPerLine = chartRows.length > 16 ? 16 : chartRows.length > 8 ? 18 : 22;
+  const wrappedSampleLabels = chartRows.map((row) => wrapChartLabel(row.label, maxLabelUnitsPerLine));
+  const longestLabelLine = Math.max(...wrappedSampleLabels.flat().map(chartLabelVisualUnits));
+  const maxLabelLines = Math.max(...wrappedSampleLabels.map((lines) => lines.length));
+  const labelLineHeight = 12;
+  const labelTop = bottom + 19;
+  const axisTitleY = labelTop + (maxLabelLines - 1) * labelLineHeight + 28;
+  const height = Math.max(440, axisTitleY + 24);
+  const minimumSlotWidth = Math.min(138, Math.max(72, longestLabelLine * 5 + 18));
+  const width = Math.max(860, left + right + chartRows.length * minimumSlotWidth);
   const plotWidth = width - left - right;
   const slotWidth = plotWidth / chartRows.length;
   const barWidth = Math.min(42, slotWidth * .56);
@@ -211,7 +219,7 @@ function ExpressionChart({
             const centerX = left + slotWidth * (index + .5);
             const barTop = y(row.rawValue);
             const barHeight = Math.max(1, bottom - barTop);
-            const label = row.label.length > 13 ? `${row.label.slice(0, 12)}…` : row.label;
+            const labelLines = wrappedSampleLabels[index];
             const lowerError = row.propagatedSd === null ? null : Math.max(0, row.rawValue - row.propagatedSd);
             const upperError = row.propagatedSd === null ? null : row.rawValue + row.propagatedSd;
             const errorTop = upperError === null ? null : y(upperError);
@@ -231,16 +239,16 @@ function ExpressionChart({
                 {row.warning && <circle cx={centerX} cy={Math.max(top + 4, (errorTop ?? barTop) - 7)} r="3" fill={colors.background} stroke={colors.warning} strokeWidth="1.2" />}
                 <text
                   x={centerX}
-                  y={bottom + 20}
-                  textAnchor={chartRows.length > 10 ? "end" : "middle"}
-                  transform={chartRows.length > 10 ? `rotate(-35 ${centerX} ${bottom + 20})` : undefined}
+                  y={labelTop}
+                  textAnchor="middle"
                   fill={colors.muted}
                   fontSize="9"
-                >{label}</text>
+                  aria-label={row.label}
+                >{labelLines.map((line, lineIndex) => <tspan key={`${line}-${lineIndex}`} x={centerX} dy={lineIndex === 0 ? 0 : labelLineHeight}>{line}</tspan>)}</text>
               </g>
             );
           })}
-          <text x={(left + width - right) / 2} y={height - 20} textAnchor="middle" fill={colors.text} fontSize="10">{l("生物学样本", "Biological sample")}</text>
+          <text x={(left + width - right) / 2} y={axisTitleY} textAnchor="middle" fill={colors.text} fontSize="10">{l("生物学样本", "Biological sample")}</text>
           <text x="24" y={(top + bottom) / 2} textAnchor="middle" transform={`rotate(-90 24 ${(top + bottom) / 2})`} fill={colors.text} fontSize="10">
             {axisMode === "log-ratio" ? "Relative expression (log₂ ratio axis)" : "Relative expression"}
           </text>

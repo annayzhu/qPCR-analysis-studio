@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildLogRatioAxis, mapRatioToY } from "./charting";
+import { buildLogRatioAxis, chartLabelVisualUnits, mapRatioToY, wrapChartLabel } from "./charting";
 import type { RawImportedRow, WellRecord } from "../../schemas/src";
 import { calculateRelativeQuantification } from "./calculations";
 import { buildQcWorkspaceState, calculateReplicateQc } from "./qc";
@@ -97,6 +97,15 @@ describe("publication chart ratio axis", () => {
     expect(axis.maxExponent).toBeGreaterThanOrEqual(Math.log2(9));
     expect(mapRatioToY(9, axis, 40, 300)).toBeLessThan(mapRatioToY(1, axis, 40, 300));
     expect(mapRatioToY(0.2, axis, 40, 300)).toBeGreaterThan(mapRatioToY(1, axis, 40, 300));
+  });
+
+  it("wraps long mixed-language sample names without truncating them", () => {
+    const sampleName = "Control_处理组_24h_technical-replicate-01";
+    const lines = wrapChartLabel(sampleName, 16);
+    expect(lines.length).toBeGreaterThan(1);
+    expect(lines.join("")).toBe(sampleName);
+    expect(lines.every((line) => chartLabelVisualUnits(line) <= 16)).toBe(true);
+    expect(lines.some((line) => line.includes("…"))).toBe(false);
   });
 });
 
