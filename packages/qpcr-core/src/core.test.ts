@@ -5,6 +5,7 @@ import { calculateRelativeQuantification } from "./calculations";
 import { buildQcWorkspaceState, calculateReplicateQc } from "./qc";
 import { summarizeMeltWells } from "./melt";
 import { restoreWellsToBaseline, setWellExclusion, updateWellFields } from "./audit";
+import { buildVisualizationBarRows, VISUALIZATION_BAR_HEADERS } from "./visualization-export";
 
 const raw: RawImportedRow = {
   sourceId: "s", sourceFileName: "demo.tsv", sourceSheet: "Sheet1", sourceRowNumber: 2,
@@ -245,5 +246,48 @@ describe("relative quantification", () => {
     expect(result.referenceSdCq).toBeNull();
     expect(result.deltaCqSd).toBeNull();
     expect(result.normalizedQuantitySd).toBeNull();
+  });
+});
+
+describe("Visualization Studio bar export", () => {
+  it("uses the selected sample and target order with the exact five-column schema", () => {
+    const wells = [
+      well("1", "A1", "Control", "REF", 20), well("2", "A2", "Control", "REF", 20),
+      well("3", "A3", "Control", "GENE1", 23), well("4", "A4", "Control", "GENE1", 23.2),
+      well("5", "A5", "Control", "GENE2", 25), well("6", "A6", "Control", "GENE2", 25.2),
+      well("7", "B1", "Treat", "REF", 20), well("8", "B2", "Treat", "REF", 20),
+      well("9", "B3", "Treat", "GENE1", 22), well("10", "B4", "Treat", "GENE1", 22.2),
+      well("11", "B5", "Treat", "GENE2", 24), well("12", "B6", "Treat", "GENE2", 24.2),
+    ];
+    const results = calculateRelativeQuantification(wells, {
+      referenceTargets: ["REF"], calibratorType: "sample", calibratorValue: "Control",
+      replicateWarningThreshold: 0.5, tmWarningThreshold: 0.5, efficiencyByTarget: {}, calculationMode: "delta-delta-cq",
+    });
+
+    const rows = buildVisualizationBarRows(results, ["Treat", "Control"], ["GENE2", "GENE1"]);
+
+    expect(VISUALIZATION_BAR_HEADERS).toEqual(["category", "value", "sd", "sem", "group"]);
+    expect(rows.map((row) => `${row.group}:${row.category}`)).toEqual([
+      "GENE2:Treat", "GENE2:Control", "GENE1:Treat", "GENE1:Control",
+    ]);
+    expect(Object.keys(rows[0])).toEqual(VISUALIZATION_BAR_HEADERS);
+    expect(rows[0].value).toBeCloseTo(2);
+    expect(rows[0].sd).not.toBeNull();
+    expect(rows[0].sem).toBeNull();
+  });
+
+  it("falls back to normalized quantity and its propagated SD when no calibrator is selected", () => {
+    const results = calculateRelativeQuantification([
+      well("1", "A1", "S1", "REF", 20), well("2", "A2", "S1", "REF", 20.2),
+      well("3", "A3", "S1", "GENE", 23), well("4", "A4", "S1", "GENE", 23.2),
+    ], {
+      referenceTargets: ["REF"], calibratorType: "sample", calibratorValue: "",
+      replicateWarningThreshold: 0.5, tmWarningThreshold: 0.5, efficiencyByTarget: {}, calculationMode: "delta-cq",
+    });
+
+    const [row] = buildVisualizationBarRows(results, ["S1"], ["GENE"]);
+    expect(row.value).toBe(results[0].normalizedQuantity);
+    expect(row.sd).toBe(results[0].normalizedQuantitySd);
+    expect(row.sem).toBeNull();
   });
 });

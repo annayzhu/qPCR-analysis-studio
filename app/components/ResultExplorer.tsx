@@ -1,8 +1,16 @@
 "use client";
 
 import { useMemo, useRef, useState } from "react";
+import XLSX from "xlsx-js-style";
 import type { RelativeQuantificationResult } from "@/packages/schemas/src";
-import { buildLogRatioAxis, chartLabelVisualUnits, mapRatioToY, wrapChartLabel } from "@/packages/qpcr-core/src";
+import {
+  buildLogRatioAxis,
+  buildVisualizationBarRows,
+  chartLabelVisualUnits,
+  mapRatioToY,
+  VISUALIZATION_BAR_HEADERS,
+  wrapChartLabel,
+} from "@/packages/qpcr-core/src";
 import { useLanguage } from "../i18n";
 
 type SortKey = "sampleName" | "targetName" | "targetMeanCq" | "targetSdCq" | "deltaCq" | "normalizedQuantity" | "relativeExpression";
@@ -300,6 +308,56 @@ export default function ResultExplorer({ results, sampleOrder, targetOrder }: Re
     () => targetOrder.filter((target) => filtered.some((row) => row.targetName === target)),
     [filtered, targetOrder],
   );
+  const visualizationRows = useMemo(
+    () => buildVisualizationBarRows(results, sampleOrder, targetOrder),
+    [results, sampleOrder, targetOrder],
+  );
+
+  function exportVisualizationExcel() {
+    const sheetRows = visualizationRows.map((row) => [
+      row.category,
+      row.value,
+      row.sd ?? "",
+      "",
+      row.group,
+    ]);
+    const worksheet = XLSX.utils.aoa_to_sheet([[...VISUALIZATION_BAR_HEADERS], ...sheetRows]);
+    worksheet["!cols"] = [{ wch: 24 }, { wch: 14 }, { wch: 14 }, { wch: 14 }, { wch: 22 }];
+    worksheet["!autofilter"] = { ref: `A1:E${sheetRows.length + 1}` };
+    for (const cell of ["A1", "B1", "C1", "D1", "E1"]) {
+      if (!worksheet[cell]) continue;
+      worksheet[cell].s = {
+        font: { bold: true, color: { rgb: "FFFFFF" } },
+        fill: { patternType: "solid", fgColor: { rgb: "4F827C" } },
+        alignment: { horizontal: "center" },
+      };
+    }
+    for (let rowIndex = 2; rowIndex <= sheetRows.length + 1; rowIndex += 1) {
+      for (const column of ["B", "C", "D"]) {
+        const cell = worksheet[`${column}${rowIndex}`];
+        if (cell) cell.z = "0.000000";
+      }
+    }
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "bar");
+    const bytes = XLSX.write(workbook, { bookType: "xlsx", type: "array", cellStyles: true });
+    downloadBlob(
+      new Blob([bytes], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }),
+      "qpcr-visualization-bar.xlsx",
+    );
+  }
+
+  function exportVisualizationTsv() {
+    const escapeCell = (value: string | number | null) => String(value ?? "").replace(/[\t\r\n]+/g, " ");
+    const lines = [
+      VISUALIZATION_BAR_HEADERS.join("\t"),
+      ...visualizationRows.map((row) => [row.category, row.value, row.sd, row.sem, row.group].map(escapeCell).join("\t")),
+    ];
+    downloadBlob(
+      new Blob(["\uFEFF", lines.join("\r\n")], { type: "text/tab-separated-values;charset=utf-8" }),
+      "qpcr-visualization-bar.tsv",
+    );
+  }
 
   function sortBy(key: SortKey) {
     if (sortKey === key) setSortDirection((current) => current === "asc" ? "desc" : "asc");
@@ -322,6 +380,21 @@ export default function ResultExplorer({ results, sampleOrder, targetOrder }: Re
         <button type="button" aria-pressed={showTechnicalSd} className={showTechnicalSd ? "filter-chip sd-filter active" : "filter-chip sd-filter"} onClick={() => setShowTechnicalSd((current) => !current)}>{l("技术复孔传播 SD", "Propagated technical SD")}</button>
         <button type="button" className={warningOnly ? "filter-chip warning-filter active" : "filter-chip warning-filter"} onClick={() => setWarningOnly((current) => !current)}>{l("仅看 QC 提示", "QC warnings only")}</button>
         <div className="visible-count"><b>{filtered.length}</b><span>{l("条结果", "results")}</span></div>
+      </div>
+
+      <div className="visualization-export-panel">
+        <div>
+          <p className="eyebrow">VISUALIZATION STUDIO</p>
+          <h3>{l("导出柱状图数据", "Export bar-chart data")}</h3>
+          <p>{l(
+            "按已选样本和基因导出；category=样本，group=基因，value=当前归一化结果，sd=技术复孔传播 SD，sem 留空。",
+            "Exports the selected samples and targets: category=sample, group=target, value=current normalized result, sd=propagated technical SD, and sem is left blank.",
+          )}</p>
+        </div>
+        <div className="visualization-export-actions">
+          <button type="button" disabled={!visualizationRows.length} onClick={exportVisualizationExcel}>{l("导出 Excel", "Export Excel")}</button>
+          <button type="button" disabled={!visualizationRows.length} onClick={exportVisualizationTsv}>{l("导出 TSV · 直接导入", "Export TSV · direct import")}</button>
+        </div>
       </div>
 
       <div className="result-chart-stack">
