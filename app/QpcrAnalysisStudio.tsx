@@ -38,6 +38,14 @@ function formatNumber(value: number | null, digits = 2): string {
   return value === null || !Number.isFinite(value) ? "—" : value.toFixed(digits);
 }
 
+function singleWellCqDisplay(well: WellRecord, l: Localizer): string {
+  if (well.cqStatus === "detected" && well.cq !== null) return formatNumber(well.cq, 3);
+  if (well.cqStatus === "not-detected") return l("未检出", "Not detected");
+  if (well.cqStatus === "invalid") return l("无效值", "Invalid value");
+  if (well.cqStatus === "not-applicable") return l("不适用", "Not applicable");
+  return l("未提供", "Not provided");
+}
+
 function targetColor(target: string): string {
   const palette = ["#198a80", "#b97235", "#516ca8", "#8b659d", "#b55566", "#397d9a", "#6b8751"];
   let hash = 0;
@@ -708,7 +716,9 @@ export default function QpcrAnalysisStudio() {
                     <div className="selection-summary">
                       <div><span>Sample</span><b>{commonValue(selectedWells, "sampleName", l)}</b></div>
                       <div><span>Target</span><b>{commonValue(selectedWells, "targetName", l)}</b></div>
-                      <div><span>Detected Cq</span><b>{selectedWells.filter((well) => well.cqStatus === "detected").length} / {selectedWells.length}</b></div>
+                      {selectedWells.length === 1
+                        ? <div className="single-cq-value"><span>Ct / Cq / Cp</span><b title={selectedWells[0].cqReason || undefined}>{singleWellCqDisplay(selectedWells[0], l)}</b></div>
+                        : <div><span>Detected Cq</span><b>{selectedWells.filter((well) => well.cqStatus === "detected").length} / {selectedWells.length}</b></div>}
                     </div>
                     {selectedWells.length > 0 && (
                       <section className={selectedQcNotices.length ? "selection-qc-alerts has-alerts" : "selection-qc-alerts is-clear"} aria-live="polite">

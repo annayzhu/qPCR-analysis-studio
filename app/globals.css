@@ -329,6 +329,8 @@ button.axis-label:hover { color: var(--teal); background: var(--teal-soft); bord
 .selection-summary { display: grid; gap: 1px; overflow: hidden; margin-bottom: 14px; border: 1px solid var(--line); border-radius: 9px; background: var(--line); }
 .selection-summary div { min-width: 0; display: grid; grid-template-columns: 88px 1fr; gap: 8px; padding: 9px 10px; background: #f8faf9; }
 .selection-summary span { color: #86928e; font-size: 8px; }.selection-summary b { overflow: hidden; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+.selection-summary .single-cq-value { background: #eef7f5; }
+.selection-summary .single-cq-value b { color: #126d65; font-size: 13px; font-variant-numeric: tabular-nums; }
 .selection-qc-alerts { margin: 0 0 13px; overflow: hidden; border: 1px solid #d9e3df; border-radius: 9px; background: #f7faf9; }
 .selection-qc-alerts.has-alerts { border-color: #e5c28b; background: #fffaf1; }
 .selection-qc-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 10px; border-bottom: 1px solid rgba(126,143,137,.16); }
