@@ -6,7 +6,7 @@ export interface VisualizationBarRow {
   category: string;
   value: number;
   sd: number | null;
-  sem: null;
+  sem: number | null;
   group: string;
 }
 
@@ -14,8 +14,8 @@ export interface VisualizationBarRow {
  * Builds the five-column bar-chart dataset consumed by Visualization Studio.
  *
  * The row order is deliberately controlled by the user's target and sample
- * selections. SEM remains null because the qPCR workflow currently propagates
- * technical-replicate SD; it does not estimate biological-replicate SEM.
+ * selections. SD and SEM both describe technical-replicate dispersion and the
+ * precision of the technical-replicate mean; neither is biological variation.
  */
 export function buildVisualizationBarRows(
   results: RelativeQuantificationResult[],
@@ -33,7 +33,7 @@ export function buildVisualizationBarRows(
         category: row.sampleName,
         value: usesRelativeExpression ? row.relativeExpression! : row.normalizedQuantity,
         sd: usesRelativeExpression ? row.relativeExpressionSd : row.normalizedQuantitySd,
-        sem: null,
+        sem: usesRelativeExpression ? row.relativeExpressionSem : row.normalizedQuantitySem,
         group: row.targetName,
       };
     })
@@ -43,4 +43,3 @@ export function buildVisualizationBarRows(
       return targetComparison || sampleRanks.get(a.category)! - sampleRanks.get(b.category)!;
     });
 }
-

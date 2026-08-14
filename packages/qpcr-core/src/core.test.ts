@@ -186,10 +186,13 @@ describe("relative quantification", () => {
     });
     expect(results[0].targetMeanCq).toBe(23);
     expect(results[0].targetSdCq).toBeCloseTo(Math.sqrt(2));
+    expect(results[0].targetSemCq).toBeCloseTo(1);
     expect(results[0].targetValidReplicates).toBe(2);
     expect(results[0].referenceValidReplicates).toEqual({ GAPDH: 2 });
     expect(results[0].deltaCqSd).toBeCloseTo(Math.sqrt(2));
+    expect(results[0].deltaCqSem).toBeCloseTo(1);
     expect(results[0].normalizedQuantitySd).toBeCloseTo(Math.log(2) * 0.125 * Math.sqrt(2));
+    expect(results[0].normalizedQuantitySem).toBeCloseTo(Math.log(2) * 0.125);
   });
 
   it("propagates technical-replicate SD through multiple-reference normalization", () => {
@@ -227,8 +230,11 @@ describe("relative quantification", () => {
     const deltaSd = 2;
     const deltaDeltaSd = Math.sqrt(deltaSd ** 2 + deltaSd ** 2);
     expect(control.relativeExpression).toBe(1);
-    expect(control.deltaDeltaCqSd).toBe(0);
-    expect(control.relativeExpressionSd).toBe(0);
+    expect(control.deltaDeltaCqSd).toBeCloseTo(deltaSd);
+    expect(control.relativeExpressionSd).toBeCloseTo(Math.log(2) * deltaSd);
+    expect(control.deltaCqSem).toBeCloseTo(Math.sqrt(2));
+    expect(control.deltaDeltaCqSem).toBeCloseTo(Math.sqrt(2));
+    expect(control.relativeExpressionSem).toBeCloseTo(Math.log(2) * Math.sqrt(2));
     expect(treated.relativeExpression).toBe(2);
     expect(treated.deltaDeltaCqSd).toBeCloseTo(deltaDeltaSd);
     expect(treated.relativeExpressionSd).toBeCloseTo(Math.log(2) * 2 * deltaDeltaSd);
@@ -245,7 +251,9 @@ describe("relative quantification", () => {
     });
     expect(result.referenceSdCq).toBeNull();
     expect(result.deltaCqSd).toBeNull();
+    expect(result.deltaCqSem).toBeNull();
     expect(result.normalizedQuantitySd).toBeNull();
+    expect(result.normalizedQuantitySem).toBeNull();
   });
 });
 
@@ -273,7 +281,11 @@ describe("Visualization Studio bar export", () => {
     expect(Object.keys(rows[0])).toEqual(VISUALIZATION_BAR_HEADERS);
     expect(rows[0].value).toBeCloseTo(2);
     expect(rows[0].sd).not.toBeNull();
-    expect(rows[0].sem).toBeNull();
+    expect(rows[0].sem).not.toBeNull();
+    const calibrator = rows.find((row) => row.category === "Control" && row.group === "GENE2")!;
+    expect(calibrator.value).toBe(1);
+    expect(calibrator.sd).toBeGreaterThan(0);
+    expect(calibrator.sem).toBeGreaterThan(0);
   });
 
   it("falls back to normalized quantity and its propagated SD when no calibrator is selected", () => {
@@ -288,6 +300,6 @@ describe("Visualization Studio bar export", () => {
     const [row] = buildVisualizationBarRows(results, ["S1"], ["GENE"]);
     expect(row.value).toBe(results[0].normalizedQuantity);
     expect(row.sd).toBe(results[0].normalizedQuantitySd);
-    expect(row.sem).toBeNull();
+    expect(row.sem).toBe(results[0].normalizedQuantitySem);
   });
 });

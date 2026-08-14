@@ -267,7 +267,7 @@ function ExpressionChart({
         <p>
           <b>{showTechnicalSd ? l("误差线：技术复孔传播 SD。", "Error bars: propagated technical-replicate SD.") : l("误差线默认关闭。", "Error bars are off by default.")}</b>
           {showTechnicalSd
-            ? l("使用 delta method 将 Cq 样本 SD 传播至 2⁻ΔCq 或 2⁻ΔΔCq；仅当目标和全部内参各有至少 2 个有效复孔时显示。校准样本作为 1 的锚点，不显示自身误差。该误差仅描述技术重复性，不代表生物学重复、SEM、95% CI 或统计显著性。", "The delta method propagates the sample SD of technical-replicate Cq values to 2⁻ΔCq or 2⁻ΔΔCq. Bars are shown only when the target and every reference have at least two valid replicates. The calibrator is anchored at 1 and has no self-error bar. This error describes technical repeatability only; it is not biological replication, SEM, a 95% CI, or statistical significance.")
+            ? l("使用 delta method 将 Cq 技术复孔 SD 传播至 2⁻ΔCq 或 2⁻ΔΔCq；仅当目标和全部内参各有至少 2 个有效复孔时显示。校准样本中心值固定为 1，但误差线保留其目标与内参复孔相对各自均值的离差，不再强制为 0。该误差仅描述技术重复性，不代表生物学重复、SEM、95% CI 或统计显著性。", "The delta method propagates technical-replicate Cq SD to 2⁻ΔCq or 2⁻ΔΔCq. Bars are shown only when the target and every reference have at least two valid replicates. The calibrator remains centered at 1, while its error bar retains target and reference replicate dispersion around their respective means instead of being forced to 0. This error describes technical repeatability only; it is not biological replication, SEM, a 95% CI, or statistical significance.")
             : l("可使用上方“技术复孔传播 SD”开关显示；这类误差仅描述技术重复性，不用于替代生物学重复。", "Use the “Propagated technical SD” control above to display them. This error describes technical repeatability and does not replace biological replication.")}
           <span className="replicate-caption"><b>{l("有效技术复孔 n：", "Valid technical-replicate n: ")}</b>{replicateSummary}</span>
         </p>
@@ -318,7 +318,7 @@ export default function ResultExplorer({ results, sampleOrder, targetOrder }: Re
       row.category,
       row.value,
       row.sd ?? "",
-      "",
+      row.sem ?? "",
       row.group,
     ]);
     const worksheet = XLSX.utils.aoa_to_sheet([[...VISUALIZATION_BAR_HEADERS], ...sheetRows]);
@@ -387,8 +387,8 @@ export default function ResultExplorer({ results, sampleOrder, targetOrder }: Re
           <p className="eyebrow">VISUALIZATION STUDIO</p>
           <h3>{l("导出柱状图数据", "Export bar-chart data")}</h3>
           <p>{l(
-            "按已选样本和基因导出；category=样本，group=基因，value=当前归一化结果，sd=技术复孔传播 SD，sem 留空。",
-            "Exports the selected samples and targets: category=sample, group=target, value=current normalized result, sd=propagated technical SD, and sem is left blank.",
+            "按已选样本和基因导出；category=样本，group=基因，value=当前归一化结果，sd=技术复孔传播 SD，sem=技术复孔均值的传播 SEM。二者均不代表生物学重复变异。",
+            "Exports the selected samples and targets: category=sample, group=target, value=current normalized result, sd=propagated technical SD, and sem=propagated SEM of the technical-replicate mean. Neither represents biological-replicate variation.",
           )}</p>
         </div>
         <div className="visualization-export-actions">
@@ -419,12 +419,13 @@ export default function ResultExplorer({ results, sampleOrder, targetOrder }: Re
             <th>ΔΔCq</th>
             <th><button type="button" onClick={() => sortBy("relativeExpression")}>{l("相对表达量", "Relative expression")}{sortMark("relativeExpression")}</button></th>
             <th>{l("传播 SD", "Propagated SD")}</th>
+            <th>{l("传播 SEM", "Propagated SEM")}</th>
             <th>{l("提示", "Warnings")}</th>
           </tr></thead>
           <tbody>
             {filtered.map((row) => (
               <tr key={`${row.sampleName}-${row.targetName}`} className={row.warningCodes.length ? "flagged-row" : ""}>
-                <td><b>{row.sampleName}</b></td><td>{row.targetName}</td><td>{formatNumber(row.targetMeanCq)}</td><td>{formatNumber(row.targetSdCq)}</td><td>{formatNumber(row.referenceMeanCq)}</td><td>{formatNumber(row.deltaCq)}</td><td>{formatNumber(row.normalizedQuantity, 4)}</td><td>{formatNumber(row.deltaDeltaCq)}</td><td><strong className="expression-value">{formatNumber(row.relativeExpression, 4)}</strong></td><td>{formatNumber(row.relativeExpressionSd ?? row.normalizedQuantitySd, 4)}</td><td>{row.warningCodes.join(", ") || "—"}</td>
+                <td><b>{row.sampleName}</b></td><td>{row.targetName}</td><td>{formatNumber(row.targetMeanCq)}</td><td>{formatNumber(row.targetSdCq)}</td><td>{formatNumber(row.referenceMeanCq)}</td><td>{formatNumber(row.deltaCq)}</td><td>{formatNumber(row.normalizedQuantity, 4)}</td><td>{formatNumber(row.deltaDeltaCq)}</td><td><strong className="expression-value">{formatNumber(row.relativeExpression, 4)}</strong></td><td>{formatNumber(row.relativeExpressionSd ?? row.normalizedQuantitySd, 4)}</td><td>{formatNumber(row.relativeExpressionSem ?? row.normalizedQuantitySem, 4)}</td><td>{row.warningCodes.join(", ") || "—"}</td>
               </tr>
             ))}
           </tbody>

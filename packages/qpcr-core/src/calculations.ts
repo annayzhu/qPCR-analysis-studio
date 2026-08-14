@@ -14,11 +14,16 @@ function sampleSd(values: number[]): number | null {
   return Math.sqrt(values.reduce((sum, value) => sum + (value - average) ** 2, 0) / (values.length - 1));
 }
 
+function standardError(sd: number | null, count: number): number | null {
+  return sd === null || count < 2 ? null : sd / Math.sqrt(count);
+}
+
 interface TargetMean {
   sampleName: string;
   targetName: string;
   meanCq: number;
   sdCq: number | null;
+  semCq: number | null;
   validReplicates: number;
 }
 
@@ -48,11 +53,13 @@ function targetMeans(wells: WellRecord[]): TargetMean[] {
   }
   return [...groups.entries()].map(([key, values]) => {
     const [sampleName, targetName] = key.split("\u241f");
+    const sdCq = sampleSd(values);
     return {
       sampleName,
       targetName,
       meanCq: mean(values)!,
-      sdCq: sampleSd(values),
+      sdCq,
+      semCq: standardError(sdCq, values.length),
       validReplicates: values.length,
     };
   });
@@ -86,6 +93,9 @@ export function calculateRelativeQuantification(
     const referenceSdCq = references.every((item) => item.sdCq !== null)
       ? Math.sqrt(references.reduce((sum, item) => sum + item.sdCq! ** 2, 0)) / references.length
       : null;
+    const referenceSemCq = references.every((item) => item.semCq !== null)
+      ? Math.sqrt(references.reduce((sum, item) => sum + item.semCq! ** 2, 0)) / references.length
+      : null;
     const referenceValidReplicates = Object.fromEntries(
       references.map((item) => [item.targetName, item.validReplicates]),
     );
@@ -98,25 +108,33 @@ export function calculateRelativeQuantification(
         : 2;
       const normalizedQuantity = base ** -deltaCq;
       const deltaCqSd = propagatedSd([targetSummary.sdCq, referenceSdCq]);
+      const deltaCqSem = propagatedSd([targetSummary.semCq, referenceSemCq]);
       const normalizedQuantitySd = exponentialSd(normalizedQuantity, deltaCqSd, base);
+      const normalizedQuantitySem = exponentialSd(normalizedQuantity, deltaCqSem, base);
       normalized.set(`${sampleName}\u241f${targetName}`, normalizedQuantity);
       rows.push({
         sampleName,
         targetName,
         targetMeanCq,
         targetSdCq: targetSummary.sdCq,
+        targetSemCq: targetSummary.semCq,
         targetValidReplicates: targetSummary.validReplicates,
         referenceMeanCq,
         referenceSdCq,
+        referenceSemCq,
         referenceValidReplicates,
         deltaCq,
         deltaCqSd,
+        deltaCqSem,
         normalizedQuantity,
         normalizedQuantitySd,
+        normalizedQuantitySem,
         deltaDeltaCq: null,
         deltaDeltaCqSd: null,
+        deltaDeltaCqSem: null,
         relativeExpression: null,
         relativeExpressionSd: null,
+        relativeExpressionSem: null,
         calibratorValue: settings.calibratorValue,
         referenceTargets: settings.referenceTargets,
         warningCodes:
@@ -137,10 +155,18 @@ export function calculateRelativeQuantification(
       (candidate) => candidate.sampleName === settings.calibratorValue && candidate.targetName === row.targetName,
     );
     const deltaDeltaCq = calibratorRow ? row.deltaCq - calibratorRow.deltaCq : null;
+    // The calibrator's center is fixed at 1, but its error is not fixed at 0:
+    // retain its own target/reference technical-replicate dispersion around
+    // the calibrator mean. Other samples additionally include calibrator error.
     const deltaDeltaCqSd = calibratorRow
       ? row.sampleName === settings.calibratorValue
-        ? 0
+        ? row.deltaCqSd
         : propagatedSd([row.deltaCqSd, calibratorRow.deltaCqSd])
+      : null;
+    const deltaDeltaCqSem = calibratorRow
+      ? row.sampleName === settings.calibratorValue
+        ? row.deltaCqSem
+        : propagatedSd([row.deltaCqSem, calibratorRow.deltaCqSem])
       : null;
     const relativeExpression = row.normalizedQuantity / calibratorQuantity;
     const base = settings.calculationMode === "efficiency-corrected"
@@ -150,8 +176,10 @@ export function calculateRelativeQuantification(
       ...row,
       deltaDeltaCq,
       deltaDeltaCqSd,
+      deltaDeltaCqSem,
       relativeExpression,
       relativeExpressionSd: exponentialSd(relativeExpression, deltaDeltaCqSd, base),
+      relativeExpressionSem: exponentialSd(relativeExpression, deltaDeltaCqSem, base),
     };
   });
 }
