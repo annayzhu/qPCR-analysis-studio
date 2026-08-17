@@ -19,6 +19,7 @@ function standardError(sd: number | null, count: number): number | null {
 }
 
 interface TargetMean {
+  plateId: string;
   sampleName: string;
   targetName: string;
   meanCq: number;
@@ -48,13 +49,14 @@ function targetMeans(wells: WellRecord[]): TargetMean[] {
       well.instrumentOmit ||
       well.userExcluded
     ) continue;
-    const key = `${well.sampleName}\u241f${well.targetName}`;
+    const key = `${well.plateId}\u241f${well.sampleName}\u241f${well.targetName}`;
     groups.set(key, [...(groups.get(key) ?? []), well.cq]);
   }
   return [...groups.entries()].map(([key, values]) => {
-    const [sampleName, targetName] = key.split("\u241f");
+    const [plateId, sampleName, targetName] = key.split("\u241f");
     const sdCq = sampleSd(values);
     return {
+      plateId,
       sampleName,
       targetName,
       meanCq: mean(values)!,
@@ -65,8 +67,88 @@ function targetMeans(wells: WellRecord[]): TargetMean[] {
   });
 }
 
+function rowKey(sampleName: string, targetName: string): string {
+  return `${sampleName}\u241f${targetName}`;
+}
+
+function plateSampleKey(plateId: string, sampleName: string): string {
+  return `${plateId}\u241f${sampleName}`;
+}
+
+function weightedMean<T>(items: T[], value: (item: T) => number, weight: (item: T) => number): number {
+  const totalWeight = items.reduce((sum, item) => sum + weight(item), 0);
+  return totalWeight > 0
+    ? items.reduce((sum, item) => sum + value(item) * weight(item), 0) / totalWeight
+    : mean(items.map(value))!;
+}
+
+function uniqueWarnings(...warningLists: string[][]): string[] {
+  return [...new Set(warningLists.flat())];
+}
+
+function sumReferenceReplicates(rows: RelativeQuantificationResult[]): Record<string, number> {
+  const counts: Record<string, number> = {};
+  for (const row of rows) {
+    for (const [target, count] of Object.entries(row.referenceValidReplicates)) {
+      counts[target] = (counts[target] ?? 0) + count;
+    }
+  }
+  return counts;
+}
+
+function meanOrNull(values: Array<number | null>): number | null {
+  const numericValues = values.filter((value): value is number => value !== null);
+  return numericValues.length === values.length && numericValues.length > 0 ? mean(numericValues)! : null;
+}
+
+function aggregatePlateAwareRows(rows: RelativeQuantificationResult[], settings: AnalysisSettings): RelativeQuantificationResult[] {
+  const groups = new Map<string, RelativeQuantificationResult[]>();
+  for (const row of rows) {
+    const key = rowKey(row.sampleName, row.targetName);
+    groups.set(key, [...(groups.get(key) ?? []), row]);
+  }
+
+  return [...groups.values()].map((group) => {
+    if (group.length === 1) return group[0];
+
+    const base = settings.calculationMode === "efficiency-corrected"
+      ? 1 + (settings.efficiencyByTarget[group[0].targetName] ?? 1)
+      : 2;
+    const normalizedQuantity = mean(group.map((row) => row.normalizedQuantity))!;
+    const deltaCq = -Math.log(normalizedQuantity) / Math.log(base);
+    const normalizedQuantitySd = sampleSd(group.map((row) => row.normalizedQuantity));
+    const normalizedQuantitySem = standardError(normalizedQuantitySd, group.length);
+    const deltaCqSd = sampleSd(group.map((row) => row.deltaCq));
+    const deltaCqSem = standardError(deltaCqSd, group.length);
+
+    return {
+      ...group[0],
+      targetMeanCq: weightedMean(group, (row) => row.targetMeanCq, (row) => row.targetValidReplicates),
+      targetSdCq: meanOrNull(group.map((row) => row.targetSdCq)),
+      targetSemCq: meanOrNull(group.map((row) => row.targetSemCq)),
+      targetValidReplicates: group.reduce((sum, row) => sum + row.targetValidReplicates, 0),
+      referenceMeanCq: mean(group.map((row) => row.referenceMeanCq))!,
+      referenceSdCq: meanOrNull(group.map((row) => row.referenceSdCq)),
+      referenceSemCq: meanOrNull(group.map((row) => row.referenceSemCq)),
+      referenceValidReplicates: sumReferenceReplicates(group),
+      deltaCq,
+      deltaCqSd,
+      deltaCqSem,
+      normalizedQuantity,
+      normalizedQuantitySd,
+      normalizedQuantitySem,
+      warningCodes: uniqueWarnings(group.flatMap((row) => row.warningCodes), ["MULTI_PLATE_TARGET_MERGED"]),
+    };
+  });
+}
+
 /**
- * Classic relative-quantification core. Technical replicates are merged first.
+ * Relative-quantification core. Technical replicates are merged first within
+ * each plate/sample/target group. References are paired by the same plate and
+ * sample before ΔCq is calculated, so a sample that is split across plates uses
+ * the reference gene(s) repeated on that exact plate rather than a global
+ * cross-plate reference pool.
+ *
  * Multiple references are combined as the arithmetic mean of their mean Cq,
  * equivalent to the geometric mean of 2^-Cq reference quantities when E=100%.
  */
@@ -75,16 +157,30 @@ export function calculateRelativeQuantification(
   settings: AnalysisSettings,
 ): RelativeQuantificationResult[] {
   const means = targetMeans(wells);
-  const bySample = new Map<string, Map<string, TargetMean>>();
+  const byPlateSample = new Map<string, Map<string, TargetMean>>();
+  const completeReferencePlateIdsBySample = new Map<string, Set<string>>();
+
   for (const item of means) {
-    const targets = bySample.get(item.sampleName) ?? new Map<string, TargetMean>();
+    const key = plateSampleKey(item.plateId, item.sampleName);
+    const targets = byPlateSample.get(key) ?? new Map<string, TargetMean>();
     targets.set(item.targetName, item);
-    bySample.set(item.sampleName, targets);
+    byPlateSample.set(key, targets);
+  }
+
+  for (const [key, targets] of byPlateSample) {
+    const [plateId, sampleName] = key.split("\u241f");
+    const hasCompleteReferenceSet = settings.referenceTargets.length > 0
+      && settings.referenceTargets.every((target) => targets.has(target));
+    if (!hasCompleteReferenceSet) continue;
+    const plateIds = completeReferencePlateIdsBySample.get(sampleName) ?? new Set<string>();
+    plateIds.add(plateId);
+    completeReferencePlateIdsBySample.set(sampleName, plateIds);
   }
 
   const normalized = new Map<string, number>();
-  const rows: RelativeQuantificationResult[] = [];
-  for (const [sampleName, targets] of bySample) {
+  const segmentRows: RelativeQuantificationResult[] = [];
+  for (const [key, targets] of byPlateSample) {
+    const [, sampleName] = key.split("\u241f");
     const references = settings.referenceTargets
       .map((target) => targets.get(target))
       .filter((item): item is TargetMean => item !== undefined);
@@ -111,8 +207,7 @@ export function calculateRelativeQuantification(
       const deltaCqSem = propagatedSd([targetSummary.semCq, referenceSemCq]);
       const normalizedQuantitySd = exponentialSd(normalizedQuantity, deltaCqSd, base);
       const normalizedQuantitySem = exponentialSd(normalizedQuantity, deltaCqSem, base);
-      normalized.set(`${sampleName}\u241f${targetName}`, normalizedQuantity);
-      rows.push({
+      segmentRows.push({
         sampleName,
         targetName,
         targetMeanCq,
@@ -137,17 +232,26 @@ export function calculateRelativeQuantification(
         relativeExpressionSem: null,
         calibratorValue: settings.calibratorValue,
         referenceTargets: settings.referenceTargets,
-        warningCodes:
-          settings.calculationMode === "efficiency-corrected" && settings.efficiencyByTarget[targetName] === undefined
+        warningCodes: [
+          ...(settings.calculationMode === "efficiency-corrected" && settings.efficiencyByTarget[targetName] === undefined
             ? ["EFFICIENCY_ASSUMED_100_PERCENT"]
-            : [],
+            : []),
+          ...((completeReferencePlateIdsBySample.get(sampleName)?.size ?? 0) > 1
+            ? ["PLATE_AWARE_REFERENCE_PAIRING"]
+            : []),
+        ],
       });
     }
   }
 
+  const rows = aggregatePlateAwareRows(segmentRows, settings);
+  for (const row of rows) {
+    normalized.set(rowKey(row.sampleName, row.targetName), row.normalizedQuantity);
+  }
+
   return rows.map((row) => {
     if (settings.calculationMode === "delta-cq" || !settings.calibratorValue) return row;
-    const calibratorQuantity = normalized.get(`${settings.calibratorValue}\u241f${row.targetName}`);
+    const calibratorQuantity = normalized.get(rowKey(settings.calibratorValue, row.targetName));
     if (!calibratorQuantity) {
       return { ...row, warningCodes: [...row.warningCodes, "CALIBRATOR_MISSING"] };
     }

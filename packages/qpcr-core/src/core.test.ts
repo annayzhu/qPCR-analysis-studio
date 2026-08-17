@@ -23,6 +23,10 @@ function well(id: string, position: string, sample: string, target: string, cq: 
   };
 }
 
+function wellOnPlate(plateId: string, id: string, position: string, sample: string, target: string, cq: number | null): WellRecord {
+  return { ...well(id, position, sample, target, cq), plateId };
+}
+
 describe("replicate QC", () => {
   it("warns without auto-excluding and leaves singleton SD/CV null", () => {
     const wells = [well("1", "A1", "S1", "G1", 20), well("2", "A2", "S1", "G1", 20.2), well("3", "A3", "S1", "G1", 21)];
@@ -254,6 +258,50 @@ describe("relative quantification", () => {
     expect(result.deltaCqSem).toBeNull();
     expect(result.normalizedQuantitySd).toBeNull();
     expect(result.normalizedQuantitySem).toBeNull();
+  });
+
+  it("pairs split samples with the same-plate reference instead of pooling references across plates", () => {
+    const wells = [
+      wellOnPlate("plate-1", "1", "A1", "S7", "T1", 20), wellOnPlate("plate-1", "2", "A2", "S7", "T1", 20), wellOnPlate("plate-1", "3", "A3", "S7", "T1", 20),
+      wellOnPlate("plate-1", "4", "B1", "S7", "T2", 22), wellOnPlate("plate-1", "5", "B2", "S7", "T2", 22), wellOnPlate("plate-1", "6", "B3", "S7", "T2", 22),
+      wellOnPlate("plate-2", "7", "A1", "S7", "T1", 25), wellOnPlate("plate-2", "8", "A2", "S7", "T1", 25), wellOnPlate("plate-2", "9", "A3", "S7", "T1", 25),
+      wellOnPlate("plate-2", "10", "B1", "S7", "T3", 26), wellOnPlate("plate-2", "11", "B2", "S7", "T3", 26), wellOnPlate("plate-2", "12", "B3", "S7", "T3", 26),
+    ];
+    const results = calculateRelativeQuantification(wells, {
+      referenceTargets: ["T1"], calibratorType: "sample", calibratorValue: "",
+      replicateWarningThreshold: 0.5, tmWarningThreshold: 0.5, efficiencyByTarget: {}, calculationMode: "delta-cq",
+    });
+
+    const t2 = results.find((row) => row.targetName === "T2")!;
+    const t3 = results.find((row) => row.targetName === "T3")!;
+    expect(t2.deltaCq).toBeCloseTo(2);
+    expect(t2.normalizedQuantity).toBeCloseTo(0.25);
+    expect(t3.deltaCq).toBeCloseTo(1);
+    expect(t3.normalizedQuantity).toBeCloseTo(0.5);
+    expect(t2.warningCodes).toContain("PLATE_AWARE_REFERENCE_PAIRING");
+    expect(t3.warningCodes).toContain("PLATE_AWARE_REFERENCE_PAIRING");
+  });
+
+  it("calculates each plate-level delta Cq before merging repeated target segments", () => {
+    const wells = [
+      wellOnPlate("plate-1", "1", "A1", "S1", "REF", 20), wellOnPlate("plate-1", "2", "A2", "S1", "REF", 20), wellOnPlate("plate-1", "3", "A3", "S1", "REF", 20),
+      wellOnPlate("plate-1", "4", "B1", "S1", "GENE", 22), wellOnPlate("plate-1", "5", "B2", "S1", "GENE", 22), wellOnPlate("plate-1", "6", "B3", "S1", "GENE", 22),
+      wellOnPlate("plate-2", "7", "A1", "S1", "REF", 30), wellOnPlate("plate-2", "8", "A2", "S1", "REF", 30), wellOnPlate("plate-2", "9", "A3", "S1", "REF", 30),
+      wellOnPlate("plate-2", "10", "B1", "S1", "GENE", 34), wellOnPlate("plate-2", "11", "B2", "S1", "GENE", 34), wellOnPlate("plate-2", "12", "B3", "S1", "GENE", 34),
+    ];
+    const [result] = calculateRelativeQuantification(wells, {
+      referenceTargets: ["REF"], calibratorType: "sample", calibratorValue: "",
+      replicateWarningThreshold: 0.5, tmWarningThreshold: 0.5, efficiencyByTarget: {}, calculationMode: "delta-cq",
+    });
+
+    expect(result.normalizedQuantity).toBeCloseTo((0.25 + 0.0625) / 2);
+    expect(result.deltaCq).toBeCloseTo(-Math.log2((0.25 + 0.0625) / 2));
+    expect(result.targetValidReplicates).toBe(6);
+    expect(result.referenceValidReplicates).toEqual({ REF: 6 });
+    expect(result.warningCodes).toEqual(expect.arrayContaining([
+      "PLATE_AWARE_REFERENCE_PAIRING",
+      "MULTI_PLATE_TARGET_MERGED",
+    ]));
   });
 });
 

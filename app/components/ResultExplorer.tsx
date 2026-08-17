@@ -40,6 +40,17 @@ function safeFileName(value: string): string {
   return value.trim().replace(/[^\p{L}\p{N}._-]+/gu, "-") || "qpcr-expression";
 }
 
+function calculationWarningLabel(code: string, l: (zh: string, en: string) => string): string {
+  const labels: Record<string, [string, string]> = {
+    EFFICIENCY_ASSUMED_100_PERCENT: ["未输入扩增效率，按 100% 计算", "No efficiency entered; assumed 100%"],
+    CALIBRATOR_MISSING: ["缺少校准样本", "Calibrator missing"],
+    PLATE_AWARE_REFERENCE_PAIRING: ["跨板样本已按同板内参配对", "Split sample paired with same-plate reference"],
+    MULTI_PLATE_TARGET_MERGED: ["同一目标跨板重复，已先按板计算再合并", "Repeated target merged after plate-level calculation"],
+  };
+  const label = labels[code];
+  return label ? l(label[0], label[1]) : code;
+}
+
 function ExpressionChart({
   rows,
   target,
@@ -425,7 +436,7 @@ export default function ResultExplorer({ results, sampleOrder, targetOrder }: Re
           <tbody>
             {filtered.map((row) => (
               <tr key={`${row.sampleName}-${row.targetName}`} className={row.warningCodes.length ? "flagged-row" : ""}>
-                <td><b>{row.sampleName}</b></td><td>{row.targetName}</td><td>{formatNumber(row.targetMeanCq)}</td><td>{formatNumber(row.targetSdCq)}</td><td>{formatNumber(row.referenceMeanCq)}</td><td>{formatNumber(row.deltaCq)}</td><td>{formatNumber(row.normalizedQuantity, 4)}</td><td>{formatNumber(row.deltaDeltaCq)}</td><td><strong className="expression-value">{formatNumber(row.relativeExpression, 4)}</strong></td><td>{formatNumber(row.relativeExpressionSd ?? row.normalizedQuantitySd, 4)}</td><td>{formatNumber(row.relativeExpressionSem ?? row.normalizedQuantitySem, 4)}</td><td>{row.warningCodes.join(", ") || "—"}</td>
+                <td><b>{row.sampleName}</b></td><td>{row.targetName}</td><td>{formatNumber(row.targetMeanCq)}</td><td>{formatNumber(row.targetSdCq)}</td><td>{formatNumber(row.referenceMeanCq)}</td><td>{formatNumber(row.deltaCq)}</td><td>{formatNumber(row.normalizedQuantity, 4)}</td><td>{formatNumber(row.deltaDeltaCq)}</td><td><strong className="expression-value">{formatNumber(row.relativeExpression, 4)}</strong></td><td>{formatNumber(row.relativeExpressionSd ?? row.normalizedQuantitySd, 4)}</td><td>{formatNumber(row.relativeExpressionSem ?? row.normalizedQuantitySem, 4)}</td><td>{row.warningCodes.map((code) => calculationWarningLabel(code, l)).join("; ") || "—"}</td>
               </tr>
             ))}
           </tbody>
