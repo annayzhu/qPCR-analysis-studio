@@ -37,6 +37,17 @@ describe("Roche LightCycler 480 adapter", () => {
     expect(dataset.plate.plateFormat).toBe(384);
     expect(dataset.plate.requiresConfirmation).toBe(false);
   });
+
+  it("keeps the same well position separate when a Plate column is present", () => {
+    const source = parseDelimitedText(
+      "Plate\tWell\tSample\tTarget\tCq\nPlate 01\tA1\tS7\tGAPDH\t20\nPlate 02\tA1\tS7\tGAPDH\t25\n",
+      "two-plates.tsv",
+    );
+    const dataset = buildCanonicalDataset([source]);
+    expect(dataset.wells).toHaveLength(2);
+    expect(new Set(dataset.wells.map((well) => well.plateId)).size).toBe(2);
+    expect(dataset.assumptions.join(" ")).toContain("检测到 2 块板");
+  });
 });
 
 describe("staged import readiness", () => {

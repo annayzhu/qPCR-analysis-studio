@@ -1,0 +1,25 @@
+Plate	Well	Sample	Target	Cq	Reporter	Task	Replicate	Tm1	Tm2	Status	Omit
+Plate 01	A1	S7_split	T1_REF	20	FAM	Unknown	1	82.2		Passed	
+Plate 01	A2	S7_split	T1_REF	20.04	FAM	Unknown	2	82.2		Passed	
+Plate 01	A3	S7_split	T1_REF	19.96	FAM	Unknown	3	82.2		Passed	
+Plate 01	B1	S7_split	T2	22	FAM	Unknown	1	84		Passed	
+Plate 01	B2	S7_split	T2	22.02	FAM	Unknown	2	84		Passed	
+Plate 01	B3	S7_split	T2	21.98	FAM	Unknown	3	84		Passed	
+Plate 01	C1	S8_complete	T1_REF	20.2	FAM	Unknown	1	82.2		Passed	
+Plate 01	C2	S8_complete	T1_REF	20.18	FAM	Unknown	2	82.2		Passed	
+Plate 01	C3	S8_complete	T1_REF	20.25	FAM	Unknown	3	82.2		Passed	
+Plate 01	D1	S8_complete	T2	23.1	FAM	Unknown	1	84		Passed	
+Plate 01	D2	S8_complete	T2	23.04	FAM	Unknown	2	84		Passed	
+Plate 01	D3	S8_complete	T2	23.18	FAM	Unknown	3	84		Passed	
+Plate 02	E1	S7_split	T1_REF	25	FAM	Unknown	1	82.2		Passed	
+Plate 02	E2	S7_split	T1_REF	24.96	FAM	Unknown	2	82.2		Passed	
+Plate 02	E3	S7_split	T1_REF	25.05	FAM	Unknown	3	82.2		Passed	
+Plate 02	F1	S7_split	T3	26.02	FAM	Unknown	1	80.8		Passed	
+Plate 02	F2	S7_split	T3	25.98	FAM	Unknown	2	80.8		Passed	
+Plate 02	F3	S7_split	T3	26.04	FAM	Unknown	3	80.8		Passed	
+Plate 02	G1	S9_complete	T1_REF	21.1	FAM	Unknown	1	82.2		Passed	
+Plate 02	G2	S9_complete	T1_REF	21.08	FAM	Unknown	2	82.2		Passed	
+Plate 02	G3	S9_complete	T1_REF	21.14	FAM	Unknown	3	82.2		Passed	
+Plate 02	H1	S9_complete	T3	24	FAM	Unknown	1	80.8		Passed	
+Plate 02	H2	S9_complete	T3	24.06	FAM	Unknown	2	80.8		Passed	
+Plate 02	H3	S9_complete	T3	23.94	FAM	Unknown	3	80.8		Passed	

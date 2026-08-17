@@ -81,6 +81,8 @@ function isInstrumentOmitted(raw: unknown, sourceHeader: string): boolean {
 }
 
 interface PartialWell {
+  plateId: string;
+  plateName: string;
   well: string;
   sampleName?: string;
   targetName?: string;
@@ -98,6 +100,14 @@ interface PartialWell {
   rawRow: RawImportedRow;
   qcFlags: QcFlag[];
   sourcePriority: number;
+}
+
+function plateIdentity(rawPlateName: string): { plateId: string; plateName: string } {
+  const plateName = rawPlateName.trim() || "Plate 1";
+  return {
+    plateId: stableId("plate", plateName.toLowerCase()),
+    plateName,
+  };
 }
 
 function sourcePriority(source: ImportedSource): number {
@@ -185,6 +195,7 @@ export function buildCanonicalDataset(inputSources: ImportedSource[]): Canonical
     for (const rawRow of table.rawRows) {
       const rowLabel = text(value(rawRow, mappings, "row"));
       const columnLabel = text(value(rawRow, mappings, "column"));
+      const plate = plateIdentity(text(value(rawRow, mappings, "plateName")));
       const well =
         normalizeWell(value(rawRow, mappings, "well")) ??
         normalizeWell(`${rowLabel}${columnLabel}`);
@@ -214,6 +225,8 @@ export function buildCanonicalDataset(inputSources: ImportedSource[]): Canonical
         });
       }
       const incoming: PartialWell = {
+        plateId: plate.plateId,
+        plateName: plate.plateName,
         well,
         sampleName,
         targetName,
@@ -232,27 +245,32 @@ export function buildCanonicalDataset(inputSources: ImportedSource[]): Canonical
         qcFlags,
         sourcePriority: priority,
       };
-      partials.set(well, mergePartial(partials.get(well), incoming));
+      const partialKey = `${plate.plateId}\u241f${well}`;
+      partials.set(partialKey, mergePartial(partials.get(partialKey), incoming));
     }
   }
 
   const instrumentTypes = new Set(sources.map((source) => source.instrumentType).filter((type) => type !== "generic"));
   const instrumentType: InstrumentType = instrumentTypes.size === 1 ? [...instrumentTypes][0] : "generic";
-  const plate = detectPlate([...partials.keys()], instrumentType);
+  const plate = detectPlate([...partials.values()].map((partial) => partial.well), instrumentType);
   if (plate.requiresConfirmation) warnings.push("板规格由部分孔位推断，请在计算前确认 96/384 孔。");
   if (sources.some((source) => source.adapterId.endsWith("melt-grouping"))) {
     assumptions.push("导入的 Roche melt 文件是分组摘要；完整曲线需另行导出原始温度-荧光数据。");
   }
+  const plateNames = [...new Set([...partials.values()].map((partial) => partial.plateName))];
+  if (plateNames.length > 1) {
+    assumptions.push(`检测到 ${plateNames.length} 块板：${plateNames.join(", ")}。相对定量会按同一块板内的样本内参进行配对。`);
+  }
 
   const wells: WellRecord[] = [...partials.values()]
-    .sort((a, b) => a.well.charCodeAt(0) - b.well.charCodeAt(0) || Number(a.well.slice(1)) - Number(b.well.slice(1)))
+    .sort((a, b) => a.plateName.localeCompare(b.plateName) || a.well.charCodeAt(0) - b.well.charCodeAt(0) || Number(a.well.slice(1)) - Number(b.well.slice(1)))
     .map((partial) => {
       const row = partial.well[0];
       const column = Number(partial.well.slice(1));
       const cq = partial.cq ?? { cq: null, cqStatus: "missing" as const, cqReason: "未提供 Cq 数据" };
       return {
-        id: stableId("well", `plate-1:${partial.well}`),
-        plateId: "plate-1",
+        id: stableId("well", `${partial.plateId}:${partial.well}`),
+        plateId: partial.plateId,
         well: partial.well,
         row,
         column,
