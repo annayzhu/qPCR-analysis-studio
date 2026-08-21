@@ -171,6 +171,33 @@ export function buildCanonicalDataset(inputSources: ImportedSource[]): Canonical
   const warnings: string[] = [];
   const assumptions: string[] = [];
   const allMappings: FieldMapping[] = [];
+  const explicitPlateNames = new Set<string>();
+  const sourceHasExplicitPlate = new Map<string, boolean>();
+  const primaryResultSourceIds = new Set<string>();
+
+  for (const source of sources) {
+    const table = selectedTable(source);
+    if (!table) continue;
+    const mappings = mappingRecord(table.suggestedMappings);
+    if (table.suggestedMappings.some((mapping) => mapping.canonicalField === "cq" && mapping.confidence >= 0.7 && !mapping.conflict)) {
+      primaryResultSourceIds.add(source.id);
+    }
+    let hasExplicitPlate = false;
+    for (const rawRow of table.rawRows) {
+      const plateName = text(value(rawRow, mappings, "plateName"));
+      if (plateName) {
+        explicitPlateNames.add(plateName);
+        hasExplicitPlate = true;
+      }
+    }
+    sourceHasExplicitPlate.set(source.id, hasExplicitPlate);
+  }
+  const singleNamedPlate = explicitPlateNames.size === 1 ? [...explicitPlateNames][0] : "";
+  const anonymousPrimarySourceIds = [...primaryResultSourceIds].filter((sourceId) => !sourceHasExplicitPlate.get(sourceId));
+  const anonymousPrimaryPlateName = new Map(anonymousPrimarySourceIds.map((sourceId, index) => [sourceId, `Unassigned result ${index + 1}`]));
+  if (anonymousPrimarySourceIds.length > 1 && singleNamedPlate) {
+    warnings.push("检测到多个未命名的 Cq/Ct/Cp 结果文件和一个具名板布局；无法自动判断板布局对应哪一个结果文件，已保留为独立板等待人工确认。");
+  }
 
   for (const source of sources) {
     for (const table of source.tables.filter((item) => /plate[ _-]?map|板布局/i.test(item.sourceSheet))) {
@@ -195,7 +222,14 @@ export function buildCanonicalDataset(inputSources: ImportedSource[]): Canonical
     for (const rawRow of table.rawRows) {
       const rowLabel = text(value(rawRow, mappings, "row"));
       const columnLabel = text(value(rawRow, mappings, "column"));
-      const plate = plateIdentity(text(value(rawRow, mappings, "plateName")));
+      const rawPlateName = text(value(rawRow, mappings, "plateName"));
+      const inferredPlateName = primaryResultSourceIds.size <= 1
+        ? singleNamedPlate
+        : anonymousPrimaryPlateName.get(source.id) ?? (sourceHasExplicitPlate.get(source.id) ? "" : `Unassigned source ${source.id}`);
+      // Instrument exports commonly omit the plate name while a separately
+      // corrected layout names it. With exactly one named plate, both sources
+      // describe the same physical well grid and must join by well position.
+      const plate = plateIdentity(rawPlateName || inferredPlateName);
       const well =
         normalizeWell(value(rawRow, mappings, "well")) ??
         normalizeWell(`${rowLabel}${columnLabel}`);

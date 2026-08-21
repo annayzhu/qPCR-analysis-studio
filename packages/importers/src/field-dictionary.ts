@@ -10,7 +10,7 @@ export const FIELD_SYNONYMS: Record<CanonicalField, readonly string[]> = {
     "Detector", "Detector Name", "基因", "基因名", "基因名称", "靶标", "靶基因", "目标基因", "检测项目",
   ],
   well: ["Well", "Well Position", "Well ID", "Position", "Pos", "孔", "孔位", "反应孔"],
-  cq: ["Ct", "Cq", "Cp", "Crt", "Crossing Point", "Crossing Threshold", "Ct值", "Cq值", "Cp值"],
+  cq: ["Ct", "Cq", "Cp", "Cq/Ct/Cp", "Ct/Cq/Cp", "Crt", "Crossing Point", "Crossing Threshold", "Ct值", "Cq值", "Cp值"],
   cqMean: ["Ct Mean", "Cq Mean", "Cp Mean", "Mean Ct", "Mean Cq", "平均Ct", "Ct均值"],
   plateName: ["Plate", "Plate Name", "Plate ID", "板", "板名称", "板编号", "孔板名称"],
   row: ["Row", "行", "孔板行"],

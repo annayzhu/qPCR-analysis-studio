@@ -142,9 +142,29 @@ export interface ExclusionLog {
 export interface EditLog {
   id: string;
   wellRecordId: string;
-  field: "sampleName" | "targetName" | "taskType";
-  previousValue: string;
-  newValue: string;
+  field: "sampleName" | "targetName" | "taskType" | "replicate";
+  previousValue: string | number | null;
+  newValue: string | number | null;
+  timestamp: string;
+}
+
+export type AlignmentIssueType = "result-without-annotation" | "annotation-without-result";
+
+export interface AlignmentDispositionLog {
+  id: string;
+  wellRecordId: string;
+  issueType: AlignmentIssueType;
+  action: "confirm-reviewed";
+  reason: string;
+  timestamp: string;
+}
+
+export interface LayoutOperationLog {
+  id: string;
+  operation: "batch-edit" | "paste" | "clear" | "move" | "copy" | "swap" | "restore-selected" | "restore-plate" | "apply";
+  sourceWellRecordIds: string[];
+  destinationWellRecordIds: string[];
+  reason: string;
   timestamp: string;
 }
 

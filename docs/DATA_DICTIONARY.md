@@ -47,7 +47,7 @@
 | `sampleName` | Sample, Sample ID, Sample No, 样本, 样本编号, 标本 | 中英文可混合 |
 | `targetName` | Target, Assay, Gene, Detector, 基因, 靶基因 | 不硬编码具体基因 |
 | `well` | Well, Well Position, Pos, 孔位 | 也可由 Row + Column 合成 |
-| `cq` | Ct, Cq, Cp, Crt, Crossing Point | 单孔值 |
+| `cq` | Ct, Cq, Cp, Cq/Ct/Cp, Crt, Crossing Point | 单孔值；模板不接受 Ct Mean 代替 |
 | `cqMean` | CT Mean, Mean Cq, 平均 Ct | 必须与单孔 Cq 分开 |
 | `reporter` | Reporter, Dye, Channel, Color, 荧光通道 | 仪器适配器可细化 |
 | `taskType` | Task, Type, Sample Type, Assay Type, Role | 避免仅依赖模糊的 `Type` |
@@ -58,3 +58,14 @@
 
 `FieldMapping` 保留：输入列、统一字段、信心度、识别方式、证据、冲突标志和用户确认状态。当两个输入列都可能映射到同一核心字段且信心度接近时，系统不静默决定，必须人工确认。
 
+## 用户输入模板（schema 1.0.0）
+
+- `Data`：空白录入表，每行一个物理孔；必需列为 `Well`、`Sample`、`Assay`、`Assay Type`、`Replicate`、`Cq/Ct/Cp`。
+- `Example`：仅包含合成、去标识化示例。
+- `Field Dictionary`：双语字段定义、允许值、同义词和模板版本。
+- `Plate`：单板时可空；多板时必须提供并与 `Well` 共同构成唯一物理身份。
+- `Tm1`、`Tm2`：可选数值层，不作为相对定量的必需条件。
+
+## 完整结果导出（schema 1.0.0）
+
+完整结果使用稳定英文列名，并附带 `Data Dictionary` 工作表。`target_technical_sd` 与 `target_technical_sem` 为目标技术复孔统计；`reference_technical_sd` 与 `reference_technical_sem` 为内参传播统计；`relative_expression_technical_sd` 与 `relative_expression_technical_sem` 为相对表达传播统计。它们均不代表生物学重复变异、置信区间或推断统计。当有效技术复孔少于 2 个时，SD/SEM 留空而不是记为 0。

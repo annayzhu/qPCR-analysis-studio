@@ -74,9 +74,16 @@ export function parseWorkbookBytes(
 ): ImportedSource {
   const sourceId = id("source", `${fileName}:${bytes.byteLength}`);
   const workbook = XLSX.read(bytes, { type: "array", cellStyles: true });
+  const dictionarySheet = workbook.Sheets["Field Dictionary"];
+  const dictionaryMatrix = dictionarySheet ? sheetMatrix(dictionarySheet) : [];
+  const isQpcrTemplate = String(dictionaryMatrix[0]?.[0] ?? "").includes("qPCR Analysis Studio Input Template");
+  const templateVersion = isQpcrTemplate ? String(dictionaryMatrix[1]?.[1] ?? "").trim() : "";
   const tables = workbook.SheetNames.map((sheetName) =>
     tableFromMatrix(sourceId, fileName, sheetName, sheetMatrix(workbook.Sheets[sheetName])),
   ).sort((a, b) => b.score - a.score);
+  const selectedTableId = isQpcrTemplate
+    ? tables.find((table) => table.sourceSheet === "Data")?.id ?? tables[0]?.id ?? ""
+    : tables[0]?.id ?? "";
   return applyInstrumentAdapter({
     id: sourceId,
     fileName,
@@ -84,8 +91,8 @@ export function parseWorkbookBytes(
     adapterId: "generic-tabular",
     instrumentType: "generic",
     tables,
-    selectedTableId: tables[0]?.id ?? "",
-    metadata: {},
+    selectedTableId,
+    metadata: templateVersion ? { qpcrTemplateSchemaVersion: templateVersion } : {},
     warnings: tables.length ? [] : ["工作簿中没有可读取的工作表"],
   });
 }

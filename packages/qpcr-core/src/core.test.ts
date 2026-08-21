@@ -5,7 +5,9 @@ import { calculateRelativeQuantification } from "./calculations";
 import { buildQcWorkspaceState, calculateReplicateQc } from "./qc";
 import { summarizeMeltWells } from "./melt";
 import { restoreWellsToBaseline, setWellExclusion, updateWellFields } from "./audit";
+import { transferLayoutAnnotations } from "./layout-correction";
 import { buildVisualizationBarRows, VISUALIZATION_BAR_HEADERS } from "./visualization-export";
+import { buildCompleteResultRows, COMPLETE_RESULTS_HEADERS } from "./complete-results-export";
 
 const raw: RawImportedRow = {
   sourceId: "s", sourceFileName: "demo.tsv", sourceSheet: "Sheet1", sourceRowNumber: 2,
@@ -159,6 +161,70 @@ describe("audited edits", () => {
     expect(restored.wells[1]).toEqual(edited[1]);
     expect(restored.editLogs).toHaveLength(3);
     expect(restored.exclusionLogs).toHaveLength(1);
+  });
+
+  it("moves layout annotations while keeping raw Cp fixed to physical wells", () => {
+    const baseline = [
+      well("a1", "A1", "S1", "REF", 20),
+      well("a2", "A2", "S1", "GENE", 24),
+      well("b1", "B1", "", "", 30),
+      well("b2", "B2", "", "", 31),
+    ];
+    baseline[0].replicate = 1;
+    baseline[1].replicate = 2;
+
+    const moved = transferLayoutAnnotations(baseline, {
+      mode: "move",
+      sourceWellIds: ["a1", "a2"],
+      destinationAnchorWellId: "b1",
+      timestamp: "2026-08-21T00:00:00Z",
+    });
+
+    expect(moved.ok).toBe(true);
+    expect(moved.wells.map(({ well: position, sampleName, targetName, replicate, cq }) => ({ position, sampleName, targetName, replicate, cq }))).toEqual([
+      { position: "A1", sampleName: "", targetName: "", replicate: null, cq: 20 },
+      { position: "A2", sampleName: "", targetName: "", replicate: null, cq: 24 },
+      { position: "B1", sampleName: "S1", targetName: "REF", replicate: 1, cq: 30 },
+      { position: "B2", sampleName: "S1", targetName: "GENE", replicate: 2, cq: 31 },
+    ]);
+    expect(baseline[0].sampleName).toBe("S1");
+    expect(baseline[2].cq).toBe(30);
+    expect(moved.logs.length).toBeGreaterThan(0);
+  });
+
+  it("rejects a layout move before mutation when the destination is occupied", () => {
+    const baseline = [well("a1", "A1", "S1", "REF", 20), well("b1", "B1", "S2", "GENE", 30)];
+    const result = transferLayoutAnnotations(baseline, {
+      mode: "move",
+      sourceWellIds: ["a1"],
+      destinationAnchorWellId: "b1",
+    });
+    expect(result.ok).toBe(false);
+    expect(result.error).toBe("collision");
+    expect(result.wells).toBe(baseline);
+    expect(result.logs).toHaveLength(0);
+  });
+
+  it("copies and swaps annotations without moving either well's Cp", () => {
+    const copyBaseline = [well("a1", "A1", "S1", "REF", 20), well("b1", "B1", "", "", 30)];
+    const copied = transferLayoutAnnotations(copyBaseline, {
+      mode: "copy",
+      sourceWellIds: ["a1"],
+      destinationAnchorWellId: "b1",
+    });
+    expect(copied.wells.map((item) => [item.well, item.sampleName, item.targetName, item.cq])).toEqual([
+      ["A1", "S1", "REF", 20], ["B1", "S1", "REF", 30],
+    ]);
+
+    const swapBaseline = [well("a1", "A1", "S1", "REF", 20), well("b1", "B1", "S2", "GENE", 30)];
+    const swapped = transferLayoutAnnotations(swapBaseline, {
+      mode: "swap",
+      sourceWellIds: ["a1"],
+      destinationAnchorWellId: "b1",
+    });
+    expect(swapped.wells.map((item) => [item.well, item.sampleName, item.targetName, item.cq])).toEqual([
+      ["A1", "S2", "GENE", 20], ["B1", "S1", "REF", 30],
+    ]);
   });
 });
 
@@ -349,5 +415,26 @@ describe("Visualization Studio bar export", () => {
     expect(row.value).toBe(results[0].normalizedQuantity);
     expect(row.sd).toBe(results[0].normalizedQuantitySd);
     expect(row.sem).toBe(results[0].normalizedQuantitySem);
+  });
+});
+
+describe("complete calculation-results export", () => {
+  it("keeps unavailable technical SD/SEM blank when n is one", () => {
+    const results = calculateRelativeQuantification([
+      well("1", "A1", "S1", "REF", 20),
+      well("2", "A2", "S1", "GENE", 23),
+    ], {
+      referenceTargets: ["REF"], calibratorType: "sample", calibratorValue: "",
+      replicateWarningThreshold: 0.5, tmWarningThreshold: 0.5,
+      efficiencyByTarget: {}, calculationMode: "delta-cq",
+    });
+    const [row] = buildCompleteResultRows(results, ["S1"], ["GENE"], "delta-cq");
+    expect(Object.keys(row)).toEqual(COMPLETE_RESULTS_HEADERS);
+    expect(row.target_valid_replicates).toBe(1);
+    expect(row.target_technical_sd).toBeNull();
+    expect(row.target_technical_sem).toBeNull();
+    expect(row.reference_technical_sd).toBeNull();
+    expect(row.reference_technical_sem).toBeNull();
+    expect(row.notes).toContain("fewer than two valid technical replicates");
   });
 });

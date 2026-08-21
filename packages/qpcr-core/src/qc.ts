@@ -79,6 +79,14 @@ export function calculateReplicateQc(
     const tm1s = active.map((well) => well.tm1).filter((value): value is number => value !== null);
     const tm1Range = range(tm1s);
     const warnings = new Set<string>();
+    const replicateIds = group.map((well) => well.replicate).filter((value): value is number => value !== null);
+    if (replicateIds.length > 0) {
+      const uniqueReplicates = [...new Set(replicateIds)].sort((a, b) => a - b);
+      const expectedReplicates = Array.from({ length: uniqueReplicates.at(-1) ?? 0 }, (_, index) => index + 1);
+      if (replicateIds.length !== group.length || replicateIds.length !== uniqueReplicates.length || uniqueReplicates.some((value, index) => value !== expectedReplicates[index])) {
+        warnings.add("REPLICATE_ID_INCOMPLETE");
+      }
+    }
     const hasQuantificationData = group.some((well) => well.cq !== null || well.cqStatus === "not-detected");
     if (active.length < group.length || (hasQuantificationData && valid.length < active.length)) warnings.add("EXCLUDED_OR_NON_DETECTED");
     if (cqRange !== null && cqRange > cqRangeWarning) warnings.add("CQ_RANGE_HIGH");
@@ -135,6 +143,7 @@ export function buildQcWorkspaceState(
     "TM_RANGE_HIGH",
     "SECONDARY_MELT_PEAK",
     "EXCLUDED_OR_NON_DETECTED",
+    "REPLICATE_ID_INCOMPLETE",
   ]);
   const groupWarnings = new Map<string, Set<string>>();
   const specificWarnings = new Map<string, Set<string>>();

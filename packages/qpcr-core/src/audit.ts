@@ -7,7 +7,7 @@ function logId(prefix: string): string {
 export function updateWellFields(
   wells: WellRecord[],
   wellIds: string[],
-  changes: Partial<Pick<WellRecord, "sampleName" | "targetName" | "taskType">>,
+  changes: Partial<Pick<WellRecord, "sampleName" | "targetName" | "taskType" | "replicate">>,
   timestamp = new Date().toISOString(),
 ): { wells: WellRecord[]; logs: EditLog[] } {
   const ids = new Set(wellIds);
@@ -15,7 +15,7 @@ export function updateWellFields(
   const next = wells.map((well) => {
     if (!ids.has(well.id)) return well;
     let updated = well;
-    for (const field of ["sampleName", "targetName", "taskType"] as const) {
+    for (const field of ["sampleName", "targetName", "taskType", "replicate"] as const) {
       const newValue = changes[field];
       if (newValue === undefined || newValue === updated[field]) continue;
       logs.push({
@@ -77,6 +77,7 @@ export function restoreWellsToBaseline(
       sampleName: baseline.sampleName,
       targetName: baseline.targetName,
       taskType: baseline.taskType,
+      replicate: baseline.replicate,
     }, timestamp);
     nextWells = fieldRestore.wells;
     editLogs.push(...fieldRestore.logs);

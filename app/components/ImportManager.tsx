@@ -5,6 +5,8 @@ import type { CanonicalField, ImportedSource } from "@/packages/schemas/src";
 import {
   CANONICAL_FIELD_LABELS,
   getSourceCapabilities,
+  validateQpcrInputTemplate,
+  writeQpcrInputTemplate,
   type ImportReadiness,
   type ImportSourceRole,
 } from "@/packages/importers/src";
@@ -101,6 +103,9 @@ interface ImportManagerProps {
   loading: boolean;
   error: string;
   hasDataset: boolean;
+  alignmentReviewRequired: boolean;
+  resultWithoutAnnotationCount: number;
+  annotationWithoutResultCount: number;
   onPickResults: () => void;
   onPickLayout: () => void;
   onImportFiles: (files: FileList | File[]) => void | Promise<void>;
@@ -125,6 +130,7 @@ function SourceCard({
   const { language, l } = useLanguage();
   const table = source.tables.find((item) => item.id === source.selectedTableId) ?? source.tables[0];
   const capabilities = getSourceCapabilities(source);
+  const templateValidation = validateQpcrInputTemplate(source);
   const sourceRole = roleLabel(capabilities.role, l);
   return (
     <article className="source-row">
@@ -154,6 +160,16 @@ function SourceCard({
         )}
 
         {source.warnings.map((warning) => <p className="inline-warning" key={warning}>△ {localizeRuntimeMessage(warning, language)}</p>)}
+
+        {templateValidation && (
+          <div className={`template-validation-summary ${templateValidation.errorCount ? "has-errors" : "is-valid"}`}>
+            <div><strong>{templateValidation.errorCount ? l("模板需要修正", "Template requires correction") : l("模板校验通过", "Template validation passed")}</strong><span>{l(
+              `${templateValidation.totalRows} 行 · ${templateValidation.detectedCount} 个有效数值 · ${templateValidation.nonDetectedCount} 个未检出 · ${templateValidation.warningCount} 条提醒 · ${templateValidation.errorCount} 个错误`,
+              `${templateValidation.totalRows} rows · ${templateValidation.detectedCount} detected · ${templateValidation.nonDetectedCount} non-detected · ${templateValidation.warningCount} warning(s) · ${templateValidation.errorCount} error(s)`,
+            )}</span></div>
+            {templateValidation.issues.length > 0 && <details><summary>{l("查看逐行校验", "Review row-level validation")}</summary><ul>{templateValidation.issues.slice(0, 20).map((item, index) => <li key={`${item.code}-${item.sourceRowNumber}-${index}`} className={item.severity}><b>{item.sourceSheet}{item.sourceRowNumber ? ` · ${l("第", "row ")}${item.sourceRowNumber}${language === "zh" ? " 行" : ""}` : ""} · {item.column}</b><span>{language === "zh" ? item.messageZh : item.messageEn}</span></li>)}</ul>{templateValidation.issues.length > 20 && <p>{l(`另有 ${templateValidation.issues.length - 20} 条，请修正前述问题后重新导入。`, `${templateValidation.issues.length - 20} more issue(s); correct the listed problems and re-import.`)}</p>}</details>}
+          </div>
+        )}
 
         {table && (
           <details className="mapping-details">
@@ -190,6 +206,9 @@ export default function ImportManager({
   loading,
   error,
   hasDataset,
+  alignmentReviewRequired,
+  resultWithoutAnnotationCount,
+  annotationWithoutResultCount,
   onPickResults,
   onPickLayout,
   onImportFiles,
@@ -203,6 +222,16 @@ export default function ImportManager({
   const resultSources = sources.filter((source) => getSourceCapabilities(source).role !== "plate-layout");
   const layoutSources = sources.filter((source) => getSourceCapabilities(source).role === "plate-layout");
 
+  function downloadInputTemplate() {
+    const bytes = writeQpcrInputTemplate();
+    const url = URL.createObjectURL(new Blob([bytes], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }));
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = "qpcr-analysis-input-template-v1.0.0.xlsx";
+    anchor.click();
+    URL.revokeObjectURL(url);
+  }
+
   return (
     <section className="intake-shell">
       <div className="intake-heading">
@@ -211,13 +240,22 @@ export default function ImportManager({
           <h2>{l("分类型导入，再统一分析", "Import by type, then analyze together")}</h2>
           <p>{l("Cq 用于相对定量；Tm/熔解结果用于峰值与分组复核。系统读取结果后，只有缺少 Sample/Target 时才要求板布局。", "Cq supports relative quantification; Tm/melt results support peak and grouping review. A separate plate layout is required only when Sample/Target information is missing.")}</p>
         </div>
-        <div className={`readiness-badge readiness-${readiness.status}`}>
-          <span />{readiness.status === "ready" ? l("分析已就绪", "Ready") : readiness.status === "review-mapping" ? l("需确认映射", "Confirm mapping") : l("等待数据", "Waiting for data")}
+        <div className={`readiness-badge readiness-${alignmentReviewRequired ? "alignment-review" : readiness.status}`}>
+          <span />{alignmentReviewRequired ? l("需复核板布局", "Review plate layout") : readiness.status === "ready" ? l("分析已就绪", "Ready") : readiness.status === "review-mapping" ? l("需确认映射", "Confirm mapping") : l("等待数据", "Waiting for data")}
         </div>
       </div>
 
       {loading && <div className="notice">{l("正在当前浏览器中解析文件…", "Parsing files in this browser…")}</div>}
       {error && <div className="notice error">{localizeRuntimeMessage(error, language)}</div>}
+      {alignmentReviewRequired && (
+        <div className="notice alignment-review-notice">
+          <strong>{l("检测到结果与板布局可能错位", "Possible result/layout misalignment detected")}</strong>
+          <span>{l(
+            `${resultWithoutAnnotationCount} 个孔有 Cp 但缺少 Sample/Target；${annotationWithoutResultCount} 个已定义孔没有 Cp。原始 Cp 已保留，请进入板工作区修正布局后再计算。`,
+            `${resultWithoutAnnotationCount} well(s) have Cp but no Sample/Target; ${annotationWithoutResultCount} annotated well(s) have no Cp. Raw Cp values are preserved. Correct the layout in Plate Workspace before calculation.`,
+          )}</span>
+        </div>
+      )}
 
       <div className="import-stage-grid" aria-label={l("分阶段数据导入", "Staged data import")}>
         <article className="import-stage primary-stage">
@@ -227,7 +265,10 @@ export default function ImportManager({
               <div className="stage-title-line"><h3>{l("仪器结果", "Instrument results")}</h3><span className="stage-kicker">{l("必需", "Required")}</span></div>
               <p>{l("可连续添加 Cq/Ct/Cp、Tm 或熔解分组文件；任一分析类型具备板信息后即可进入对应结果页。", "Add multiple Cq/Ct/Cp, Tm, or melt-group files. Each analysis becomes available when its data include plate information.")}</p>
             </div>
-            <button className="primary-button" type="button" disabled={loading} onClick={onPickResults}>+ {l("添加结果", "Add results")}</button>
+            <div className="stage-header-actions">
+              <button className="quiet-button bordered template-download-button" type="button" onClick={downloadInputTemplate}>↓ {l("下载数据导入模板", "Download input template")}</button>
+              <button className="primary-button" type="button" disabled={loading} onClick={onPickResults}>+ {l("添加结果", "Add results")}</button>
+            </div>
           </div>
           <div className="stage-files">
             <FileDropzone kind="results" loading={loading} onPick={onPickResults} onFiles={onImportFiles} />
@@ -269,15 +310,15 @@ export default function ImportManager({
         </article>
       </div>
 
-      <div className={`readiness-panel readiness-${readiness.status}`}>
-        <div className="readiness-icon">{readiness.status === "ready" ? "✓" : readiness.status === "review-mapping" ? "!" : "→"}</div>
+      <div className={`readiness-panel readiness-${alignmentReviewRequired ? "alignment-review" : readiness.status}`}>
+        <div className="readiness-icon">{alignmentReviewRequired ? "!" : readiness.status === "ready" ? "✓" : readiness.status === "review-mapping" ? "!" : "→"}</div>
         <div>
-          <strong>{localizeRuntimeMessage(readiness.message, language)}</strong>
+          <strong>{alignmentReviewRequired ? l("文件已解析，需复核板布局后再计算", "Files parsed; review the plate layout before calculation") : localizeRuntimeMessage(readiness.message, language)}</strong>
           <p>{l(`已读取 ${readiness.primaryResultCount} 个 Cq 结果、${readiness.supplementalResultCount} 个 Tm/熔解结果、${readiness.layoutCount} 个布局文件。进入分析后仍可返回追加或替换。`, `${readiness.primaryResultCount} Cq result(s), ${readiness.supplementalResultCount} Tm/melt result(s), and ${readiness.layoutCount} layout file(s) loaded. You can return later to add or replace files.`)}</p>
         </div>
         <div className="readiness-actions">
           {readiness.canAnalyze && <button className="quiet-button bordered" type="button" onClick={onRebuild}>{l("重新合并并计算", "Re-merge & calculate")}</button>}
-          <button className="primary-button" type="button" disabled={!hasDataset} onClick={onContinue}>{readiness.analysisMode === "melt-only" ? l("进入熔解分析", "Open melt analysis") : l("进入分析", "Open analysis")} →</button>
+          <button className="primary-button" type="button" disabled={!hasDataset} onClick={onContinue}>{alignmentReviewRequired ? l("检查并修正板布局", "Review & correct layout") : readiness.analysisMode === "melt-only" ? l("进入熔解分析", "Open melt analysis") : l("进入分析", "Open analysis")} →</button>
         </div>
       </div>
     </section>

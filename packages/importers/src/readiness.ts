@@ -1,5 +1,6 @@
-import type { CanonicalField, ImportedSource } from "../../schemas/src";
+import type { CanonicalDataset, CanonicalField, ImportedSource } from "../../schemas/src";
 import { selectedTable } from "./adapters";
+import { validateQpcrInputTemplate } from "./user-template";
 
 export type ImportSourceRole = "primary-result" | "supplemental-result" | "plate-layout" | "unknown";
 
@@ -28,7 +29,75 @@ export interface ImportReadiness {
   message: string;
 }
 
+export interface AlignmentIssue {
+  wellId: string;
+  plateId: string;
+  well: string;
+}
+
+export interface DatasetAlignment {
+  status: "aligned" | "needs-correction" | "not-applicable";
+  joinedDetectedCount: number;
+  resultWithoutAnnotation: AlignmentIssue[];
+  annotationWithoutResult: AlignmentIssue[];
+}
+
 const CRITICAL_FIELDS = new Set<CanonicalField>(["well", "sampleName", "targetName", "cq"]);
+
+export function assessDatasetAlignment(
+  dataset: CanonicalDataset,
+  analysisMode: ImportReadiness["analysisMode"],
+): DatasetAlignment {
+  if (analysisMode !== "quantification") {
+    return {
+      status: "not-applicable",
+      joinedDetectedCount: 0,
+      resultWithoutAnnotation: [],
+      annotationWithoutResult: [],
+    };
+  }
+
+  const issue = (well: CanonicalDataset["wells"][number]): AlignmentIssue => ({
+    wellId: well.id,
+    plateId: well.plateId,
+    well: well.well,
+  });
+  const resultWithoutAnnotation = dataset.wells
+    .filter((well) => well.cqStatus === "detected" && well.cq !== null && (!well.sampleName || !well.targetName))
+    .map(issue);
+  const annotationWithoutResult = dataset.wells
+    .filter((well) => well.sampleName && well.targetName && well.cqStatus === "missing")
+    .map(issue);
+  const joinedDetectedCount = dataset.wells.filter(
+    (well) => well.cqStatus === "detected" && well.cq !== null && well.sampleName && well.targetName,
+  ).length;
+
+  return {
+    status: resultWithoutAnnotation.length || annotationWithoutResult.length ? "needs-correction" : "aligned",
+    joinedDetectedCount,
+    resultWithoutAnnotation,
+    annotationWithoutResult,
+  };
+}
+
+export function getUnresolvedAlignmentIssues(
+  alignment: DatasetAlignment,
+  reviewedWellIds: Iterable<string>,
+): AlignmentIssue[] {
+  const reviewed = new Set(reviewedWellIds);
+  return [...alignment.resultWithoutAnnotation, ...alignment.annotationWithoutResult]
+    .filter((issue) => !reviewed.has(issue.wellId));
+}
+
+export function getAnalysisBlockingError(
+  dataset: CanonicalDataset,
+  analysisMode: ImportReadiness["analysisMode"],
+): string | null {
+  if (analysisMode !== "quantification") return null;
+  return assessDatasetAlignment(dataset, analysisMode).joinedDetectedCount
+    ? null
+    : "未找到与样本和基因正确合并的有效 Cq/Ct/Cp。请检查结果文件与板布局的板名和孔位是否对应。";
+}
 
 export function getSourceCapabilities(source: ImportedSource): SourceCapabilities {
   const table = selectedTable(source);
@@ -88,10 +157,26 @@ export function assessImportReadiness(sources: ImportedSource[]): ImportReadines
   const supplementalResults = capabilities.filter((item) => item.role === "supplemental-result");
   const layouts = capabilities.filter((item) => item.role === "plate-layout");
   const hasBlockingConflict = capabilities.some((item) => item.blockingConflicts.length > 0);
+  const templateValidation = sources.map(validateQpcrInputTemplate).filter((item) => item !== null);
+  const hasTemplateErrors = templateValidation.some((item) => item.errorCount > 0);
   const analysisResults = [...primaryResults, ...supplementalResults];
   const analysisMode = primaryResults.length ? "quantification" : supplementalResults.length ? "melt-only" : null;
   const resultIncludesPlateLayout = analysisResults.some((item) => item.includesPlateLayout);
   const layoutRequired = analysisResults.length > 0 && !resultIncludesPlateLayout;
+
+  if (hasTemplateErrors) {
+    return {
+      status: "review-mapping",
+      canAnalyze: false,
+      analysisMode,
+      resultIncludesPlateLayout,
+      layoutRequired,
+      primaryResultCount: primaryResults.length,
+      supplementalResultCount: supplementalResults.length,
+      layoutCount: layouts.length,
+      message: "数据模板存在阻断错误。请按工作表、行号和列提示修正后重新导入。",
+    };
+  }
 
   if (!analysisResults.length) {
     return {
