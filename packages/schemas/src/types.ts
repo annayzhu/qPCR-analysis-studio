@@ -164,6 +164,9 @@ export interface LayoutOperationLog {
   operation: "batch-edit" | "paste" | "clear" | "move" | "copy" | "swap" | "restore-selected" | "restore-plate" | "apply";
   sourceWellRecordIds: string[];
   destinationWellRecordIds: string[];
+  changes: EditLog[];
+  previousSnapshot: string;
+  newSnapshot: string;
   reason: string;
   timestamp: string;
 }
@@ -213,6 +216,7 @@ export interface ReplicateQc {
 export interface RelativeQuantificationResult {
   sampleName: string;
   targetName: string;
+  assayTypeRole: string;
   targetMeanCq: number;
   targetSdCq: number | null;
   targetSemCq: number | null;

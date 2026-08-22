@@ -19,14 +19,14 @@ function filledTemplateBytes(): ArrayBuffer {
   const workbook = buildQpcrInputTemplateWorkbook();
   const rows: Array<Array<string | number>> = [
     [...QPCR_INPUT_TEMPLATE_HEADERS],
-    ["Plate 01", "A1", "Control", "REF", "Reference", 1, 20.0, 82.1, ""],
-    ["Plate 01", "A2", "Control", "REF", "Reference", 2, 20.2, 82.2, ""],
-    ["Plate 01", "A3", "Control", "GENE", "Target", 1, 23.0, 84.1, ""],
-    ["Plate 01", "A4", "Control", "GENE", "Target", 2, 23.2, 84.2, ""],
-    ["Plate 01", "B1", "Treat", "REF", "Reference", 1, 20.1, 82.1, ""],
-    ["Plate 01", "B2", "Treat", "REF", "Reference", 2, 20.3, 82.2, ""],
-    ["Plate 01", "B3", "Treat", "GENE", "Target", 1, 22.1, 84.1, ""],
-    ["Plate 01", "B4", "Treat", "GENE", "Target", 2, 22.3, 84.2, ""],
+    ["Plate 01", 96, "A1", "Control", "REF", "Reference", 1, 20.0, 82.1, ""],
+    ["Plate 01", 96, "A2", "Control", "REF", "Reference", 2, 20.2, 82.2, ""],
+    ["Plate 01", 96, "A3", "Control", "GENE", "Target", 1, 23.0, 84.1, ""],
+    ["Plate 01", 96, "A4", "Control", "GENE", "Target", 2, 23.2, 84.2, ""],
+    ["Plate 01", 96, "B1", "Treat", "REF", "Reference", 1, 20.1, 82.1, ""],
+    ["Plate 01", 96, "B2", "Treat", "REF", "Reference", 2, 20.3, 82.2, ""],
+    ["Plate 01", 96, "B3", "Treat", "GENE", "Target", 1, 22.1, 84.1, ""],
+    ["Plate 01", 96, "B4", "Treat", "GENE", "Target", 2, 22.3, 84.2, ""],
   ];
   workbook.Sheets.Data = XLSX.utils.aoa_to_sheet(rows);
   return XLSX.write(workbook, { bookType: "xlsx", type: "array", cellStyles: true }) as ArrayBuffer;

@@ -360,14 +360,21 @@ describe("relative quantification", () => {
       replicateWarningThreshold: 0.5, tmWarningThreshold: 0.5, efficiencyByTarget: {}, calculationMode: "delta-cq",
     });
 
-    expect(result.normalizedQuantity).toBeCloseTo((0.25 + 0.0625) / 2);
-    expect(result.deltaCq).toBeCloseTo(-Math.log2((0.25 + 0.0625) / 2));
+    expect(result.targetMeanCq).toBeCloseTo(28);
+    expect(result.referenceMeanCq).toBeCloseTo(25);
+    expect(result.deltaCq).toBeCloseTo(result.targetMeanCq - result.referenceMeanCq);
+    expect(result.normalizedQuantity).toBeCloseTo(0.125);
     expect(result.targetValidReplicates).toBe(6);
     expect(result.referenceValidReplicates).toEqual({ REF: 6 });
     expect(result.warningCodes).toEqual(expect.arrayContaining([
       "PLATE_AWARE_REFERENCE_PAIRING",
       "MULTI_PLATE_TARGET_MERGED",
     ]));
+    expect(result.targetSdCq).toBeCloseTo(Math.sqrt(43.2));
+    expect(result.targetSemCq).toBeCloseTo(result.targetSdCq! / Math.sqrt(6));
+    expect(result.referenceSdCq).toBeCloseTo(Math.sqrt(30));
+    expect(result.referenceSemCq).toBeCloseTo(result.referenceSdCq! / Math.sqrt(6));
+    expect(result.normalizedQuantitySd).toBeCloseTo(Math.log(2) * result.normalizedQuantity * result.deltaCqSd!);
   });
 });
 
@@ -436,5 +443,29 @@ describe("complete calculation-results export", () => {
     expect(row.reference_technical_sd).toBeNull();
     expect(row.reference_technical_sem).toBeNull();
     expect(row.notes).toContain("fewer than two valid technical replicates");
+  });
+
+  it("preserves the supplied assay role and carries import/QC warnings into the complete export", () => {
+    const wells = [
+      { ...well("1", "A1", "S1", "REF", 20), taskType: "Reference" },
+      { ...well("2", "A2", "S1", "REF", 20.2), taskType: "Reference" },
+      { ...well("3", "A3", "S1", "GENE", 23), taskType: "Gene of interest" },
+      { ...well("4", "A4", "S1", "GENE", 23.2), taskType: "Gene of interest" },
+    ];
+    const results = calculateRelativeQuantification(wells, {
+      referenceTargets: ["REF"], calibratorType: "sample", calibratorValue: "",
+      replicateWarningThreshold: 0.5, tmWarningThreshold: 0.5,
+      efficiencyByTarget: {}, calculationMode: "delta-cq",
+    });
+    const [row] = buildCompleteResultRows(
+      results,
+      ["S1"],
+      ["GENE"],
+      "delta-cq",
+      ["IMPORT_WARNING: synthetic warning"],
+    );
+
+    expect(row.assay_type_role).toBe("Gene of interest");
+    expect(row.warnings).toContain("IMPORT_WARNING: synthetic warning");
   });
 });

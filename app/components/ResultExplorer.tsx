@@ -275,9 +275,10 @@ interface ResultExplorerProps {
   sampleOrder: string[];
   targetOrder: string[];
   calculationMode: AnalysisSettings["calculationMode"];
+  provenanceWarnings?: string[];
 }
 
-export default function ResultExplorer({ results, sampleOrder, targetOrder, calculationMode }: ResultExplorerProps) {
+export default function ResultExplorer({ results, sampleOrder, targetOrder, calculationMode, provenanceWarnings = [] }: ResultExplorerProps) {
   const { language, l } = useLanguage();
   const [warningOnly, setWarningOnly] = useState(false);
   const [showTechnicalSd, setShowTechnicalSd] = useState(false);
@@ -310,8 +311,8 @@ export default function ResultExplorer({ results, sampleOrder, targetOrder, calc
     [results, sampleOrder, targetOrder],
   );
   const completeRows = useMemo(
-    () => buildCompleteResultRows(results, sampleOrder, targetOrder, calculationMode),
-    [calculationMode, results, sampleOrder, targetOrder],
+    () => buildCompleteResultRows(results, sampleOrder, targetOrder, calculationMode, provenanceWarnings),
+    [calculationMode, provenanceWarnings, results, sampleOrder, targetOrder],
   );
 
   function exportCompleteExcel() {
@@ -344,6 +345,12 @@ export default function ResultExplorer({ results, sampleOrder, targetOrder, calc
       ...completeRows.map((row) => COMPLETE_RESULTS_HEADERS.map((header) => escapeCell(row[header])).join("\t")),
     ];
     downloadBlob(new Blob(["\uFEFF", lines.join("\r\n")], { type: "text/tab-separated-values;charset=utf-8" }), "qpcr-complete-calculation-results.tsv");
+    const dictionaryLines = [
+      "field\tdefinition_zh\tdefinition_en",
+      ...COMPLETE_RESULTS_DICTIONARY.map((item) => [item.field, item.definitionZh, item.definitionEn]
+        .map((value) => value.replace(/[\t\r\n]+/g, " ")).join("\t")),
+    ];
+    downloadBlob(new Blob(["\uFEFF", dictionaryLines.join("\r\n")], { type: "text/tab-separated-values;charset=utf-8" }), "qpcr-complete-calculation-results-data-dictionary.tsv");
   }
 
   function exportVisualizationExcel() {
@@ -438,7 +445,7 @@ export default function ResultExplorer({ results, sampleOrder, targetOrder, calc
             <span className="command-group-label">{l("完整计算结果", "Complete results")}</span>
             <div className="visualization-export-actions">
               <button type="button" disabled={!completeRows.length} onClick={exportCompleteExcel}>{l("Excel（含字典）", "Excel + dictionary")}</button>
-              <button type="button" disabled={!completeRows.length} onClick={exportCompleteTsv}>TSV</button>
+              <button type="button" disabled={!completeRows.length} onClick={exportCompleteTsv}>{l("TSV + 字典", "TSV + dictionary")}</button>
             </div>
           </div>
 

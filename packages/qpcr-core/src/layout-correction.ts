@@ -23,7 +23,7 @@ export interface LayoutTransferResult {
   logs: EditLog[];
   mappings: LayoutTransferMapping[];
   collisionWellIds: string[];
-  error: "empty-selection" | "mixed-source-plates" | "out-of-bounds" | "collision" | "overlapping-swap" | null;
+  error: "empty-selection" | "mixed-source-plates" | "out-of-bounds" | "collision" | "overlapping-copy" | "overlapping-swap" | null;
 }
 
 type LayoutAnnotation = Pick<WellRecord, "sampleName" | "targetName" | "taskType" | "replicate">;
@@ -86,6 +86,9 @@ export function previewLayoutTransfer(
   if (destinationIds.size !== mappings.length) return failed(wells, "out-of-bounds", mappings);
   if (request.mode === "swap" && mappings.some((mapping) => sourceIds.has(mapping.destinationWellId))) {
     return failed(wells, "overlapping-swap", mappings);
+  }
+  if (request.mode === "copy" && mappings.some((mapping) => sourceIds.has(mapping.destinationWellId))) {
+    return failed(wells, "overlapping-copy", mappings);
   }
   const collisionWellIds = request.mode === "swap" ? [] : mappings
     .map((mapping) => wells.find((well) => well.id === mapping.destinationWellId))

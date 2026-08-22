@@ -124,4 +124,24 @@ describe("plate-layout correction workflow", () => {
     expect(restored.wells.find((well) => well.id === a3.id)?.targetName).toBe("");
     expect(restored.wells.every((well) => well.cq === cpById.get(well.id))).toBe(true);
   });
+
+  it("blocks an overlapping copy before any source annotation can be overwritten", () => {
+    const source = parseDelimitedText(
+      "Well\tSample\tTarget\tCq\nA1\tS01\tREF\t20\nA2\tS01\tGENE\t21\nA3\t\t\t22\n",
+      "overlapping-copy.tsv",
+    );
+    const wells = buildCanonicalDataset([source]).wells;
+    const snapshot = structuredClone(wells);
+    const a1 = wells.find((well) => well.well === "A1")!;
+    const a2 = wells.find((well) => well.well === "A2")!;
+
+    const copied = transferLayoutAnnotations(wells, {
+      mode: "copy",
+      sourceWellIds: [a1.id, a2.id],
+      destinationAnchorWellId: a2.id,
+    });
+
+    expect(copied).toMatchObject({ ok: false, error: "overlapping-copy" });
+    expect(copied.wells).toEqual(snapshot);
+  });
 });

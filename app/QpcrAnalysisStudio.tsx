@@ -22,6 +22,7 @@ import {
   getAnalysisBlockingError,
   getUnresolvedAlignmentIssues,
   parseBrowserFile,
+  validateQpcrInputTemplate,
 } from "@/packages/importers/src";
 import {
   buildQcWorkspaceState,
@@ -74,6 +75,9 @@ function makeLayoutOperationLog(
   sourceWellRecordIds: string[],
   destinationWellRecordIds: string[],
   reason: string,
+  changes: EditLog[] = [],
+  previousSnapshot = "",
+  newSnapshot = "",
 ): LayoutOperationLog {
   const timestamp = new Date().toISOString();
   return {
@@ -81,6 +85,9 @@ function makeLayoutOperationLog(
     operation,
     sourceWellRecordIds,
     destinationWellRecordIds,
+    changes,
+    previousSnapshot,
+    newSnapshot,
     reason,
     timestamp,
   };
@@ -229,6 +236,26 @@ function auditLogReference(
   return label(log.wellRecordId);
 }
 
+function layoutAnnotationSnapshot(wells: WellRecord[], wellIds: string[]): string {
+  const ids = new Set(wellIds);
+  return JSON.stringify(wells.filter((well) => ids.has(well.id)).map((well) => ({
+    wellRecordId: well.id,
+    sampleName: well.sampleName,
+    targetName: well.targetName,
+    taskType: well.taskType,
+    replicate: well.replicate,
+    userExcluded: well.userExcluded,
+  })));
+}
+
+function auditWellReferences(wellIds: string[], wells: WellRecord[]): string {
+  const wellById = new Map(wells.map((well) => [well.id, well]));
+  return wellIds.map((wellId) => {
+    const well = wellById.get(wellId);
+    return well ? `${well.plateId} ${well.well}` : wellId;
+  }).join("; ");
+}
+
 export default function QpcrAnalysisStudio() {
   const { language, setLanguage, l } = useLanguage();
   const resultInput = useRef<HTMLInputElement>(null);
@@ -334,6 +361,16 @@ export default function QpcrAnalysisStudio() {
     };
     return calculateRelativeQuantification(appliedWells, settings);
   }, [appliedWells, calibrator, referenceTargets]);
+  const resultExportWarnings = useMemo(() => [...new Set([
+    ...(dataset?.warnings ?? []),
+    ...sources.flatMap((source) => source.warnings),
+    ...sources.flatMap((source) => source.tables.flatMap((table) => table.warnings)),
+    ...sources.flatMap((source) => validateQpcrInputTemplate(source)?.issues
+      .filter((issue) => issue.severity === "warning")
+      .map((issue) => `${issue.code}: ${issue.sourceSheet} row ${issue.sourceRowNumber ?? "-"} ${issue.messageEn}`) ?? []),
+    ...appliedWells.flatMap((well) => well.qcFlags.map((flag) => `${flag.code}: ${flag.message}`)),
+    ...appliedQcState.replicateQc.flatMap((group) => group.warningCodes.map((code) => `${code}: ${group.plateId} ${group.sampleName} ${group.targetName}`)),
+  ])], [appliedQcState.replicateQc, appliedWells, dataset?.warnings, sources]);
   const filteredQc = useMemo(() => {
     const query = qcSearch.trim().toLocaleLowerCase();
     return qc.filter((row) => (!qcIssueOnly || row.warningCodes.length > 0)
@@ -419,6 +456,19 @@ export default function QpcrAnalysisStudio() {
     setDisplayTargets([...new Set(built.wells.map((well) => well.targetName).filter(Boolean))].sort());
   }
 
+  function resetBuiltAnalysis() {
+    setDataset(null);
+    setImportedWells([]);
+    setDraftWells([]);
+    setAppliedWells([]);
+    setAlignmentReviewPending(false);
+    setDraftHistory([]);
+    setPendingOperationLogs([]);
+    setPendingDispositionLogs([]);
+    setAlignmentDispositions({});
+    setNeedsRebuild(false);
+  }
+
   async function importFiles(files: FileList | File[]) {
     if (!files.length) return;
     setLoading(true);
@@ -429,18 +479,7 @@ export default function QpcrAnalysisStudio() {
       setSources(nextSources);
       const nextReadiness = assessImportReadiness(nextSources);
       if (nextReadiness.canAnalyze) buildAndApply(nextSources);
-      else {
-        setDataset(null);
-        setImportedWells([]);
-        setDraftWells([]);
-        setAppliedWells([]);
-        setAlignmentReviewPending(false);
-        setDraftHistory([]);
-        setPendingOperationLogs([]);
-        setPendingDispositionLogs([]);
-        setAlignmentDispositions({});
-        setNeedsRebuild(false);
-      }
+      else resetBuiltAnalysis();
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "文件解析失败");
     } finally {
@@ -482,18 +521,7 @@ export default function QpcrAnalysisStudio() {
     setSources(nextSources);
     const nextReadiness = assessImportReadiness(nextSources);
     if (nextReadiness.canAnalyze) buildAndApply(nextSources);
-    else {
-      setDataset(null);
-      setImportedWells([]);
-      setDraftWells([]);
-      setAppliedWells([]);
-      setAlignmentReviewPending(false);
-      setDraftHistory([]);
-      setPendingOperationLogs([]);
-      setPendingDispositionLogs([]);
-      setAlignmentDispositions({});
-      setNeedsRebuild(false);
-    }
+    else resetBuiltAnalysis();
   }
 
   function rebuildCurrentSources() {
@@ -623,7 +651,7 @@ export default function QpcrAnalysisStudio() {
     const updated = updateWellFields(draftWells, selected, changes);
     setDraftWells(updated.wells);
     setPendingEditLogs((current) => [...current, ...updated.logs]);
-    setPendingOperationLogs((current) => [...current, makeLayoutOperationLog("batch-edit", selected, selected, l("批量修改板布局字段", "Batch edit plate-layout fields"))]);
+    setPendingOperationLogs((current) => [...current, makeLayoutOperationLog("batch-edit", selected, selected, l("批量修改板布局字段", "Batch edit plate-layout fields"), updated.logs)]);
     setBatchSample("");
     setBatchTarget("");
     setBatchTask("");
@@ -661,7 +689,7 @@ export default function QpcrAnalysisStudio() {
     setDraftWells(nextWells);
     invalidateAlignmentDispositions(pastedWellIds);
     setPendingEditLogs((current) => [...current, ...logs]);
-    setPendingOperationLogs((current) => [...current, makeLayoutOperationLog("paste", [], pastedWellIds, l("粘贴外部板布局字段", "Paste external plate-layout fields"))]);
+    setPendingOperationLogs((current) => [...current, makeLayoutOperationLog("paste", [], pastedWellIds, l("粘贴外部板布局字段", "Paste external plate-layout fields"), logs)]);
     setPasteBlock("");
     setPasteOverwriteConfirmed(false);
   }
@@ -693,7 +721,7 @@ export default function QpcrAnalysisStudio() {
     setDraftWells(restored.wells);
     setPendingEditLogs((current) => [...current, ...restored.editLogs]);
     setPendingExclusionLogs((current) => [...current, ...restored.exclusionLogs]);
-    setPendingOperationLogs((current) => [...current, makeLayoutOperationLog("restore-selected", selected, selected, l("恢复选中孔的导入布局", "Restore selected imported layout"))]);
+    setPendingOperationLogs((current) => [...current, makeLayoutOperationLog("restore-selected", selected, selected, l("恢复选中孔的导入布局", "Restore selected imported layout"), restored.editLogs)]);
     setBatchSample("");
     setBatchTarget("");
     setBatchTask("");
@@ -714,7 +742,7 @@ export default function QpcrAnalysisStudio() {
     });
     setDraftWells(updated.wells);
     setPendingEditLogs((current) => [...current, ...updated.logs]);
-    setPendingOperationLogs((current) => [...current, makeLayoutOperationLog("clear", selected, [], l("清空选中孔布局；原始测量保留", "Clear selected layout; preserve raw measurements"))]);
+    setPendingOperationLogs((current) => [...current, makeLayoutOperationLog("clear", selected, [], l("清空选中孔布局；原始测量保留", "Clear selected layout; preserve raw measurements"), updated.logs)]);
   }
 
   function restoreWholePlate() {
@@ -733,7 +761,7 @@ export default function QpcrAnalysisStudio() {
     setDraftWells(restored.wells);
     setPendingEditLogs((current) => [...current, ...restored.editLogs]);
     setPendingExclusionLogs((current) => [...current, ...restored.exclusionLogs]);
-    setPendingOperationLogs((current) => [...current, makeLayoutOperationLog("restore-plate", currentPlateWellIds, currentPlateWellIds, l("当前板恢复为导入布局", "Restore active plate to imported layout"))]);
+    setPendingOperationLogs((current) => [...current, makeLayoutOperationLog("restore-plate", currentPlateWellIds, currentPlateWellIds, l("当前板恢复为导入布局", "Restore active plate to imported layout"), restored.editLogs)]);
   }
 
   function applyLayoutTransfer() {
@@ -752,7 +780,7 @@ export default function QpcrAnalysisStudio() {
     invalidateAlignmentDispositions([...selected, ...transferred.mappings.map((mapping) => mapping.destinationWellId)]);
     setDraftWells(transferred.wells);
     setPendingEditLogs((current) => [...current, ...transferred.logs]);
-    setPendingOperationLogs((current) => [...current, makeLayoutOperationLog(transferMode, selected, transferred.mappings.map((mapping) => mapping.destinationWellId), l("按相对几何位置修正布局", "Correct layout by relative geometry"))]);
+    setPendingOperationLogs((current) => [...current, makeLayoutOperationLog(transferMode, selected, transferred.mappings.map((mapping) => mapping.destinationWellId), l("按相对几何位置修正布局", "Correct layout by relative geometry"), transferred.logs)]);
     setSelected(transferred.mappings.map((mapping) => mapping.destinationWellId));
     setSelectionAnchor(transferred.mappings[0]?.destinationWellId ?? null);
     setTransferDestination("");
@@ -824,9 +852,11 @@ export default function QpcrAnalysisStudio() {
       Status: status,
       Action: auditLogTitle(log, l),
       Wells: auditLogReference(log, draftWells),
+      "Source wells": "operation" in log ? auditWellReferences(log.sourceWellRecordIds, draftWells) : auditLogReference(log, draftWells),
+      "Destination wells": "operation" in log ? auditWellReferences(log.destinationWellRecordIds, draftWells) : auditLogReference(log, draftWells),
       Field: "field" in log ? log.field : "",
-      "Previous value": "field" in log ? log.previousValue : "previousState" in log ? String(log.previousState) : "",
-      "New value": "field" in log ? log.newValue : "newState" in log ? String(log.newState) : "",
+      "Previous value": "field" in log ? log.previousValue : "previousState" in log ? String(log.previousState) : "operation" in log ? log.changes.map((change) => `${change.wellRecordId}.${change.field}=${change.previousValue ?? ""}`).join("; ") || log.previousSnapshot : "",
+      "New value": "field" in log ? log.newValue : "newState" in log ? String(log.newState) : "operation" in log ? log.changes.map((change) => `${change.wellRecordId}.${change.field}=${change.newValue ?? ""}`).join("; ") || log.newSnapshot : "",
       Reason: auditLogDescription(log, l),
     }));
     const workbook = XLSX.utils.book_new();
@@ -869,7 +899,21 @@ export default function QpcrAnalysisStudio() {
     const hadAllTargetsSelected = targets.length > 0 && targets.every((target) => displayTargets.includes(target));
     setAppliedWells(draftWells);
     setDataset((current) => current ? { ...current, wells: draftWells } : current);
-    const applyLog = makeLayoutOperationLog("apply", [], [], l("应用布局快照并重算 QC 与结果", "Apply layout snapshot and recalculate QC and results"));
+    const affectedWellIds = [...new Set([
+      ...pendingEditLogs.map((log) => log.wellRecordId),
+      ...pendingExclusionLogs.map((log) => log.wellRecordId),
+      ...pendingDispositionLogs.map((log) => log.wellRecordId),
+      ...pendingOperationLogs.flatMap((log) => [...log.sourceWellRecordIds, ...log.destinationWellRecordIds]),
+    ])];
+    const applyLog = makeLayoutOperationLog(
+      "apply",
+      affectedWellIds,
+      affectedWellIds,
+      l("应用布局快照并重算 QC 与结果", "Apply layout snapshot and recalculate QC and results"),
+      pendingEditLogs,
+      layoutAnnotationSnapshot(appliedWells, affectedWellIds),
+      layoutAnnotationSnapshot(draftWells, affectedWellIds),
+    );
     setAuditLogs((current) => [...current, ...pendingEditLogs, ...pendingExclusionLogs, ...pendingOperationLogs, ...pendingDispositionLogs, applyLog]);
     setPendingEditLogs([]);
     setPendingExclusionLogs([]);
@@ -1082,12 +1126,15 @@ export default function QpcrAnalysisStudio() {
                 </div>
                 {dataset.warnings.map((warning) => <div className="notice" key={warning}>{localizeRuntimeMessage(warning, language)}</div>)}
                 {error && <div className="notice error">{localizeRuntimeMessage(error, language)}</div>}
-                {draftAlignment?.status === "needs-correction" && (
+                {draftAlignment && (draftAlignment.status === "needs-correction" || draftAlignment.incompleteReplicateGroups.length > 0) && (
                   <div className="alignment-diagnostics" role="alert">
                     <div><span>{l("布局对齐检查", "Layout alignment check")}</span><strong>{unresolvedAlignmentIssueIds.size ? l(`仍有 ${unresolvedAlignmentIssueIds.size} 个孔需要人工复核`, `${unresolvedAlignmentIssueIds.size} well(s) still require review`) : l("剩余差异均已人工确认", "All remaining differences were reviewed")}</strong><p>{l("Cp 始终留在仪器物理孔；这里只移动或修改 Sample、Target、反应角色和复孔编号。", "Cp always remains on its physical instrument well. Only Sample, Target, reaction-role, and replicate annotations are moved or edited here.")}</p></div>
                     <div className="alignment-diagnostic-actions">
                       <button type="button" onClick={() => selectAlignmentIssueGroup(draftAlignment.resultWithoutAnnotation)} disabled={!draftAlignment.resultWithoutAnnotation.length}><b>{draftAlignment.resultWithoutAnnotation.length}</b><span>{l("有 Cp、无布局", "Cp without layout")}</span></button>
                       <button type="button" onClick={() => selectAlignmentIssueGroup(draftAlignment.annotationWithoutResult)} disabled={!draftAlignment.annotationWithoutResult.length}><b>{draftAlignment.annotationWithoutResult.length}</b><span>{l("有布局、无 Cp", "Layout without Cp")}</span></button>
+                      <button type="button" onClick={() => setDataManagerOpen(true)} disabled={!draftAlignment.plateIdentityConflicts.length} title={draftAlignment.plateIdentityConflicts.join("\n")}><b>{draftAlignment.plateIdentityConflicts.length}</b><span>{l("板身份冲突", "Plate identity conflict")}</span></button>
+                      <button type="button" onClick={() => selectAlignmentIssueGroup(draftAlignment.duplicateDestinations)} disabled={!draftAlignment.duplicateDestinations.length}><b>{draftAlignment.duplicateDestinations.length}</b><span>{l("重复目标孔", "Duplicate destinations")}</span></button>
+                      <button type="button" onClick={() => selectAlignmentIssueGroup(draftAlignment.incompleteReplicateGroups.flatMap((group) => group.wellIds.map((wellId) => ({ wellId, plateId: group.plateId }))))} disabled={!draftAlignment.incompleteReplicateGroups.length}><b>{draftAlignment.incompleteReplicateGroups.length}</b><span>{l("复孔编号待复核", "Replicate IDs to review")}</span></button>
                     </div>
                   </div>
                 )}
@@ -1202,7 +1249,7 @@ export default function QpcrAnalysisStudio() {
                             const destination = draftWells.find((well) => well.id === mapping.destinationWellId);
                             const sourceLabel = [source?.sampleName, source?.targetName].filter(Boolean).join(" / ") || l("无布局注释", "No layout annotation");
                             return `${source?.plateId ?? ""} ${mapping.sourceWell} [${sourceLabel}] → ${destination?.plateId ?? ""} ${mapping.destinationWell} [Cp ${destination ? singleWellCqDisplay(destination, l) : "—"}]`;
-                          }).join(" · ")}{layoutTransferPreview.mappings.length > 4 ? "…" : ""}</span></> : <><b>{l("暂不能应用", "Cannot apply")}</b><span>{layoutTransferPreview?.error === "collision" ? l("目标区域已有布局，系统不会静默覆盖。请先清空、移动或使用交换。", "The destination already contains layout annotations. Nothing will be overwritten silently; clear, move, or use swap first.") : layoutTransferPreview?.error === "out-of-bounds" ? l("目标区域超出孔板范围。", "The destination extends beyond the plate.") : layoutTransferPreview?.error === "mixed-source-plates" ? l("一次操作只能选择同一块板。", "One operation can only use wells from the same plate.") : layoutTransferPreview?.error === "overlapping-swap" ? l("交换区域不能与源区域重叠。", "Swap regions cannot overlap.") : l("请输入板内有效目标孔。", "Enter a valid destination well.")}</span></>}
+                          }).join(" · ")}{layoutTransferPreview.mappings.length > 4 ? "…" : ""}</span></> : <><b>{l("暂不能应用", "Cannot apply")}</b><span>{layoutTransferPreview?.error === "collision" ? l("目标区域已有布局，系统不会静默覆盖。请先清空、移动或使用交换。", "The destination already contains layout annotations. Nothing will be overwritten silently; clear, move, or use swap first.") : layoutTransferPreview?.error === "out-of-bounds" ? l("目标区域超出孔板范围。", "The destination extends beyond the plate.") : layoutTransferPreview?.error === "mixed-source-plates" ? l("一次操作只能选择同一块板。", "One operation can only use wells from the same plate.") : layoutTransferPreview?.error === "overlapping-copy" ? l("复制目标不能与源区域重叠，否则无法完整保留源布局。", "A copy destination cannot overlap the source region because the full source must be retained.") : layoutTransferPreview?.error === "overlapping-swap" ? l("交换区域不能与源区域重叠。", "Swap regions cannot overlap.") : l("请输入板内有效目标孔。", "Enter a valid destination well.")}</span></>}
                         </div>
                       )}
                       <button className="secondary-button full-width" type="button" onClick={applyLayoutTransfer} disabled={!layoutTransferPreview?.ok}>{l(`应用${transferMode === "move" ? "移动" : transferMode === "copy" ? "复制" : "交换"}`, `Apply ${transferMode}`)}</button>
@@ -1273,7 +1320,7 @@ export default function QpcrAnalysisStudio() {
                       <p>{l("设置后计算 ΔΔCq 与相对表达量；未提供扩增效率时按 100% 计算并记录假设。", "A calibrator enables ΔΔCq and relative expression. Missing amplification efficiency is recorded and assumed to be 100%.")}</p>
                     </section>
                   </div>
-                  {!referenceTargets.length ? <div className="empty-table">{l("请先在第 1 区选择至少一个内参基因。", "Select at least one reference target in section 1.")}</div> : <ResultExplorer results={relativeResults} sampleOrder={displaySamples} targetOrder={selectedDisplayTargets} calculationMode={calibrator ? "delta-delta-cq" : "delta-cq"} />}
+                  {!referenceTargets.length ? <div className="empty-table">{l("请先在第 1 区选择至少一个内参基因。", "Select at least one reference target in section 1.")}</div> : <ResultExplorer results={relativeResults} sampleOrder={displaySamples} targetOrder={selectedDisplayTargets} calculationMode={calibrator ? "delta-delta-cq" : "delta-cq"} provenanceWarnings={resultExportWarnings} />}
                 </>}
                 {resultSection === "quantification" && !hasQuantification && <div className="empty-table">{l("当前仅导入了 Tm/熔解结果；添加单孔 Cq/Ct/Cp 后可进行相对定量。", "Only Tm/melt results are currently imported. Add well-level Cq/Ct/Cp data for relative quantification.")}</div>}
                 {resultSection === "melt" && hasMeltAnalysis && <MeltAnalysis wells={appliedWells} />}

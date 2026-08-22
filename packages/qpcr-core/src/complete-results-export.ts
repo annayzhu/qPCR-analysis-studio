@@ -92,6 +92,7 @@ export function buildCompleteResultRows(
   sampleOrder: string[],
   targetOrder: string[],
   calculationMode: AnalysisSettings["calculationMode"],
+  contextWarnings: string[] = [],
 ): CompleteResultRow[] {
   return orderedResults(results, sampleOrder, targetOrder).map((row) => {
     const referenceCount = Object.values(row.referenceValidReplicates).reduce((sum, count) => sum + count, 0);
@@ -105,7 +106,7 @@ export function buildCompleteResultRows(
       schema_version: COMPLETE_RESULTS_SCHEMA_VERSION,
       sample: row.sampleName,
       assay: row.targetName,
-      assay_type_role: "Target",
+      assay_type_role: row.assayTypeRole,
       reference_assays: row.referenceTargets.join("; "),
       calibrator: row.calibratorValue,
       calculation_mode: calculationMode,
@@ -130,7 +131,7 @@ export function buildCompleteResultRows(
       relative_expression: row.relativeExpression,
       relative_expression_technical_sd: row.relativeExpressionSd,
       relative_expression_technical_sem: row.relativeExpressionSem,
-      warnings: row.warningCodes.join("; "),
+      warnings: [...new Set([...contextWarnings, ...row.warningCodes])].join("; "),
       notes,
     };
   });
