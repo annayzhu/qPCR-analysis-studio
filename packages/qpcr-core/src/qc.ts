@@ -1,4 +1,4 @@
-import type { ReplicateQc, WellRecord } from "../../schemas/src";
+import { physicalWellIdOf, type PhysicalWellId, type ReplicateQc, type WellRecord } from "../../schemas/src";
 
 function mean(values: number[]): number | null {
   return values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null;
@@ -34,8 +34,8 @@ export interface ReplicateQcOptions {
 
 export interface QcWorkspaceState {
   replicateQc: ReplicateQc[];
-  groupWarnings: Map<string, Set<string>>;
-  specificWarnings: Map<string, Set<string>>;
+  groupWarnings: Map<PhysicalWellId, Set<string>>;
+  specificWarnings: Map<PhysicalWellId, Set<string>>;
 }
 
 function isQcRelevantWell(well: WellRecord): boolean {
@@ -145,50 +145,58 @@ export function buildQcWorkspaceState(
     "EXCLUDED_OR_NON_DETECTED",
     "REPLICATE_ID_INCOMPLETE",
   ]);
-  const groupWarnings = new Map<string, Set<string>>();
-  const specificWarnings = new Map<string, Set<string>>();
-  const wellByName = new Map(wells.map((well) => [well.well, well]));
-  const addWarning = (map: Map<string, Set<string>>, wellName: string, warning: string) => {
-    const warnings = map.get(wellName) ?? new Set<string>();
+  const groupWarnings = new Map<PhysicalWellId, Set<string>>();
+  const specificWarnings = new Map<PhysicalWellId, Set<string>>();
+  const wellByIdentity = new Map(wells.map((well) => [physicalWellIdOf(well), well]));
+  const addWarning = (map: Map<PhysicalWellId, Set<string>>, physicalWellId: PhysicalWellId, warning: string) => {
+    const warnings = map.get(physicalWellId) ?? new Set<string>();
     warnings.add(warning);
-    map.set(wellName, warnings);
+    map.set(physicalWellId, warnings);
   };
 
   for (const row of replicateQc.filter((item) => item.warningCodes.length > 0)) {
     for (const wellName of row.wells) {
+      const physicalWellId = createQcPhysicalWellId(row.plateId, wellName);
       for (const warning of row.warningCodes) {
         if (groupLevelWarnings.has(warning)) {
-          addWarning(groupWarnings, wellName, warning);
+          addWarning(groupWarnings, physicalWellId, warning);
         }
       }
     }
     if (row.suspectWell && row.warningCodes.includes("CQ_RANGE_HIGH")) {
-      addWarning(specificWarnings, row.suspectWell, "CQ_RANGE_HIGH");
+      addWarning(specificWarnings, createQcPhysicalWellId(row.plateId, row.suspectWell), "CQ_RANGE_HIGH");
     }
     if (row.warningCodes.includes("SECONDARY_MELT_PEAK")) {
       for (const wellName of row.wells) {
-        if (wellByName.get(wellName)?.tm2 !== null) addWarning(specificWarnings, wellName, "SECONDARY_MELT_PEAK");
+        const physicalWellId = createQcPhysicalWellId(row.plateId, wellName);
+        if (wellByIdentity.get(physicalWellId)?.tm2 !== null) addWarning(specificWarnings, physicalWellId, "SECONDARY_MELT_PEAK");
       }
     }
     if (row.warningCodes.includes("EXCLUDED_OR_NON_DETECTED")) {
       for (const wellName of row.wells) {
-        const well = wellByName.get(wellName);
+        const physicalWellId = createQcPhysicalWellId(row.plateId, wellName);
+        const well = wellByIdentity.get(physicalWellId);
         if (well && (well.instrumentOmit || well.userExcluded || well.cqStatus === "not-detected")) {
-          addWarning(specificWarnings, wellName, "EXCLUDED_OR_NON_DETECTED");
+          addWarning(specificWarnings, physicalWellId, "EXCLUDED_OR_NON_DETECTED");
         }
       }
     }
   }
 
   for (const well of wells.filter(isQcRelevantWell)) {
+    const physicalWellId = physicalWellIdOf(well);
     for (const flag of well.qcFlags) {
-      if (flag.severity !== "info") addWarning(specificWarnings, well.well, flag.code);
+      if (flag.severity !== "info") addWarning(specificWarnings, physicalWellId, flag.code);
     }
-    if (well.tm2 !== null) addWarning(specificWarnings, well.well, "SECONDARY_MELT_PEAK");
+    if (well.tm2 !== null) addWarning(specificWarnings, physicalWellId, "SECONDARY_MELT_PEAK");
     if (well.instrumentOmit || well.userExcluded || well.cqStatus === "not-detected") {
-      addWarning(specificWarnings, well.well, "EXCLUDED_OR_NON_DETECTED");
+      addWarning(specificWarnings, physicalWellId, "EXCLUDED_OR_NON_DETECTED");
     }
   }
 
   return { replicateQc, groupWarnings, specificWarnings };
+}
+
+function createQcPhysicalWellId(plateId: string, well: string): PhysicalWellId {
+  return physicalWellIdOf({ plateId, well });
 }

@@ -9,7 +9,7 @@ import type {
   RawImportedRow,
   WellRecord,
 } from "../../schemas/src";
-import { normalizeWell } from "../../schemas/src";
+import { createPhysicalWellId, normalizeWell } from "../../schemas/src";
 import { applyInstrumentAdapter, selectedTable } from "./adapters";
 
 const NON_DETECTED = /^(?:undetermined|no\s*ct|no\s*cq|n\/?a|na|nan|failed|无扩增|未检出)$/i;
@@ -279,7 +279,7 @@ export function buildCanonicalDataset(inputSources: ImportedSource[]): Canonical
         qcFlags,
         sourcePriority: priority,
       };
-      const partialKey = `${plate.plateId}\u241f${well}`;
+      const partialKey = createPhysicalWellId(plate.plateId, well);
       partials.set(partialKey, mergePartial(partials.get(partialKey), incoming));
     }
   }

@@ -4,8 +4,6 @@ import { useMemo, useRef, useState } from "react";
 import type {
   AnalysisSettings,
   AlignmentDispositionLog,
-  AlignmentIssueType,
-  CanonicalDataset,
   CanonicalField,
   EditLog,
   ExclusionLog,
@@ -14,25 +12,20 @@ import type {
   ReplicateQc,
   WellRecord,
 } from "@/packages/schemas/src";
-import { normalizeWell } from "@/packages/schemas/src";
+import { normalizeWell, physicalWellIdOf } from "@/packages/schemas/src";
 import {
-  assessDatasetAlignment,
   assessImportReadiness,
   buildCanonicalDataset,
-  getAnalysisBlockingError,
-  getUnresolvedAlignmentIssues,
   parseBrowserFile,
   validateQpcrInputTemplate,
 } from "@/packages/importers/src";
 import {
-  buildQcWorkspaceState,
-  calculateRelativeQuantification,
-  previewLayoutTransfer,
-  restoreWellsToBaseline,
-  setWellExclusion,
-  transferLayoutAnnotations,
-  updateWellFields,
-} from "@/packages/qpcr-core/src";
+  createAnalysisSession,
+  previewAnalysisSessionChange,
+  projectAnalysisSession,
+  transitionAnalysisSession,
+} from "@/packages/analysis-session/src";
+import type { AnalysisSessionCommand, AnalysisSessionState } from "@/packages/analysis-session/src";
 import ImportManager from "./components/ImportManager";
 import MeltAnalysis from "./components/MeltAnalysis";
 import ResultExplorer from "./components/ResultExplorer";
@@ -40,16 +33,9 @@ import { localizeRuntimeMessage, useLanguage } from "./i18n";
 
 type WorkspaceView = "overview" | "plate" | "results";
 type ResultSection = "quantification" | "melt";
-type DraftSnapshot = {
-  wells: WellRecord[];
-  editLogs: EditLog[];
-  exclusionLogs: ExclusionLog[];
-  operationLogs: LayoutOperationLog[];
-  dispositionLogs: AlignmentDispositionLog[];
-  dispositions: Record<string, AlignmentIssueType>;
-};
 
 const VIEW_ITEMS: WorkspaceView[] = ["overview", "plate", "results"];
+const EMPTY_WELLS: WellRecord[] = [];
 
 function formatNumber(value: number | null, digits = 2): string {
   return value === null || !Number.isFinite(value) ? "—" : value.toFixed(digits);
@@ -68,29 +54,6 @@ function targetColor(target: string): string {
   let hash = 0;
   for (const char of target) hash = (hash * 31 + char.charCodeAt(0)) | 0;
   return target ? palette[Math.abs(hash) % palette.length] : "#cbd1ce";
-}
-
-function makeLayoutOperationLog(
-  operation: LayoutOperationLog["operation"],
-  sourceWellRecordIds: string[],
-  destinationWellRecordIds: string[],
-  reason: string,
-  changes: EditLog[] = [],
-  previousSnapshot = "",
-  newSnapshot = "",
-): LayoutOperationLog {
-  const timestamp = new Date().toISOString();
-  return {
-    id: `layout-${timestamp}-${Math.random().toString(36).slice(2, 8)}`,
-    operation,
-    sourceWellRecordIds,
-    destinationWellRecordIds,
-    changes,
-    previousSnapshot,
-    newSnapshot,
-    reason,
-    timestamp,
-  };
 }
 
 function commonValue(
@@ -236,18 +199,6 @@ function auditLogReference(
   return label(log.wellRecordId);
 }
 
-function layoutAnnotationSnapshot(wells: WellRecord[], wellIds: string[]): string {
-  const ids = new Set(wellIds);
-  return JSON.stringify(wells.filter((well) => ids.has(well.id)).map((well) => ({
-    wellRecordId: well.id,
-    sampleName: well.sampleName,
-    targetName: well.targetName,
-    taskType: well.taskType,
-    replicate: well.replicate,
-    userExcluded: well.userExcluded,
-  })));
-}
-
 function auditWellReferences(wellIds: string[], wells: WellRecord[]): string {
   const wellById = new Map(wells.map((well) => [well.id, well]));
   return wellIds.map((wellId) => {
@@ -261,10 +212,7 @@ export default function QpcrAnalysisStudio() {
   const resultInput = useRef<HTMLInputElement>(null);
   const layoutInput = useRef<HTMLInputElement>(null);
   const [sources, setSources] = useState<ImportedSource[]>([]);
-  const [dataset, setDataset] = useState<CanonicalDataset | null>(null);
-  const [importedWells, setImportedWells] = useState<WellRecord[]>([]);
-  const [draftWells, setDraftWells] = useState<WellRecord[]>([]);
-  const [appliedWells, setAppliedWells] = useState<WellRecord[]>([]);
+  const [analysisSession, setAnalysisSession] = useState<AnalysisSessionState | null>(null);
   const [selected, setSelected] = useState<string[]>([]);
   const [selectionAnchor, setSelectionAnchor] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
@@ -274,12 +222,6 @@ export default function QpcrAnalysisStudio() {
   const [needsRebuild, setNeedsRebuild] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const [pendingEditLogs, setPendingEditLogs] = useState<EditLog[]>([]);
-  const [pendingExclusionLogs, setPendingExclusionLogs] = useState<ExclusionLog[]>([]);
-  const [pendingOperationLogs, setPendingOperationLogs] = useState<LayoutOperationLog[]>([]);
-  const [pendingDispositionLogs, setPendingDispositionLogs] = useState<AlignmentDispositionLog[]>([]);
-  const [alignmentDispositions, setAlignmentDispositions] = useState<Record<string, AlignmentIssueType>>({});
-  const [auditLogs, setAuditLogs] = useState<(EditLog | ExclusionLog | LayoutOperationLog | AlignmentDispositionLog)[]>([]);
   const [batchSample, setBatchSample] = useState("");
   const [batchTarget, setBatchTarget] = useState("");
   const [batchTask, setBatchTask] = useState("");
@@ -287,22 +229,35 @@ export default function QpcrAnalysisStudio() {
   const [pasteBlock, setPasteBlock] = useState("");
   const [pasteOverwriteConfirmed, setPasteOverwriteConfirmed] = useState(false);
   const [exclusionReason, setExclusionReason] = useState("");
-  const [referenceTargets, setReferenceTargets] = useState<string[]>([]);
-  const [calibrator, setCalibrator] = useState("");
   const [displaySamples, setDisplaySamples] = useState<string[]>([]);
   const [displayTargets, setDisplayTargets] = useState<string[]>([]);
   const [qcSearch, setQcSearch] = useState("");
   const [qcIssueOnly, setQcIssueOnly] = useState(false);
-  const [alignmentReviewPending, setAlignmentReviewPending] = useState(false);
-  const [draftHistory, setDraftHistory] = useState<DraftSnapshot[]>([]);
   const [transferDestination, setTransferDestination] = useState("");
   const [transferMode, setTransferMode] = useState<"move" | "copy" | "swap">("move");
   const [activePlateId, setActivePlateId] = useState("");
   const [transferDestinationPlateId, setTransferDestinationPlateId] = useState("");
 
   const readiness = useMemo(() => assessImportReadiness(sources), [sources]);
-  const pendingCount = pendingEditLogs.length + pendingExclusionLogs.length + pendingOperationLogs.length + pendingDispositionLogs.length;
-  const analysisLocked = alignmentReviewPending || pendingCount > 0;
+  const sessionView = useMemo(
+    () => analysisSession ? projectAnalysisSession(analysisSession) : null,
+    [analysisSession],
+  );
+  const dataset = sessionView?.dataset ?? null;
+  const importedWells = sessionView?.importedWells ?? EMPTY_WELLS;
+  const draftWells = sessionView?.draftWells ?? EMPTY_WELLS;
+  const appliedWells = sessionView?.appliedWells ?? EMPTY_WELLS;
+  const pendingEditLogs = analysisSession?.pendingEditLogs ?? [];
+  const pendingExclusionLogs = analysisSession?.pendingExclusionLogs ?? [];
+  const pendingOperationLogs = analysisSession?.pendingOperationLogs ?? [];
+  const pendingDispositionLogs = analysisSession?.pendingDispositionLogs ?? [];
+  const alignmentDispositions = sessionView?.alignmentDispositions ?? {};
+  const auditLogs = sessionView?.auditLogs ?? [];
+  const pendingCount = sessionView?.pendingCount ?? 0;
+  const alignmentReviewPending = sessionView?.alignmentReviewPending ?? false;
+  const analysisLocked = sessionView?.analysisLocked ?? false;
+  const referenceTargets = sessionView?.settings.referenceTargets ?? [];
+  const calibrator = sessionView?.settings.calibratorValue ?? "";
   const selectedWells = useMemo(() => draftWells.filter((well) => selected.includes(well.id)), [draftWells, selected]);
   const plateIds = useMemo(() => [...new Set(draftWells.map((well) => well.plateId))], [draftWells]);
   const activePlateWells = useMemo(
@@ -320,14 +275,9 @@ export default function QpcrAnalysisStudio() {
       well.userExcluded !== baseline.userExcluded
     );
   }).length, [importedWellById, selectedWells]);
-  const appliedQcState = useMemo(() => buildQcWorkspaceState(appliedWells), [appliedWells]);
-  const draftQcState = useMemo(() => buildQcWorkspaceState(draftWells), [draftWells]);
-  const draftAlignment = useMemo(
-    () => dataset
-      ? assessDatasetAlignment({ ...dataset, wells: draftWells }, readiness.analysisMode)
-      : null,
-    [dataset, draftWells, readiness.analysisMode],
-  );
+  const appliedQcState = sessionView?.appliedQcState ?? { replicateQc: [], groupWarnings: new Map(), specificWarnings: new Map() };
+  const draftQcState = sessionView?.draftQcState ?? { replicateQc: [], groupWarnings: new Map(), specificWarnings: new Map() };
+  const draftAlignment = sessionView?.draftAlignment ?? null;
   const alignmentIssueById = useMemo(() => {
     const issues = new Map<string, "result-without-annotation" | "annotation-without-result">();
     for (const issue of draftAlignment?.resultWithoutAnnotation ?? []) issues.set(issue.wellId, "result-without-annotation");
@@ -335,8 +285,8 @@ export default function QpcrAnalysisStudio() {
     return issues;
   }, [draftAlignment]);
   const unresolvedAlignmentIssueIds = useMemo(
-    () => new Set([...alignmentIssueById.keys()].filter((wellId) => !alignmentDispositions[wellId])),
-    [alignmentDispositions, alignmentIssueById],
+    () => new Set(sessionView?.unresolvedAlignmentIssues.map((issue) => issue.wellId) ?? []),
+    [sessionView?.unresolvedAlignmentIssues],
   );
   const qc = appliedQcState.replicateQc;
   const draftQc = draftQcState.replicateQc;
@@ -348,19 +298,7 @@ export default function QpcrAnalysisStudio() {
     () => [...new Set(appliedWells.map((well) => well.sampleName).filter(Boolean))].sort(),
     [appliedWells],
   );
-  const relativeResults = useMemo(() => {
-    if (!referenceTargets.length) return [];
-    const settings: AnalysisSettings = {
-      referenceTargets,
-      calibratorType: "sample",
-      calibratorValue: calibrator,
-      replicateWarningThreshold: 0.5,
-      tmWarningThreshold: 0.5,
-      efficiencyByTarget: {},
-      calculationMode: calibrator ? "delta-delta-cq" : "delta-cq",
-    };
-    return calculateRelativeQuantification(appliedWells, settings);
-  }, [appliedWells, calibrator, referenceTargets]);
+  const relativeResults = sessionView?.relativeResults ?? [];
   const resultExportWarnings = useMemo(() => [...new Set([
     ...(dataset?.warnings ?? []),
     ...sources.flatMap((source) => source.warnings),
@@ -411,61 +349,92 @@ export default function QpcrAnalysisStudio() {
       ? draftWells.find((well) => well.well === destinationWell && (!destinationPlate || well.plateId === destinationPlate))
       : undefined;
     if (!selected.length || !destination) return null;
-    return previewLayoutTransfer(draftWells, {
-      mode: transferMode,
-      sourceWellIds: selected,
-      destinationAnchorWellId: destination.id,
+    if (!analysisSession) return null;
+    const preview = previewAnalysisSessionChange(analysisSession, {
+      type: "transfer-annotations",
+      request: {
+        mode: transferMode,
+        sourceWellIds: selected,
+        destinationAnchorWellId: destination.id,
+      },
+      reason: l("按相对几何位置修正布局", "Correct layout by relative geometry"),
     });
-  }, [draftWells, selected, selectedWells, transferDestination, transferDestinationPlateId, transferMode]);
+    return preview.kind === "layout-transfer" ? preview.result : null;
+  }, [analysisSession, draftWells, l, selected, selectedWells, transferDestination, transferDestinationPlateId, transferMode]);
+
+  function executeSessionCommand(command: AnalysisSessionCommand) {
+    if (!analysisSession) return null;
+    const result = transitionAnalysisSession(analysisSession, command);
+    if (result.ok) {
+      setAnalysisSession(result.state);
+      setError("");
+    } else if (result.error.code === "empty-change" || result.error.code === "nothing-to-undo") {
+      setError("");
+    } else {
+      setError(localizeRuntimeMessage(result.error.message, language));
+    }
+    return result;
+  }
+
+  function configureAnalysis(referenceTargetSelection: string[], calibratorSelection: string) {
+    if (!analysisSession) return;
+    executeSessionCommand({
+      type: "configure-analysis",
+      settings: {
+        ...analysisSession.settings,
+        referenceTargets: referenceTargetSelection,
+        calibratorValue: calibratorSelection,
+        calculationMode: calibratorSelection ? "delta-delta-cq" : "delta-cq",
+      },
+    });
+  }
+
+  function setReferenceTargets(update: string[] | ((current: string[]) => string[])) {
+    const next = typeof update === "function" ? update(referenceTargets) : update;
+    configureAnalysis(next, calibrator);
+  }
+
+  function setCalibrator(next: string) {
+    configureAnalysis(referenceTargets, next);
+  }
 
   function buildAndApply(sourceList: ImportedSource[]) {
     const built = buildCanonicalDataset(sourceList);
     const nextReadiness = assessImportReadiness(sourceList);
-    const alignment = assessDatasetAlignment(built, nextReadiness.analysisMode);
-    const blockingError = getAnalysisBlockingError(built, nextReadiness.analysisMode);
-    setError(blockingError ?? "");
-    setDataset(built);
-    setImportedWells(built.wells);
-    setDraftWells(built.wells);
-    setAppliedWells(built.wells);
+    if (!nextReadiness.analysisMode) return;
+    const builtTargets = [...new Set(built.wells.map((well) => well.targetName).filter(Boolean))];
+    const probableReference = builtTargets.find((target) => /^(?:gapdh|actb|18s|rplp0|b2m|hprt1)$/i.test(target))
+      ?? builtTargets.find((target) => /gapdh|actb|18s|rplp0|b2m|hprt/i.test(target));
+    const initialSettings: AnalysisSettings = {
+      referenceTargets: probableReference ? [probableReference] : [],
+      calibratorType: "sample",
+      calibratorValue: "",
+      replicateWarningThreshold: 0.5,
+      tmWarningThreshold: 0.5,
+      efficiencyByTarget: {},
+      calculationMode: "delta-cq",
+    };
+    const nextSession = createAnalysisSession(built, nextReadiness.analysisMode, initialSettings);
+    const nextView = projectAnalysisSession(nextSession);
+    setAnalysisSession(nextSession);
+    setError(nextView.blockingError ?? "");
     const firstDefined = built.wells.find((well) => well.sampleName || well.targetName);
     setSelected(firstDefined ? [firstDefined.id] : []);
     setSelectionAnchor(firstDefined?.id ?? null);
-    setPendingEditLogs([]);
-    setPendingExclusionLogs([]);
-    setPendingOperationLogs([]);
-    setPendingDispositionLogs([]);
-    setAlignmentDispositions({});
-    setAuditLogs([]);
-    setDraftHistory([]);
     setTransferDestination("");
     setActivePlateId(built.wells[0]?.plateId ?? "");
     setTransferDestinationPlateId(built.wells[0]?.plateId ?? "");
     setNeedsRebuild(false);
-    setAlignmentReviewPending(alignment.status === "needs-correction" || Boolean(blockingError));
-    setView(alignment.status === "needs-correction" || blockingError ? "plate" : "overview");
+    setView(nextView.alignmentReviewPending ? "plate" : "overview");
     const hasCq = built.wells.some((well) => well.cq !== null);
     const hasMelt = built.wells.some((well) => well.tm1 !== null || well.tm2 !== null || Boolean(well.meltGroup));
     setResultSection(hasCq || !hasMelt ? "quantification" : "melt");
-    const builtTargets = [...new Set(built.wells.map((well) => well.targetName).filter(Boolean))];
-    const probableReference = builtTargets.find((target) => /^(?:gapdh|actb|18s|rplp0|b2m|hprt1)$/i.test(target))
-      ?? builtTargets.find((target) => /gapdh|actb|18s|rplp0|b2m|hprt/i.test(target));
-    setReferenceTargets(probableReference ? [probableReference] : []);
-    setCalibrator("");
     setDisplaySamples([...new Set(built.wells.map((well) => well.sampleName).filter(Boolean))].sort());
     setDisplayTargets([...new Set(built.wells.map((well) => well.targetName).filter(Boolean))].sort());
   }
 
   function resetBuiltAnalysis() {
-    setDataset(null);
-    setImportedWells([]);
-    setDraftWells([]);
-    setAppliedWells([]);
-    setAlignmentReviewPending(false);
-    setDraftHistory([]);
-    setPendingOperationLogs([]);
-    setPendingDispositionLogs([]);
-    setAlignmentDispositions({});
+    setAnalysisSession(null);
     setNeedsRebuild(false);
   }
 
@@ -531,25 +500,12 @@ export default function QpcrAnalysisStudio() {
 
   function clearProject() {
     setSources([]);
-    setDataset(null);
-    setImportedWells([]);
-    setDraftWells([]);
-    setAppliedWells([]);
+    setAnalysisSession(null);
     setSelected([]);
     setSelectionAnchor(null);
-    setAuditLogs([]);
-    setPendingEditLogs([]);
-    setPendingExclusionLogs([]);
-    setPendingOperationLogs([]);
-    setPendingDispositionLogs([]);
-    setAlignmentDispositions({});
-    setDraftHistory([]);
-    setAlignmentReviewPending(false);
     setTransferDestination("");
     setActivePlateId("");
     setTransferDestinationPlateId("");
-    setReferenceTargets([]);
-    setCalibrator("");
     setDisplaySamples([]);
     setDisplayTargets([]);
     setView("overview");
@@ -600,39 +556,8 @@ export default function QpcrAnalysisStudio() {
     setSelected(activePlateWells.filter((well) => values.has(well[field])).map((well) => well.id));
   }
 
-  function rememberDraft() {
-    const snapshot: DraftSnapshot = {
-      wells: draftWells,
-      editLogs: pendingEditLogs,
-      exclusionLogs: pendingExclusionLogs,
-      operationLogs: pendingOperationLogs,
-      dispositionLogs: pendingDispositionLogs,
-      dispositions: alignmentDispositions,
-    };
-    setDraftHistory((current) => [...current.slice(-19), snapshot]);
-  }
-
   function undoLastDraftChange() {
-    const snapshot = draftHistory[draftHistory.length - 1];
-    if (!snapshot) return;
-    setDraftWells(snapshot.wells);
-    setPendingEditLogs(snapshot.editLogs);
-    setPendingExclusionLogs(snapshot.exclusionLogs);
-    setPendingOperationLogs(snapshot.operationLogs);
-    setPendingDispositionLogs(snapshot.dispositionLogs);
-    setAlignmentDispositions(snapshot.dispositions);
-    setDraftHistory((current) => current.slice(0, -1));
-    setError("");
-  }
-
-  function invalidateAlignmentDispositions(wellIds: string[]) {
-    const ids = new Set(wellIds);
-    setAlignmentDispositions((current) => {
-      const next = { ...current };
-      for (const wellId of ids) delete next[wellId];
-      return next;
-    });
-    setPendingDispositionLogs((current) => current.filter((log) => !ids.has(log.wellRecordId)));
+    executeSessionCommand({ type: "undo" });
   }
 
   function applyBatchEdit() {
@@ -646,12 +571,13 @@ export default function QpcrAnalysisStudio() {
       if (Number.isInteger(replicate) && replicate > 0) changes.replicate = replicate;
     }
     if (!Object.keys(changes).length) return;
-    rememberDraft();
-    invalidateAlignmentDispositions(selected);
-    const updated = updateWellFields(draftWells, selected, changes);
-    setDraftWells(updated.wells);
-    setPendingEditLogs((current) => [...current, ...updated.logs]);
-    setPendingOperationLogs((current) => [...current, makeLayoutOperationLog("batch-edit", selected, selected, l("批量修改板布局字段", "Batch edit plate-layout fields"), updated.logs)]);
+    const result = executeSessionCommand({
+      type: "assign-annotations",
+      assignments: selected.map((wellId) => ({ wellId, changes })),
+      operation: "batch-edit",
+      reason: l("批量修改板布局字段", "Batch edit plate-layout fields"),
+    });
+    if (!result?.ok) return;
     setBatchSample("");
     setBatchTarget("");
     setBatchTask("");
@@ -661,67 +587,57 @@ export default function QpcrAnalysisStudio() {
   function applyPastedBlock() {
     if (!pastePreview.rows.length) return;
     if (pasteCollisionCount > 0 && !pasteOverwriteConfirmed) return;
-    rememberDraft();
     const orderedSelected = draftWells
       .filter((well) => selected.includes(well.id))
       .sort((a, b) => a.row.localeCompare(b.row) || a.column - b.column);
-    let nextWells = draftWells;
-    const logs: EditLog[] = [];
-    const pastedWellIds: string[] = [];
-    pastePreview.rows.forEach((cells, index) => {
+    const assignments = pastePreview.rows.flatMap((cells, index) => {
       const wellName = pastePreview.hasWellColumn ? normalizeWell(cells[0]) : orderedSelected[index]?.well;
-      if (!wellName) return;
-      const destination = nextWells.find((well) => well.well === wellName && well.plateId === (activePlateId || plateIds[0]));
-      if (!destination) return;
+      if (!wellName) return [];
+      const destination = draftWells.find((well) => well.well === wellName && well.plateId === (activePlateId || plateIds[0]));
+      if (!destination) return [];
       const offset = pastePreview.hasWellColumn ? 1 : 0;
       const [sampleName, targetName, taskType, replicateValue] = cells.slice(offset);
-      if (sampleName === undefined) return;
-      const updated = updateWellFields(nextWells, [destination.id], {
-        sampleName,
-        ...(targetName !== undefined ? { targetName } : {}),
-        ...(taskType !== undefined ? { taskType } : {}),
-        ...(replicateValue !== undefined && Number.isInteger(Number(replicateValue)) && Number(replicateValue) > 0 ? { replicate: Number(replicateValue) } : {}),
-      });
-      nextWells = updated.wells;
-      logs.push(...updated.logs);
-      pastedWellIds.push(destination.id);
+      if (sampleName === undefined) return [];
+      return [{
+        wellId: destination.id,
+        changes: {
+          sampleName,
+          ...(targetName !== undefined ? { targetName } : {}),
+          ...(taskType !== undefined ? { taskType } : {}),
+          ...(replicateValue !== undefined && Number.isInteger(Number(replicateValue)) && Number(replicateValue) > 0 ? { replicate: Number(replicateValue) } : {}),
+        },
+      }];
     });
-    setDraftWells(nextWells);
-    invalidateAlignmentDispositions(pastedWellIds);
-    setPendingEditLogs((current) => [...current, ...logs]);
-    setPendingOperationLogs((current) => [...current, makeLayoutOperationLog("paste", [], pastedWellIds, l("粘贴外部板布局字段", "Paste external plate-layout fields"), logs)]);
+    const result = executeSessionCommand({
+      type: "assign-annotations",
+      assignments,
+      operation: "paste",
+      reason: l("粘贴外部板布局字段", "Paste external plate-layout fields"),
+    });
+    if (!result?.ok) return;
     setPasteBlock("");
     setPasteOverwriteConfirmed(false);
   }
 
   function setExclusion(excluded: boolean, ids = selected) {
     if (!ids.length) return;
-    rememberDraft();
-    invalidateAlignmentDispositions(ids);
-    const updated = setWellExclusion(
-      draftWells,
-      ids,
+    executeSessionCommand({
+      type: "set-exclusion",
+      wellIds: ids,
       excluded,
-      exclusionReason.trim() || l("技术复孔异常（人工判定）", "Technical replicate issue (manual decision)"),
-    );
-    setDraftWells(updated.wells);
-    setPendingExclusionLogs((current) => [...current, ...updated.logs]);
+      reason: exclusionReason.trim() || l("技术复孔异常（人工判定）", "Technical replicate issue (manual decision)"),
+    });
   }
 
   function restoreSelectedWells() {
     if (!selected.length) return;
-    rememberDraft();
-    invalidateAlignmentDispositions(selected);
-    const restored = restoreWellsToBaseline(
-      draftWells,
-      importedWells,
-      selected,
-      l("恢复为本次导入值", "Restore values from this import"),
-    );
-    setDraftWells(restored.wells);
-    setPendingEditLogs((current) => [...current, ...restored.editLogs]);
-    setPendingExclusionLogs((current) => [...current, ...restored.exclusionLogs]);
-    setPendingOperationLogs((current) => [...current, makeLayoutOperationLog("restore-selected", selected, selected, l("恢复选中孔的导入布局", "Restore selected imported layout"), restored.editLogs)]);
+    const result = executeSessionCommand({
+      type: "restore-imported",
+      wellIds: selected,
+      operation: "restore-selected",
+      reason: l("恢复选中孔的导入布局", "Restore selected imported layout"),
+    });
+    if (!result?.ok) return;
     setBatchSample("");
     setBatchTarget("");
     setBatchTask("");
@@ -732,17 +648,15 @@ export default function QpcrAnalysisStudio() {
 
   function clearSelectedAnnotations() {
     if (!selected.length) return;
-    rememberDraft();
-    invalidateAlignmentDispositions(selected);
-    const updated = updateWellFields(draftWells, selected, {
-      sampleName: "",
-      targetName: "",
-      taskType: "Unknown",
-      replicate: null,
+    executeSessionCommand({
+      type: "assign-annotations",
+      assignments: selected.map((wellId) => ({
+        wellId,
+        changes: { sampleName: "", targetName: "", taskType: "Unknown", replicate: null },
+      })),
+      operation: "clear",
+      reason: l("清空选中孔布局；原始测量保留", "Clear selected layout; preserve raw measurements"),
     });
-    setDraftWells(updated.wells);
-    setPendingEditLogs((current) => [...current, ...updated.logs]);
-    setPendingOperationLogs((current) => [...current, makeLayoutOperationLog("clear", selected, [], l("清空选中孔布局；原始测量保留", "Clear selected layout; preserve raw measurements"), updated.logs)]);
   }
 
   function restoreWholePlate() {
@@ -750,18 +664,12 @@ export default function QpcrAnalysisStudio() {
     const currentPlateId = activePlateId || plateIds[0];
     const currentPlateWellIds = draftWells.filter((well) => well.plateId === currentPlateId).map((well) => well.id);
     if (!currentPlateWellIds.length) return;
-    rememberDraft();
-    invalidateAlignmentDispositions(currentPlateWellIds);
-    const restored = restoreWellsToBaseline(
-      draftWells,
-      importedWells,
-      currentPlateWellIds,
-      l("整板恢复为本次导入值", "Restore whole plate to imported values"),
-    );
-    setDraftWells(restored.wells);
-    setPendingEditLogs((current) => [...current, ...restored.editLogs]);
-    setPendingExclusionLogs((current) => [...current, ...restored.exclusionLogs]);
-    setPendingOperationLogs((current) => [...current, makeLayoutOperationLog("restore-plate", currentPlateWellIds, currentPlateWellIds, l("当前板恢复为导入布局", "Restore active plate to imported layout"), restored.editLogs)]);
+    executeSessionCommand({
+      type: "restore-imported",
+      wellIds: currentPlateWellIds,
+      operation: "restore-plate",
+      reason: l("当前板恢复为导入布局", "Restore active plate to imported layout"),
+    });
   }
 
   function applyLayoutTransfer() {
@@ -770,19 +678,16 @@ export default function QpcrAnalysisStudio() {
     const destinationPlate = transferDestinationPlateId || selectedWells[0]?.plateId;
     const destination = draftWells.find((well) => well.well === destinationWell && well.plateId === destinationPlate);
     if (!destination) return;
-    rememberDraft();
-    const transferred = transferLayoutAnnotations(draftWells, {
-      mode: transferMode,
-      sourceWellIds: selected,
-      destinationAnchorWellId: destination.id,
+    const result = executeSessionCommand({
+      type: "transfer-annotations",
+      request: { mode: transferMode, sourceWellIds: selected, destinationAnchorWellId: destination.id },
+      reason: l("按相对几何位置修正布局", "Correct layout by relative geometry"),
     });
-    if (!transferred.ok) return;
-    invalidateAlignmentDispositions([...selected, ...transferred.mappings.map((mapping) => mapping.destinationWellId)]);
-    setDraftWells(transferred.wells);
-    setPendingEditLogs((current) => [...current, ...transferred.logs]);
-    setPendingOperationLogs((current) => [...current, makeLayoutOperationLog(transferMode, selected, transferred.mappings.map((mapping) => mapping.destinationWellId), l("按相对几何位置修正布局", "Correct layout by relative geometry"), transferred.logs)]);
-    setSelected(transferred.mappings.map((mapping) => mapping.destinationWellId));
-    setSelectionAnchor(transferred.mappings[0]?.destinationWellId ?? null);
+    if (!result?.ok) return;
+    const transferred = result.state.pendingOperationLogs.at(-1);
+    const destinationIds = transferred?.destinationWellRecordIds ?? [];
+    setSelected(destinationIds);
+    setSelectionAnchor(destinationIds[0] ?? null);
     setTransferDestination("");
   }
 
@@ -792,24 +697,14 @@ export default function QpcrAnalysisStudio() {
       return issueType && !alignmentDispositions[wellId] ? [{ wellId, issueType }] : [];
     });
     if (!reviewed.length) return;
-    rememberDraft();
-    const timestamp = new Date().toISOString();
-    setAlignmentDispositions((current) => {
-      const next = { ...current };
-      for (const item of reviewed) next[item.wellId] = item.issueType;
-      return next;
+    executeSessionCommand({
+      type: "record-alignment-dispositions",
+      wellIds: reviewed.map((item) => item.wellId),
+      reasonByIssueType: {
+        "result-without-annotation": l("确认该结果孔保持无布局注释", "Confirm result-bearing well remains without layout annotation"),
+        "annotation-without-result": l("确认该已定义孔没有对应结果", "Confirm annotated well has no matching result"),
+      },
     });
-    setPendingDispositionLogs((current) => [...current, ...reviewed.map((item) => ({
-      id: `alignment-${timestamp}-${item.wellId}`,
-      wellRecordId: item.wellId,
-      issueType: item.issueType,
-      action: "confirm-reviewed" as const,
-      reason: item.issueType === "result-without-annotation"
-        ? l("确认该结果孔保持无布局注释", "Confirm result-bearing well remains without layout annotation")
-        : l("确认该已定义孔没有对应结果", "Confirm annotated well has no matching result"),
-      timestamp,
-    }))]);
-    setError("");
   }
 
   function selectAlignmentIssueGroup(issues: Array<{ wellId: string; plateId: string }>) {
@@ -875,52 +770,43 @@ export default function QpcrAnalysisStudio() {
   }
 
   function recalculate() {
-    if (!dataset) return;
-    const candidateDataset = { ...dataset, wells: draftWells };
-    const candidateAlignment = assessDatasetAlignment(candidateDataset, readiness.analysisMode);
-    const unresolvedAlignmentIssues = getUnresolvedAlignmentIssues(candidateAlignment, Object.keys(alignmentDispositions));
-    if (unresolvedAlignmentIssues.length) {
-      setError("仍有板布局对齐提示未处理。请修正孔位，或选中后确认该状态。");
-      setAlignmentReviewPending(true);
-      setSelected(unresolvedAlignmentIssues.map((issue) => issue.wellId));
+    if (!analysisSession) return;
+    const result = transitionAnalysisSession(analysisSession, {
+      type: "apply",
+      reason: l("应用布局快照并重算 QC 与结果", "Apply layout snapshot and recalculate QC and results"),
+    });
+    if (!result.ok && result.error.code === "alignment-review-required") {
+      setError(l(
+        "仍有板布局对齐提示未处理。请修正孔位，或选中后确认该状态。",
+        "Plate-layout alignment notices remain unresolved. Correct the positions or select them and confirm the retained state.",
+      ));
+      setSelected(result.error.wellIds);
       setView("plate");
       return;
     }
-    const blockingError = getAnalysisBlockingError(candidateDataset, readiness.analysisMode);
-    if (blockingError) {
-      setError(blockingError);
-      setAlignmentReviewPending(true);
+    if (!result.ok) {
+      setError(localizeRuntimeMessage(result.error.message, language));
       setView("plate");
       return;
     }
-    const nextSamples = [...new Set(draftWells.map((well) => well.sampleName).filter(Boolean))].sort();
-    const nextTargets = [...new Set(draftWells.map((well) => well.targetName).filter(Boolean))].sort();
+    const nextSamples = [...new Set(result.state.appliedWells.map((well) => well.sampleName).filter(Boolean))].sort();
+    const nextTargets = [...new Set(result.state.appliedWells.map((well) => well.targetName).filter(Boolean))].sort();
     const hadAllSamplesSelected = samples.length > 0 && samples.every((sample) => displaySamples.includes(sample));
     const hadAllTargetsSelected = targets.length > 0 && targets.every((target) => displayTargets.includes(target));
-    setAppliedWells(draftWells);
-    setDataset((current) => current ? { ...current, wells: draftWells } : current);
-    const affectedWellIds = [...new Set([
-      ...pendingEditLogs.map((log) => log.wellRecordId),
-      ...pendingExclusionLogs.map((log) => log.wellRecordId),
-      ...pendingDispositionLogs.map((log) => log.wellRecordId),
-      ...pendingOperationLogs.flatMap((log) => [...log.sourceWellRecordIds, ...log.destinationWellRecordIds]),
-    ])];
-    const applyLog = makeLayoutOperationLog(
-      "apply",
-      affectedWellIds,
-      affectedWellIds,
-      l("应用布局快照并重算 QC 与结果", "Apply layout snapshot and recalculate QC and results"),
-      pendingEditLogs,
-      layoutAnnotationSnapshot(appliedWells, affectedWellIds),
-      layoutAnnotationSnapshot(draftWells, affectedWellIds),
-    );
-    setAuditLogs((current) => [...current, ...pendingEditLogs, ...pendingExclusionLogs, ...pendingOperationLogs, ...pendingDispositionLogs, applyLog]);
-    setPendingEditLogs([]);
-    setPendingExclusionLogs([]);
-    setPendingOperationLogs([]);
-    setPendingDispositionLogs([]);
-    setDraftHistory([]);
-    setAlignmentReviewPending(false);
+    const nextReferenceTargets = result.state.settings.referenceTargets.filter((target) => nextTargets.includes(target));
+    const nextCalibrator = result.state.settings.calibratorValue && nextSamples.includes(result.state.settings.calibratorValue)
+      ? result.state.settings.calibratorValue
+      : "";
+    const configured = transitionAnalysisSession(result.state, {
+      type: "configure-analysis",
+      settings: {
+        ...result.state.settings,
+        referenceTargets: nextReferenceTargets,
+        calibratorValue: nextCalibrator,
+        calculationMode: nextCalibrator ? "delta-delta-cq" : "delta-cq",
+      },
+    });
+    setAnalysisSession(configured.state);
     setError("");
     setDisplaySamples((current) => {
       const retained = current.filter((sample) => nextSamples.includes(sample));
@@ -930,8 +816,6 @@ export default function QpcrAnalysisStudio() {
       const retained = current.filter((target) => nextTargets.includes(target));
       return hadAllTargetsSelected ? [...retained, ...nextTargets.filter((target) => !retained.includes(target))] : retained;
     });
-    setReferenceTargets((current) => current.filter((target) => nextTargets.includes(target)));
-    if (calibrator && !nextSamples.includes(calibrator)) setCalibrator("");
   }
 
   function switchWorkspaceView(nextView: WorkspaceView) {
@@ -955,10 +839,11 @@ export default function QpcrAnalysisStudio() {
   const qcIssueCount = qc.filter((row) => row.warningCodes.length).length;
   const qcWellIssueCount = appliedQcState.specificWarnings.size;
   const selectedQcNotices = selectedWells.flatMap((well) => {
-    const specificCodes = draftQcState.specificWarnings.get(well.well) ?? new Set<string>();
-    const groupCodes = draftQcState.groupWarnings.get(well.well) ?? new Set<string>();
+    const physicalWellId = physicalWellIdOf(well);
+    const specificCodes = draftQcState.specificWarnings.get(physicalWellId) ?? new Set<string>();
+    const groupCodes = draftQcState.groupWarnings.get(physicalWellId) ?? new Set<string>();
     return [...new Set([...specificCodes, ...groupCodes])].map((code) => {
-      const group = draftQc.find((row) => row.wells.includes(well.well) && row.warningCodes.includes(code));
+      const group = draftQc.find((row) => row.plateId === well.plateId && row.wells.includes(well.well) && row.warningCodes.includes(code));
       const isSpecific = specificCodes.has(code);
       const isGroup = groupCodes.has(code);
       return {
@@ -1154,13 +1039,14 @@ export default function QpcrAnalysisStudio() {
                         ...dataset.plate.columns.map((column) => {
                           const wellName = `${row}${column}`;
                           const well = activePlateWells.find((item) => item.well === wellName);
+                          const physicalWellId = well ? physicalWellIdOf(well) : null;
                           const isSelected = Boolean(well && selected.includes(well.id));
-                          const hasGroupWarning = Boolean(well && draftQcState.groupWarnings.has(well.well));
-                          const hasSpecificWarning = Boolean(well && draftQcState.specificWarnings.has(well.well));
+                          const hasGroupWarning = Boolean(physicalWellId && draftQcState.groupWarnings.has(physicalWellId));
+                          const hasSpecificWarning = Boolean(physicalWellId && draftQcState.specificWarnings.has(physicalWellId));
                           const alignmentIssue = well ? alignmentIssueById.get(well.id) : undefined;
-                          const warningText = well ? [...new Set([
-                            ...(draftQcState.specificWarnings.get(well.well) ?? []),
-                            ...(draftQcState.groupWarnings.get(well.well) ?? []),
+                          const warningText = physicalWellId ? [...new Set([
+                            ...(draftQcState.specificWarnings.get(physicalWellId) ?? []),
+                            ...(draftQcState.groupWarnings.get(physicalWellId) ?? []),
                           ])].map((code) => warningLabel(code, l)).join(", ") : "";
                           return (
                             <button
@@ -1232,7 +1118,7 @@ export default function QpcrAnalysisStudio() {
                     </div>
 
                     <section className="layout-correction-tools">
-                      <div className="layout-correction-heading"><div><span>{l("错位修正", "Offset correction")}</span><b>{l("移动的是布局，不是 Cp", "Move layout, not Cp")}</b></div><div className="layout-correction-header-actions"><button type="button" className="quiet-button bordered" onClick={undoLastDraftChange} disabled={!draftHistory.length}>{l("撤销", "Undo")}</button><button type="button" className="quiet-button bordered" onClick={() => void exportCorrectedLayout()}>{l("导出布局", "Export layout")}</button></div></div>
+                      <div className="layout-correction-heading"><div><span>{l("错位修正", "Offset correction")}</span><b>{l("移动的是布局，不是 Cp", "Move layout, not Cp")}</b></div><div className="layout-correction-header-actions"><button type="button" className="quiet-button bordered" onClick={undoLastDraftChange} disabled={!sessionView?.canUndo}>{l("撤销", "Undo")}</button><button type="button" className="quiet-button bordered" onClick={() => void exportCorrectedLayout()}>{l("导出布局", "Export layout")}</button></div></div>
                       <div className="layout-utility-actions">
                         <button type="button" onClick={clearSelectedAnnotations} disabled={!selected.length}>{l("清空已选布局", "Clear selected layout")}</button>
                         <button type="button" onClick={restoreWholePlate} disabled={!activePlateWells.length}>{l("当前板恢复导入值", "Restore active plate")}</button>

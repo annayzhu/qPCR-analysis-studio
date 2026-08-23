@@ -1,4 +1,5 @@
 import type { CanonicalDataset, CanonicalField, ImportedSource } from "../../schemas/src";
+import { physicalWellIdOf } from "../../schemas/src";
 import { selectedTable } from "./adapters";
 import { validateQpcrInputTemplate } from "./user-template";
 
@@ -87,7 +88,7 @@ export function assessDatasetAlignment(
   const physicalGroups = new Map<string, CanonicalDataset["wells"]>();
   const replicateGroups = new Map<string, CanonicalDataset["wells"]>();
   for (const well of dataset.wells) {
-    const physicalKey = `${well.plateId}\u241f${well.well}`;
+    const physicalKey = physicalWellIdOf(well);
     physicalGroups.set(physicalKey, [...(physicalGroups.get(physicalKey) ?? []), well]);
     if (well.sampleName && well.targetName) {
       const replicateKey = `${well.plateId}\u241f${well.sampleName}\u241f${well.targetName}`;

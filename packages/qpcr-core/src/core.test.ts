@@ -8,6 +8,7 @@ import { restoreWellsToBaseline, setWellExclusion, updateWellFields } from "./au
 import { transferLayoutAnnotations } from "./layout-correction";
 import { buildVisualizationBarRows, VISUALIZATION_BAR_HEADERS } from "./visualization-export";
 import { buildCompleteResultRows, COMPLETE_RESULTS_HEADERS } from "./complete-results-export";
+import { physicalWellIdOf } from "../../schemas/src";
 
 const raw: RawImportedRow = {
   sourceId: "s", sourceFileName: "demo.tsv", sourceSheet: "Sheet1", sourceRowNumber: 2,
@@ -41,11 +42,11 @@ describe("replicate QC", () => {
     expect(singleton.linearQuantityCvPercent).toBeNull();
 
     const workspace = buildQcWorkspaceState(wells);
-    expect(workspace.groupWarnings.get("A1")).toContain("CQ_RANGE_HIGH");
-    expect(workspace.groupWarnings.get("A2")).toContain("CQ_RANGE_HIGH");
-    expect(workspace.groupWarnings.get("A3")).toContain("CQ_RANGE_HIGH");
-    expect(workspace.specificWarnings.has("A1")).toBe(false);
-    expect(workspace.specificWarnings.get("A3")).toContain("CQ_RANGE_HIGH");
+    expect(workspace.groupWarnings.get(physicalWellIdOf(wells[0]))).toContain("CQ_RANGE_HIGH");
+    expect(workspace.groupWarnings.get(physicalWellIdOf(wells[1]))).toContain("CQ_RANGE_HIGH");
+    expect(workspace.groupWarnings.get(physicalWellIdOf(wells[2]))).toContain("CQ_RANGE_HIGH");
+    expect(workspace.specificWarnings.has(physicalWellIdOf(wells[0]))).toBe(false);
+    expect(workspace.specificWarnings.get(physicalWellIdOf(wells[2]))).toContain("CQ_RANGE_HIGH");
   });
 
   it("keeps overview and plate warnings synchronized for imported well flags", () => {
@@ -65,10 +66,10 @@ describe("replicate QC", () => {
     const workspace = buildQcWorkspaceState([instrumentFlagged, invalid]);
     expect(workspace.replicateQc.find((row) => row.sampleName === "S1")?.warningCodes).toContain("INSTRUMENT_FLAG");
     expect(workspace.replicateQc.find((row) => row.sampleName === "S2")?.warningCodes).toContain("INVALID_CQ");
-    expect(workspace.specificWarnings.get("A1")).toContain("INSTRUMENT_FLAG");
-    expect(workspace.specificWarnings.get("A2")).toContain("INVALID_CQ");
-    expect(workspace.groupWarnings.has("A1")).toBe(false);
-    expect(workspace.groupWarnings.has("A2")).toBe(false);
+    expect(workspace.specificWarnings.get(physicalWellIdOf(instrumentFlagged))).toContain("INSTRUMENT_FLAG");
+    expect(workspace.specificWarnings.get(physicalWellIdOf(invalid))).toContain("INVALID_CQ");
+    expect(workspace.groupWarnings.has(physicalWellIdOf(instrumentFlagged))).toBe(false);
+    expect(workspace.groupWarnings.has(physicalWellIdOf(invalid))).toBe(false);
     expect([...workspace.specificWarnings.values()].every((warnings) => warnings.size > 0)).toBe(true);
   });
 
@@ -78,7 +79,7 @@ describe("replicate QC", () => {
     empty.cqReason = "Roche 480 导出的 0 值按未检出处理";
     const workspace = buildQcWorkspaceState([empty]);
     expect(workspace.replicateQc).toHaveLength(0);
-    expect(workspace.specificWarnings.has("P24")).toBe(false);
+    expect(workspace.specificWarnings.has(physicalWellIdOf(empty))).toBe(false);
   });
 
   it("keeps an unnamed instrument warning visible as a well-level alert", () => {
@@ -92,7 +93,24 @@ describe("replicate QC", () => {
     });
     const workspace = buildQcWorkspaceState([unnamed]);
     expect(workspace.replicateQc).toHaveLength(0);
-    expect(workspace.specificWarnings.get("P23")).toContain("INSTRUMENT_FLAG");
+    expect(workspace.specificWarnings.get(physicalWellIdOf(unnamed))).toContain("INSTRUMENT_FLAG");
+  });
+
+  it("keeps same-position QC warnings isolated between plates", () => {
+    const plateOne = wellOnPlate("plate-1", "p1-a1", "A1", "S1", "G1", 20);
+    const plateTwo = wellOnPlate("plate-2", "p2-a1", "A1", "S2", "G1", 21);
+    plateOne.instrumentFlag = "Review";
+    plateOne.qcFlags.push({
+      code: "INSTRUMENT_FLAG",
+      severity: "warning",
+      message: "Instrument status: Review",
+      source: "instrument",
+    });
+
+    const workspace = buildQcWorkspaceState([plateOne, plateTwo]);
+
+    expect(workspace.specificWarnings.get(physicalWellIdOf(plateOne))).toContain("INSTRUMENT_FLAG");
+    expect(workspace.specificWarnings.has(physicalWellIdOf(plateTwo))).toBe(false);
   });
 });
 
