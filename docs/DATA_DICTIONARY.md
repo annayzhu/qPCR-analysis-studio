@@ -64,8 +64,9 @@
 - `Example`：仅包含合成、去标识化示例。
 - `Field Dictionary`：双语字段定义、允许值、同义词和模板版本。
 - `Plate`：单板时可空；多板时必须提供并与 `Well` 共同构成唯一物理身份。
+- `Plate Format`：可选填 `96` 或 `384`；填写后，超出对应板型范围的孔位会阻断导入。
 - `Tm1`、`Tm2`：可选数值层，不作为相对定量的必需条件。
 
 ## 完整结果导出（schema 1.0.0）
 
-完整结果使用稳定英文列名，并附带 `Data Dictionary` 工作表。`target_technical_sd` 与 `target_technical_sem` 为目标技术复孔统计；`reference_technical_sd` 与 `reference_technical_sem` 为内参传播统计；`relative_expression_technical_sd` 与 `relative_expression_technical_sem` 为相对表达传播统计。它们均不代表生物学重复变异、置信区间或推断统计。当有效技术复孔少于 2 个时，SD/SEM 留空而不是记为 0。
+完整结果使用稳定英文列名。XLSX 附带 `Data Dictionary` 工作表，TSV 下载会同时生成独立的数据字典 TSV。`assay_type_role` 保留参与目标结果行的输入 Assay Type/role；`warnings` 汇总导入、孔级/复孔 QC 与计算警告。`target_technical_sd` 与 `target_technical_sem` 为目标技术复孔统计；`reference_technical_sd` 与 `reference_technical_sem` 为内参传播统计；`relative_expression_technical_sd` 与 `relative_expression_technical_sem` 为相对表达传播统计。它们均不代表生物学重复变异、置信区间或推断统计。当有效技术复孔少于 2 个时，SD/SEM 留空而不是记为 0。

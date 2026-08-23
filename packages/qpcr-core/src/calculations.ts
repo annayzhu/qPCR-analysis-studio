@@ -22,6 +22,7 @@ interface TargetMean {
   plateId: string;
   sampleName: string;
   targetName: string;
+  assayTypeRole: string;
   meanCq: number;
   sdCq: number | null;
   semCq: number | null;
@@ -39,7 +40,7 @@ function exponentialSd(quantity: number, cqSd: number | null, base: number): num
 }
 
 function targetMeans(wells: WellRecord[]): TargetMean[] {
-  const groups = new Map<string, number[]>();
+  const groups = new Map<string, { values: number[]; assayTypes: Set<string> }>();
   for (const well of wells) {
     if (
       !well.sampleName ||
@@ -50,21 +51,42 @@ function targetMeans(wells: WellRecord[]): TargetMean[] {
       well.userExcluded
     ) continue;
     const key = `${well.plateId}\u241f${well.sampleName}\u241f${well.targetName}`;
-    groups.set(key, [...(groups.get(key) ?? []), well.cq]);
+    const group = groups.get(key) ?? { values: [], assayTypes: new Set<string>() };
+    group.values.push(well.cq);
+    if (well.taskType) group.assayTypes.add(well.taskType);
+    groups.set(key, group);
   }
-  return [...groups.entries()].map(([key, values]) => {
+  return [...groups.entries()].map(([key, group]) => {
     const [plateId, sampleName, targetName] = key.split("\u241f");
+    const { values } = group;
     const sdCq = sampleSd(values);
     return {
       plateId,
       sampleName,
       targetName,
+      assayTypeRole: [...group.assayTypes].sort().join("; ") || "Unknown",
       meanCq: mean(values)!,
       sdCq,
       semCq: standardError(sdCq, values.length),
       validReplicates: values.length,
     };
   });
+}
+
+function combineTargetMeans(items: TargetMean[]): Pick<TargetMean, "meanCq" | "sdCq" | "semCq" | "validReplicates"> {
+  const validReplicates = items.reduce((sum, item) => sum + item.validReplicates, 0);
+  const meanCq = weightedMean(items, (item) => item.meanCq, (item) => item.validReplicates);
+  const withinAndBetweenSumSquares = items.reduce((sum, item) => {
+    const within = item.validReplicates > 1 && item.sdCq !== null
+      ? (item.validReplicates - 1) * item.sdCq ** 2
+      : 0;
+    const between = item.validReplicates * (item.meanCq - meanCq) ** 2;
+    return sum + within + between;
+  }, 0);
+  const sdCq = validReplicates > 1
+    ? Math.sqrt(withinAndBetweenSumSquares / (validReplicates - 1))
+    : null;
+  return { meanCq, sdCq, semCq: standardError(sdCq, validReplicates), validReplicates };
 }
 
 function rowKey(sampleName: string, targetName: string): string {
@@ -96,13 +118,16 @@ function sumReferenceReplicates(rows: RelativeQuantificationResult[]): Record<st
   return counts;
 }
 
-function meanOrNull(values: Array<number | null>): number | null {
-  const numericValues = values.filter((value): value is number => value !== null);
-  return numericValues.length === values.length && numericValues.length > 0 ? mean(numericValues)! : null;
+interface PlateRelativeQuantificationResult extends RelativeQuantificationResult {
+  plateId: string;
 }
 
-function aggregatePlateAwareRows(rows: RelativeQuantificationResult[], settings: AnalysisSettings): RelativeQuantificationResult[] {
-  const groups = new Map<string, RelativeQuantificationResult[]>();
+function aggregatePlateAwareRows(
+  rows: PlateRelativeQuantificationResult[],
+  means: TargetMean[],
+  settings: AnalysisSettings,
+): RelativeQuantificationResult[] {
+  const groups = new Map<string, PlateRelativeQuantificationResult[]>();
   for (const row of rows) {
     const key = rowKey(row.sampleName, row.targetName);
     groups.set(key, [...(groups.get(key) ?? []), row]);
@@ -114,22 +139,39 @@ function aggregatePlateAwareRows(rows: RelativeQuantificationResult[], settings:
     const base = settings.calculationMode === "efficiency-corrected"
       ? 1 + (settings.efficiencyByTarget[group[0].targetName] ?? 1)
       : 2;
-    const normalizedQuantity = mean(group.map((row) => row.normalizedQuantity))!;
-    const deltaCq = -Math.log(normalizedQuantity) / Math.log(base);
-    const normalizedQuantitySd = sampleSd(group.map((row) => row.normalizedQuantity));
-    const normalizedQuantitySem = standardError(normalizedQuantitySd, group.length);
-    const deltaCqSd = sampleSd(group.map((row) => row.deltaCq));
-    const deltaCqSem = standardError(deltaCqSd, group.length);
+    const includedPlateIds = new Set(group.map((row) => row.plateId));
+    const targetSummary = combineTargetMeans(means.filter((item) =>
+      includedPlateIds.has(item.plateId)
+      && item.sampleName === group[0].sampleName
+      && item.targetName === group[0].targetName));
+    const referenceSummaries = settings.referenceTargets.map((referenceTarget) => combineTargetMeans(means.filter((item) =>
+      includedPlateIds.has(item.plateId)
+      && item.sampleName === group[0].sampleName
+      && item.targetName === referenceTarget)));
+    const referenceMeanCq = mean(referenceSummaries.map((item) => item.meanCq))!;
+    const referenceSdCq = propagatedSd(referenceSummaries.map((item) => item.sdCq));
+    const referenceSemCq = propagatedSd(referenceSummaries.map((item) => item.semCq));
+    const adjustedReferenceSdCq = referenceSdCq === null ? null : referenceSdCq / referenceSummaries.length;
+    const adjustedReferenceSemCq = referenceSemCq === null ? null : referenceSemCq / referenceSummaries.length;
+    const deltaCq = targetSummary.meanCq - referenceMeanCq;
+    const normalizedQuantity = base ** -deltaCq;
+    const deltaCqSd = propagatedSd([targetSummary.sdCq, adjustedReferenceSdCq]);
+    const deltaCqSem = propagatedSd([targetSummary.semCq, adjustedReferenceSemCq]);
+    const normalizedQuantitySd = exponentialSd(normalizedQuantity, deltaCqSd, base);
+    const normalizedQuantitySem = exponentialSd(normalizedQuantity, deltaCqSem, base);
 
+    const { plateId, ...firstRow } = group[0];
+    void plateId;
     return {
-      ...group[0],
-      targetMeanCq: weightedMean(group, (row) => row.targetMeanCq, (row) => row.targetValidReplicates),
-      targetSdCq: meanOrNull(group.map((row) => row.targetSdCq)),
-      targetSemCq: meanOrNull(group.map((row) => row.targetSemCq)),
-      targetValidReplicates: group.reduce((sum, row) => sum + row.targetValidReplicates, 0),
-      referenceMeanCq: mean(group.map((row) => row.referenceMeanCq))!,
-      referenceSdCq: meanOrNull(group.map((row) => row.referenceSdCq)),
-      referenceSemCq: meanOrNull(group.map((row) => row.referenceSemCq)),
+      ...firstRow,
+      assayTypeRole: [...new Set(group.map((row) => row.assayTypeRole))].sort().join("; "),
+      targetMeanCq: targetSummary.meanCq,
+      targetSdCq: targetSummary.sdCq,
+      targetSemCq: targetSummary.semCq,
+      targetValidReplicates: targetSummary.validReplicates,
+      referenceMeanCq,
+      referenceSdCq: adjustedReferenceSdCq,
+      referenceSemCq: adjustedReferenceSemCq,
       referenceValidReplicates: sumReferenceReplicates(group),
       deltaCq,
       deltaCqSd,
@@ -178,9 +220,9 @@ export function calculateRelativeQuantification(
   }
 
   const normalized = new Map<string, number>();
-  const segmentRows: RelativeQuantificationResult[] = [];
+  const segmentRows: PlateRelativeQuantificationResult[] = [];
   for (const [key, targets] of byPlateSample) {
-    const [, sampleName] = key.split("\u241f");
+    const [plateId, sampleName] = key.split("\u241f");
     const references = settings.referenceTargets
       .map((target) => targets.get(target))
       .filter((item): item is TargetMean => item !== undefined);
@@ -208,8 +250,10 @@ export function calculateRelativeQuantification(
       const normalizedQuantitySd = exponentialSd(normalizedQuantity, deltaCqSd, base);
       const normalizedQuantitySem = exponentialSd(normalizedQuantity, deltaCqSem, base);
       segmentRows.push({
+        plateId,
         sampleName,
         targetName,
+        assayTypeRole: targetSummary.assayTypeRole,
         targetMeanCq,
         targetSdCq: targetSummary.sdCq,
         targetSemCq: targetSummary.semCq,
@@ -244,7 +288,7 @@ export function calculateRelativeQuantification(
     }
   }
 
-  const rows = aggregatePlateAwareRows(segmentRows, settings);
+  const rows = aggregatePlateAwareRows(segmentRows, means, settings);
   for (const row of rows) {
     normalized.set(rowKey(row.sampleName, row.targetName), row.normalizedQuantity);
   }

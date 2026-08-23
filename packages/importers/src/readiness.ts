@@ -1,4 +1,5 @@
 import type { CanonicalDataset, CanonicalField, ImportedSource } from "../../schemas/src";
+import { physicalWellIdOf } from "../../schemas/src";
 import { selectedTable } from "./adapters";
 import { validateQpcrInputTemplate } from "./user-template";
 
@@ -40,6 +41,14 @@ export interface DatasetAlignment {
   joinedDetectedCount: number;
   resultWithoutAnnotation: AlignmentIssue[];
   annotationWithoutResult: AlignmentIssue[];
+  plateIdentityConflicts: string[];
+  duplicateDestinations: AlignmentIssue[];
+  incompleteReplicateGroups: Array<{
+    plateId: string;
+    sampleName: string;
+    targetName: string;
+    wellIds: string[];
+  }>;
 }
 
 const CRITICAL_FIELDS = new Set<CanonicalField>(["well", "sampleName", "targetName", "cq"]);
@@ -54,6 +63,9 @@ export function assessDatasetAlignment(
       joinedDetectedCount: 0,
       resultWithoutAnnotation: [],
       annotationWithoutResult: [],
+      plateIdentityConflicts: [],
+      duplicateDestinations: [],
+      incompleteReplicateGroups: [],
     };
   }
 
@@ -71,12 +83,48 @@ export function assessDatasetAlignment(
   const joinedDetectedCount = dataset.wells.filter(
     (well) => well.cqStatus === "detected" && well.cq !== null && well.sampleName && well.targetName,
   ).length;
+  const plateIdentityConflicts = dataset.warnings.filter((warning) =>
+    /无法自动判断板布局|plate identity|孔板身份/i.test(warning));
+  const physicalGroups = new Map<string, CanonicalDataset["wells"]>();
+  const replicateGroups = new Map<string, CanonicalDataset["wells"]>();
+  for (const well of dataset.wells) {
+    const physicalKey = physicalWellIdOf(well);
+    physicalGroups.set(physicalKey, [...(physicalGroups.get(physicalKey) ?? []), well]);
+    if (well.sampleName && well.targetName) {
+      const replicateKey = `${well.plateId}\u241f${well.sampleName}\u241f${well.targetName}`;
+      replicateGroups.set(replicateKey, [...(replicateGroups.get(replicateKey) ?? []), well]);
+    }
+  }
+  const duplicateDestinations = [...physicalGroups.values()]
+    .filter((wells) => wells.length > 1)
+    .flatMap((wells) => wells.map(issue));
+  const incompleteReplicateGroups = [...replicateGroups.values()].flatMap((wells) => {
+    if (wells.length < 2) return [];
+    const identifiers = wells.map((well) => well.replicate);
+    const numeric = identifiers.filter((value): value is number => value !== null);
+    const unique = new Set(numeric);
+    const complete = numeric.length === wells.length
+      && unique.size === wells.length
+      && Math.min(...numeric) === 1
+      && Math.max(...numeric) === wells.length;
+    return complete ? [] : [{
+      plateId: wells[0].plateId,
+      sampleName: wells[0].sampleName,
+      targetName: wells[0].targetName,
+      wellIds: wells.map((well) => well.id),
+    }];
+  });
 
   return {
-    status: resultWithoutAnnotation.length || annotationWithoutResult.length ? "needs-correction" : "aligned",
+    status: resultWithoutAnnotation.length || annotationWithoutResult.length || plateIdentityConflicts.length || duplicateDestinations.length
+      ? "needs-correction"
+      : "aligned",
     joinedDetectedCount,
     resultWithoutAnnotation,
     annotationWithoutResult,
+    plateIdentityConflicts,
+    duplicateDestinations,
+    incompleteReplicateGroups,
   };
 }
 

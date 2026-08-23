@@ -43,9 +43,9 @@ describe("qPCR user input template", () => {
     const workbook = buildQpcrInputTemplateWorkbook();
     workbook.Sheets.Data = XLSX.utils.aoa_to_sheet([
       [...QPCR_INPUT_TEMPLATE_HEADERS],
-      ["Plate 01", "Z99", "S01", "GENE", "Target", 0, "bad", "warm", ""],
-      ["Plate 01", "A1", "S01", "GENE", "Target", 1, 22.1, 84.1, ""],
-      ["Plate 01", "A1", "S01", "GENE", "Target", 1, 22.2, 84.2, ""],
+      ["Plate 01", 96, "Z99", "S01", "GENE", "Target", 0, "bad", "warm", ""],
+      ["Plate 01", 96, "A1", "S01", "GENE", "Target", 1, 22.1, 84.1, ""],
+      ["Plate 01", 96, "A1", "S01", "GENE", "Target", 1, 22.2, 84.2, ""],
     ]);
     const bytes = XLSX.write(workbook, { bookType: "xlsx", type: "array" }) as ArrayBuffer;
     const source = parseWorkbookBytes(bytes, "invalid-template.xlsx");
@@ -58,6 +58,39 @@ describe("qPCR user input template", () => {
       sourceSheet: "Data", sourceRowNumber: 2, column: "Well", suppliedValue: "Z99",
     });
     expect(assessImportReadiness([source])).toMatchObject({ status: "review-mapping", canAnalyze: false });
+  });
+
+  it("blocks blank Plate cells when the same template contains a named plate", () => {
+    const workbook = buildQpcrInputTemplateWorkbook();
+    workbook.Sheets.Data = XLSX.utils.aoa_to_sheet([
+      [...QPCR_INPUT_TEMPLATE_HEADERS],
+      ["Plate 01", 96, "A1", "S01", "REF", "Reference", 1, 20, "", ""],
+      ["", 96, "A2", "S01", "GENE", "Target", 1, 23, "", ""],
+    ]);
+    const bytes = XLSX.write(workbook, { bookType: "xlsx", type: "array" }) as ArrayBuffer;
+    const validation = validateQpcrInputTemplate(parseWorkbookBytes(bytes, "mixed-plate-template.xlsx"))!;
+
+    expect(validation.issues).toContainEqual(expect.objectContaining({
+      code: "missing-plate",
+      severity: "error",
+      sourceRowNumber: 3,
+      column: "Plate",
+    }));
+  });
+
+  it("rejects a 384-only coordinate when Plate Format explicitly selects 96 wells", () => {
+    const workbook = buildQpcrInputTemplateWorkbook();
+    workbook.Sheets.Data = XLSX.utils.aoa_to_sheet([
+      [...QPCR_INPUT_TEMPLATE_HEADERS],
+      ["Plate 01", 96, "A13", "S01", "GENE", "Target", 1, 22.1, "", ""],
+    ]);
+    const bytes = XLSX.write(workbook, { bookType: "xlsx", type: "array" }) as ArrayBuffer;
+    const validation = validateQpcrInputTemplate(parseWorkbookBytes(bytes, "96-well-template.xlsx"))!;
+
+    expect(validation.issues).toContainEqual(expect.objectContaining({
+      code: "invalid-well",
+      suppliedValue: "A13",
+    }));
   });
 });
 
@@ -234,5 +267,21 @@ describe("staged import readiness", () => {
       alignment.resultWithoutAnnotation[0].wellId,
       alignment.annotationWithoutResult[0].wellId,
     ])).toHaveLength(0);
+  });
+
+  it("reports ambiguous plate identity and incomplete replicate groups as distinct diagnostics", () => {
+    const resultOne = parseDelimitedText("Pos\tName\tCp\nA1\t1\t20\n", "result-one.txt");
+    const resultTwo = parseDelimitedText("Pos\tName\tCp\nA1\t1\t21\n", "result-two.txt");
+    const layout = parseDelimitedText(
+      "Plate\tWell\tSample\tTarget\tReplicate\nNamed plate\tA1\tS1\tGENE\t1\nNamed plate\tA2\tS1\tGENE\t3\n",
+      "layout.tsv",
+    );
+    const alignment = assessDatasetAlignment(buildCanonicalDataset([resultOne, resultTwo, layout]), "quantification");
+
+    expect(alignment.plateIdentityConflicts).toHaveLength(1);
+    expect(alignment.incompleteReplicateGroups).toContainEqual(expect.objectContaining({
+      sampleName: "S1",
+      targetName: "GENE",
+    }));
   });
 });

@@ -22,10 +22,13 @@ app/                         网页界面
 packages/schemas/            统一数据模型与验证
 packages/importers/          通用表格导入、字段映射、仪器适配器
 packages/qpcr-core/          纯 TypeScript 计算、QC 与审计函数
+packages/analysis-session/   草稿、应用、对齐、重算与审计的不可变工作流边界
 scripts/                     真实文件回归验证
 docs/                        计算规范、数据字典、适配记录
 apps/desktop/                未来 Electron 离线封装边界
 ```
+
+界面只通过 Analysis Session 的创建、读取投影、变更预览和状态迁移接口操作分析状态；原始测量、布局草稿、已应用快照和计算结果不会在 React 组件内分别维护。领域术语见 [`CONTEXT.md`](./CONTEXT.md)，关键取舍见 [`docs/adr/`](./docs/adr/)。
 
 ## 本地运行
 
@@ -39,9 +42,11 @@ npm run dev
 ## 验证
 
 ```bash
+npm run lint
 npm run test:unit
 npm run typecheck
 npm run build
+npm test
 ```
 
 真实 Roche 480 回归不将实验文件复制入仓库：

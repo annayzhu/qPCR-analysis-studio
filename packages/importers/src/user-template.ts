@@ -6,6 +6,7 @@ import { selectedTable } from "./adapters";
 export const QPCR_INPUT_TEMPLATE_SCHEMA_VERSION = "1.0.0";
 export const QPCR_INPUT_TEMPLATE_HEADERS = [
   "Plate",
+  "Plate Format",
   "Well",
   "Sample",
   "Assay",
@@ -25,8 +26,10 @@ export interface TemplateValidationIssue {
     | "mean-column-not-allowed"
     | "missing-value"
     | "invalid-well"
+    | "invalid-plate-format"
     | "invalid-replicate"
     | "invalid-number"
+    | "missing-plate"
     | "duplicate-well"
     | "duplicate-replicate";
   severity: "error" | "warning";
@@ -60,10 +63,10 @@ function headerStyle(required: boolean) {
 
 function styleDataSheet(sheet: XLSX.WorkSheet, rowCount: number) {
   sheet["!cols"] = [
-    { wch: 16 }, { wch: 10 }, { wch: 24 }, { wch: 20 }, { wch: 18 },
+    { wch: 16 }, { wch: 14 }, { wch: 10 }, { wch: 24 }, { wch: 20 }, { wch: 18 },
     { wch: 12 }, { wch: 14 }, { wch: 12 }, { wch: 12 },
   ];
-  sheet["!autofilter"] = { ref: `A1:I${Math.max(1, rowCount)}` };
+  sheet["!autofilter"] = { ref: `A1:${XLSX.utils.encode_col(QPCR_INPUT_TEMPLATE_HEADERS.length - 1)}${Math.max(1, rowCount)}` };
   sheet["!freeze"] = { xSplit: 0, ySplit: 1, topLeftCell: "A2", activePane: "bottomLeft", state: "frozen" };
   QPCR_INPUT_TEMPLATE_HEADERS.forEach((header, index) => {
     const cell = sheet[XLSX.utils.encode_cell({ r: 0, c: index })];
@@ -86,13 +89,13 @@ export function buildQpcrInputTemplateWorkbook(): XLSX.WorkBook {
 
   const exampleRows: Array<Array<string | number>> = [
     [...QPCR_INPUT_TEMPLATE_HEADERS],
-    ["Plate 01", "A1", "CAL_01", "REF1", "Reference", 1, 20.0, 82.1, ""],
-    ["Plate 01", "A2", "CAL_01", "REF1", "Reference", 2, 20.2, 82.2, ""],
-    ["Plate 01", "A3", "CAL_01", "GENE_A", "Target", 1, 23.0, 84.5, ""],
-    ["Plate 01", "A4", "CAL_01", "GENE_A", "Target", 2, 23.2, 84.4, ""],
-    ["Plate 01", "A5", "SAMPLE_01", "REF1", "Reference", 1, 20.4, 82.1, ""],
-    ["Plate 01", "A6", "SAMPLE_01", "GENE_A", "Target", 1, 22.1, 84.6, ""],
-    ["Plate 01", "A7", "NTC_01", "GENE_A", "NTC", 1, "Undetermined", "", ""],
+    ["Plate 01", 96, "A1", "CAL_01", "REF1", "Reference", 1, 20.0, 82.1, ""],
+    ["Plate 01", 96, "A2", "CAL_01", "REF1", "Reference", 2, 20.2, 82.2, ""],
+    ["Plate 01", 96, "A3", "CAL_01", "GENE_A", "Target", 1, 23.0, 84.5, ""],
+    ["Plate 01", 96, "A4", "CAL_01", "GENE_A", "Target", 2, 23.2, 84.4, ""],
+    ["Plate 01", 96, "A5", "SAMPLE_01", "REF1", "Reference", 1, 20.4, 82.1, ""],
+    ["Plate 01", 96, "A6", "SAMPLE_01", "GENE_A", "Target", 1, 22.1, 84.6, ""],
+    ["Plate 01", 96, "A7", "NTC_01", "GENE_A", "NTC", 1, "Undetermined", "", ""],
   ];
   const exampleSheet = XLSX.utils.aoa_to_sheet(exampleRows);
   styleDataSheet(exampleSheet, exampleRows.length);
@@ -107,6 +110,7 @@ export function buildQpcrInputTemplateWorkbook(): XLSX.WorkBook {
     [],
     ["Field", "Requirement", "中文说明", "English definition", "Allowed values / unit", "Accepted synonyms"],
     ["Plate", "Conditional", "孔板名称；多板数据必填", "Plate identifier; required for multi-plate data", "Text", "Plate Name, Plate ID, 板编号"],
+    ["Plate Format", "Optional", "显式板型；填写后孔位必须在该板范围内", "Explicit plate format; wells must fit this format when supplied", "96 or 384", "板型, Plate Size"],
     ["Well", "Required", "物理孔位", "Physical well coordinate", "A1–H12 (96) or A1–P24 (384)", "Well Position, Pos, 孔位"],
     ["Sample", "Required", "生物学样本名称", "Biological sample identifier", "Text", "Sample Name, 样本, 样本编号"],
     ["Assay", "Required", "基因或检测项目", "Target gene or assay", "Text", "Target, Gene, 基因, 靶标"],
@@ -173,6 +177,7 @@ export function validateQpcrInputTemplate(source: ImportedSource): TemplateValid
   const table = selectedTable(source);
   if (!table) return { totalRows: 0, detectedCount: 0, nonDetectedCount: 0, warningCount: 0, errorCount: 1, issues: [] };
   const mappings = acceptedMapping(table);
+  const plateFormatHeader = table.headers.find((header) => /^(?:plate\s*format|plate\s*size|板型)$/i.test(header.normalize("NFKC").trim()));
   const issues: TemplateValidationIssue[] = [];
   if (!table.rawRows.length) issues.push(issue(
     "missing-value", "error", table, null, "Data", "",
@@ -199,14 +204,22 @@ export function validateQpcrInputTemplate(source: ImportedSource): TemplateValid
   let nonDetectedCount = 0;
   const physicalKeys = new Map<string, RawImportedRow>();
   const replicateKeys = new Map<string, RawImportedRow>();
+  const namedPlateValues = new Set(table.rawRows.map((row) => rawText(row, mappings.plateName)).filter(Boolean));
   for (const row of table.rawRows) {
-    const plate = rawText(row, mappings.plateName) || "Plate 1";
+    const suppliedPlate = rawText(row, mappings.plateName);
+    const suppliedPlateFormat = rawText(row, plateFormatHeader);
+    const plate = suppliedPlate || "Plate 1";
     const wellValue = rawText(row, mappings.well);
     const sample = rawText(row, mappings.sampleName);
     const assay = rawText(row, mappings.targetName);
     const assayType = rawText(row, mappings.taskType);
     const replicate = rawText(row, mappings.replicate);
     const cq = rawText(row, mappings.cq);
+    if (namedPlateValues.size > 0 && !suppliedPlate) issues.push(issue(
+      "missing-plate", "error", table, row, "Plate", suppliedPlate,
+      `第 ${row.sourceRowNumber} 行的 Plate 为空；同一工作表已出现具名孔板，多板数据必须逐行填写 Plate。`,
+      `Plate is blank on row ${row.sourceRowNumber}; this sheet contains a named plate, so Plate is required on every row of multi-plate data.`,
+    ));
     for (const [field, label] of required) {
       const supplied = rawText(row, mappings[field]);
       if (!supplied) issues.push(issue(
@@ -216,10 +229,21 @@ export function validateQpcrInputTemplate(source: ImportedSource): TemplateValid
       ));
     }
     const well = normalizeWell(wellValue);
+    const plateFormat = suppliedPlateFormat ? Number(suppliedPlateFormat) : null;
+    if (suppliedPlateFormat && plateFormat !== 96 && plateFormat !== 384) issues.push(issue(
+      "invalid-plate-format", "error", table, row, "Plate Format", suppliedPlateFormat,
+      `第 ${row.sourceRowNumber} 行的 Plate Format 必须为 96 或 384。`,
+      `Plate Format on row ${row.sourceRowNumber} must be 96 or 384.`,
+    ));
     if (wellValue && !well) issues.push(issue(
       "invalid-well", "error", table, row, "Well", wellValue,
       `第 ${row.sourceRowNumber} 行孔位“${wellValue}”无效；请使用 A1–P24。`,
       `Well “${wellValue}” on row ${row.sourceRowNumber} is invalid; use A1–P24.`,
+    ));
+    if (well && plateFormat === 96 && (well.charCodeAt(0) > 72 || Number(well.slice(1)) > 12)) issues.push(issue(
+      "invalid-well", "error", table, row, "Well", wellValue,
+      `第 ${row.sourceRowNumber} 行孔位“${wellValue}”超出 96 孔板范围 A1–H12。`,
+      `Well “${wellValue}” on row ${row.sourceRowNumber} is outside the 96-well range A1–H12.`,
     ));
     if (replicate && (!Number.isInteger(Number(replicate)) || Number(replicate) <= 0)) issues.push(issue(
       "invalid-replicate", "error", table, row, "Replicate", replicate,
