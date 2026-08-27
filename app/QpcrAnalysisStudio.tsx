@@ -18,6 +18,7 @@ import {
   assessImportReadiness,
   buildCanonicalDataset,
   parseBrowserFile,
+  resolveAnalysisStartForImport,
   transitionAnalysisStart,
   validateAnalysisStartSource,
 } from "@/packages/importers/src";
@@ -214,6 +215,7 @@ export default function QpcrAnalysisStudio() {
   const { language, setLanguage, l } = useLanguage();
   const resultInput = useRef<HTMLInputElement>(null);
   const layoutInput = useRef<HTMLInputElement>(null);
+  const analysisStartSelectedByUser = useRef(false);
   const [sources, setSources] = useState<ImportedSource[]>([]);
   const [analysisSession, setAnalysisSession] = useState<AnalysisSessionState | null>(null);
   const [analysisStart, setAnalysisStart] = useState<AnalysisStart>("cq");
@@ -468,7 +470,11 @@ export default function QpcrAnalysisStudio() {
       const declaredStart = parsed
         .map((source) => source.metadata.qpcrAnalysisStart)
         .find((value): value is AnalysisStart => value === "cq" || value === "delta-cq" || value === "delta-delta-cq");
-      const effectiveStart = declaredStart ?? analysisStart;
+      const effectiveStart = resolveAnalysisStartForImport({
+        selectedStart: analysisStart,
+        selectedByUser: analysisStartSelectedByUser.current,
+        declaredStart,
+      });
       const nextSources = [...sources, ...parsed].map((source) => ({
         ...source,
         metadata: {
@@ -522,6 +528,7 @@ export default function QpcrAnalysisStudio() {
   }
 
   function changeAnalysisStart(next: AnalysisStart) {
+    analysisStartSelectedByUser.current = true;
     const transitioned = transitionAnalysisStart({
       analysisStart,
       sources,
@@ -553,6 +560,7 @@ export default function QpcrAnalysisStudio() {
   }
 
   function clearProject() {
+    analysisStartSelectedByUser.current = false;
     setSources([]);
     setAnalysisStart("cq");
     setAnalysisSession(null);

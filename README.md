@@ -40,7 +40,7 @@ npm run dev
 
 默认开发地址由 vinext 输出，通常是 `http://localhost:3000` 或下一个可用端口。
 
-“打开 Bar 图”默认链接到 Visualization Studio 本地独立版 `http://localhost:3400/?plot=bar`。部署时可通过 `NEXT_PUBLIC_VISUALIZATION_STUDIO_URL` 指向实际的 Visualization Studio 地址。
+“打开 Bar 图”默认链接到 Visualization Studio 本地独立版 `http://127.0.0.1:3400/visualization-studio/?plot=bar`。部署时可通过 `NEXT_PUBLIC_VISUALIZATION_STUDIO_URL` 指向实际的 Visualization Studio 地址；单文件离线版在没有 Node.js `process` 对象时也会安全使用该默认地址。
 
 ## 验证
 
