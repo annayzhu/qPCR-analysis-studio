@@ -90,9 +90,9 @@ describe("downloadable template to complete-results export", () => {
     const workbook = buildQpcrInputTemplateWorkbook();
     workbook.Sheets["Analysis Settings"].B1.v = "Delta Delta Cq";
     workbook.Sheets.Data = XLSX.utils.aoa_to_sheet([
-      ["Plate", "Well", "Sample", "Assay", "Replicate", "Delta Delta Cq"],
-      ["Source Plate", "A1", "Treat", "GENE", 1, -1.0],
-      ["Source Plate", "A2", "Treat", "GENE", 2, -0.8],
+      ["Plate", "Plate Format", "Well", "Sample", "Assay", "Assay Type", "Replicate", "Delta Delta Cq", "Tm1", "Tm2"],
+      ["Source Plate", 96, "A1", "Treat", "GENE", "Target", 1, -1.0, 84.2, 86.1],
+      ["Source Plate", 96, "A2", "Treat", "GENE", "Target", 2, -0.8, 84.3, ""],
     ]);
     const bytes = XLSX.write(workbook, { bookType: "xlsx", type: "array" }) as ArrayBuffer;
     const source = parseWorkbookBytes(bytes, "delta-delta-cq-with-provenance.xlsx");
@@ -122,6 +122,11 @@ describe("downloadable template to complete-results export", () => {
         value_provenance: "user-supplied",
         plate: "Source Plate",
         well: "A1",
+        plate_format: 96,
+        assay_type: "Target",
+        tm1: 84.2,
+        tm2: 86.1,
+        verification_status: "unverified",
         sample: "Treat",
         target: "GENE",
         replicate: 1,

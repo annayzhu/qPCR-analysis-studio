@@ -40,10 +40,18 @@ function wellOnPlate(plateId: string, id: string, position: string, sample: stri
 }
 
 describe("user-supplied calculation starts", () => {
+  const supplied = (sampleName: string, replicate: number, value: number) => ({
+    sampleName,
+    targetName: "GENE",
+    replicate,
+    value,
+    verificationStatus: "unverified" as const,
+  });
+
   it("summarizes replicate Delta Cq values and propagates their technical error", () => {
     const [result] = calculateFromSuppliedCalculations([
-      { sampleName: "Control", targetName: "GENE", replicate: 1, value: 3.0 },
-      { sampleName: "Control", targetName: "GENE", replicate: 2, value: 3.2 },
+      supplied("Control", 1, 3.0),
+      supplied("Control", 2, 3.2),
     ], { analysisStart: "delta-cq", calibratorValue: "" });
 
     expect(result).toMatchObject({
@@ -65,8 +73,8 @@ describe("user-supplied calculation starts", () => {
 
   it("starts from replicate Delta Delta Cq values without a reference or calibrator", () => {
     const [result] = calculateFromSuppliedCalculations([
-      { sampleName: "Treat", targetName: "GENE", replicate: 1, value: 0.0 },
-      { sampleName: "Treat", targetName: "GENE", replicate: 2, value: 0.2 },
+      supplied("Treat", 1, 0.0),
+      supplied("Treat", 2, 0.2),
     ], { analysisStart: "delta-delta-cq", calibratorValue: "" });
 
     expect(result).toMatchObject({
@@ -87,10 +95,10 @@ describe("user-supplied calculation starts", () => {
 
   it("continues from Delta Cq through a calibrator while retaining calibrator error", () => {
     const results = calculateFromSuppliedCalculations([
-      { sampleName: "Control", targetName: "GENE", replicate: 1, value: 3.0 },
-      { sampleName: "Control", targetName: "GENE", replicate: 2, value: 3.2 },
-      { sampleName: "Treat", targetName: "GENE", replicate: 1, value: 2.0 },
-      { sampleName: "Treat", targetName: "GENE", replicate: 2, value: 2.2 },
+      supplied("Control", 1, 3.0),
+      supplied("Control", 2, 3.2),
+      supplied("Treat", 1, 2.0),
+      supplied("Treat", 2, 2.2),
     ], { analysisStart: "delta-cq", calibratorValue: "Control" });
     const control = results.find((row) => row.sampleName === "Control")!;
     const treat = results.find((row) => row.sampleName === "Treat")!;
@@ -106,8 +114,8 @@ describe("user-supplied calculation starts", () => {
 
   it("exports supplied calculations with explicit provenance and the stable bar contract", () => {
     const results = calculateFromSuppliedCalculations([
-      { sampleName: "Treat", targetName: "GENE", replicate: 1, value: 0.0 },
-      { sampleName: "Treat", targetName: "GENE", replicate: 2, value: 0.2 },
+      supplied("Treat", 1, 0.0),
+      supplied("Treat", 2, 0.2),
     ], { analysisStart: "delta-delta-cq", calibratorValue: "" });
 
     const [complete] = buildSuppliedCompleteRows(results, ["Treat"], ["GENE"]);

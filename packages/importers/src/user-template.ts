@@ -1,6 +1,6 @@
 import XLSX from "xlsx-js-style";
 import type { CanonicalField, ImportedSource, ImportedTable, RawImportedRow } from "../../schemas/src";
-import { normalizeWell } from "../../schemas/src";
+import { analysisStartPolicy, normalizeWell } from "../../schemas/src";
 import { selectedTable } from "./adapters";
 
 export const QPCR_INPUT_TEMPLATE_SCHEMA_VERSION = "2.1.0";
@@ -194,8 +194,7 @@ function issue(
   };
 }
 
-export function validateQpcrInputTemplate(source: ImportedSource): TemplateValidationSummary | null {
-  if (!source.metadata.qpcrTemplateSchemaVersion) return null;
+function validateAnalysisStartRows(source: ImportedSource): TemplateValidationSummary {
   const table = selectedTable(source);
   if (!table) return { totalRows: 0, detectedCount: 0, nonDetectedCount: 0, warningCount: 0, errorCount: 1, issues: [] };
   const mappings = acceptedMapping(table);
@@ -347,4 +346,20 @@ export function validateQpcrInputTemplate(source: ImportedSource): TemplateValid
     errorCount: issues.filter((item) => item.severity === "error").length,
     issues,
   };
+}
+
+export function validateQpcrInputTemplate(source: ImportedSource): TemplateValidationSummary | null {
+  return source.metadata.qpcrTemplateSchemaVersion ? validateAnalysisStartRows(source) : null;
+}
+
+export function validateAnalysisStartSource(source: ImportedSource): TemplateValidationSummary | null {
+  if (source.metadata.qpcrTemplateSchemaVersion) return validateAnalysisStartRows(source);
+  const analysisStart = source.metadata.qpcrAnalysisStart;
+  if (analysisStart !== "delta-cq" && analysisStart !== "delta-delta-cq") return null;
+  const table = selectedTable(source);
+  if (!table) return null;
+  const mappings = acceptedMapping(table);
+  return mappings[analysisStartPolicy(analysisStart).authoritativeValueField]
+    ? validateAnalysisStartRows(source)
+    : null;
 }

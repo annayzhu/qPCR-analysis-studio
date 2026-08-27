@@ -18,7 +18,7 @@ import {
   assessImportReadiness,
   buildCanonicalDataset,
   parseBrowserFile,
-  validateQpcrInputTemplate,
+  validateAnalysisStartSource,
 } from "@/packages/importers/src";
 import {
   createAnalysisSession,
@@ -318,7 +318,7 @@ export default function QpcrAnalysisStudio() {
     ...(dataset?.warnings ?? []),
     ...sources.flatMap((source) => source.warnings),
     ...sources.flatMap((source) => source.tables.flatMap((table) => table.warnings)),
-    ...sources.flatMap((source) => validateQpcrInputTemplate(source)?.issues
+    ...sources.flatMap((source) => validateAnalysisStartSource(source)?.issues
       .filter((issue) => issue.severity === "warning")
       .map((issue) => `${issue.code}: ${issue.sourceSheet} row ${issue.sourceRowNumber ?? "-"} ${issue.messageEn}`) ?? []),
     ...appliedWells.flatMap((well) => well.qcFlags.map((flag) => `${flag.code}: ${flag.message}`)),

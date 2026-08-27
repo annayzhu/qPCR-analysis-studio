@@ -41,8 +41,9 @@ export const SUPPLIED_COMPLETE_HEADERS = [
 export type SuppliedCompleteRow = Record<(typeof SUPPLIED_COMPLETE_HEADERS)[number], string | number | null>;
 
 export const SUPPLIED_TRACEABILITY_HEADERS = [
-  "analysis_start", "value_provenance", "plate", "well", "sample", "target",
-  "replicate", "supplied_value", "cycle_type", "source_sheet", "source_row",
+  "analysis_start", "value_provenance", "verification_status", "plate", "plate_format", "well",
+  "sample", "target", "assay_type", "replicate", "supplied_value", "cycle_type", "tm1", "tm2",
+  "source_sheet", "source_row",
 ] as const;
 
 export type SuppliedTraceabilityRow = Record<(typeof SUPPLIED_TRACEABILITY_HEADERS)[number], string | number | null>;
@@ -196,13 +197,18 @@ export function buildSuppliedTraceabilityRows(
   return records.map((record) => ({
     analysis_start: record.analysisStart ?? null,
     value_provenance: "user-supplied",
+    verification_status: record.verificationStatus,
     plate: record.plateName ?? null,
+    plate_format: record.plateFormat ?? null,
     well: record.well ?? null,
     sample: record.sampleName,
     target: record.targetName,
+    assay_type: record.assayType || null,
     replicate: record.replicate,
     supplied_value: record.value,
     cycle_type: record.cycleType || null,
+    tm1: record.tm1 ?? null,
+    tm2: record.tm2 ?? null,
     source_sheet: record.sourceSheet ?? null,
     source_row: record.sourceRowNumber ?? null,
   }));

@@ -1,7 +1,7 @@
 import type { CanonicalDataset, CanonicalField, ImportedSource } from "../../schemas/src";
-import { physicalWellIdOf } from "../../schemas/src";
+import { analysisStartPolicy, physicalWellIdOf } from "../../schemas/src";
 import { selectedTable } from "./adapters";
-import { validateQpcrInputTemplate } from "./user-template";
+import { validateAnalysisStartSource } from "./user-template";
 
 export type ImportSourceRole = "primary-result" | "supplemental-result" | "plate-layout" | "unknown";
 
@@ -170,11 +170,10 @@ export function getSourceCapabilities(source: ImportedSource): SourceCapabilitie
   const fields = [...new Set(acceptedMappings.map((mapping) => mapping.canonicalField!))];
   const fieldSet = new Set(fields);
   const analysisStart = source.metadata.qpcrAnalysisStart;
-  const criticalFields = analysisStart === "delta-cq"
-    ? new Set<CanonicalField>(["sampleName", "targetName", "replicate", "deltaCq"])
-    : analysisStart === "delta-delta-cq"
-      ? new Set<CanonicalField>(["sampleName", "targetName", "replicate", "deltaDeltaCq"])
-      : CYCLE_START_CRITICAL_FIELDS;
+  const policy = analysisStart === "delta-cq" || analysisStart === "delta-delta-cq"
+    ? analysisStartPolicy(analysisStart)
+    : null;
+  const criticalFields = new Set<CanonicalField>(policy?.requiredFields ?? CYCLE_START_CRITICAL_FIELDS);
   const blockingConflicts = table.suggestedMappings
     .filter((mapping) => mapping.conflict && mapping.canonicalField && criticalFields.has(mapping.canonicalField))
     .map((mapping) => mapping.sourceColumn);
@@ -184,15 +183,12 @@ export function getSourceCapabilities(source: ImportedSource): SourceCapabilitie
   const hasMeltSummary = fieldSet.has("meltGroup") || fieldSet.has("meltScore") || fieldSet.has("meltResolution");
   const hasSampleName = fieldSet.has("sampleName");
   const hasTargetName = fieldSet.has("targetName");
-  const includesPlateLayout = analysisStart !== "delta-cq"
-    && analysisStart !== "delta-delta-cq"
+  const includesPlateLayout = !policy?.calculationOnly
     && hasWell
     && hasSampleName
     && hasTargetName;
-  const hasSelectedCalculation =
-    (analysisStart === "delta-cq" && fieldSet.has("deltaCq"))
-    || (analysisStart === "delta-delta-cq" && fieldSet.has("deltaDeltaCq"));
-  const hasAuthoritativeQuantification = analysisStart === "delta-cq" || analysisStart === "delta-delta-cq"
+  const hasSelectedCalculation = policy ? fieldSet.has(policy.authoritativeValueField) : false;
+  const hasAuthoritativeQuantification = policy
     ? hasSelectedCalculation
     : hasCq;
 
@@ -221,7 +217,7 @@ export function assessImportReadiness(sources: ImportedSource[]): ImportReadines
   const supplementalResults = capabilities.filter((item) => item.role === "supplemental-result");
   const layouts = capabilities.filter((item) => item.role === "plate-layout");
   const hasBlockingConflict = capabilities.some((item) => item.blockingConflicts.length > 0);
-  const templateValidation = sources.map(validateQpcrInputTemplate).filter((item) => item !== null);
+  const templateValidation = sources.map(validateAnalysisStartSource).filter((item) => item !== null);
   const hasTemplateErrors = templateValidation.some((item) => item.errorCount > 0);
   const analysisResults = [...primaryResults, ...supplementalResults];
   const analysisMode = primaryResults.length ? "quantification" : supplementalResults.length ? "melt-only" : null;

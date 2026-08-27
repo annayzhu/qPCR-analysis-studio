@@ -7,6 +7,7 @@ import {
   buildQpcrInputTemplateWorkbook,
   parseWorkbookBytes,
   QPCR_INPUT_TEMPLATE_HEADERS,
+  validateAnalysisStartSource,
   validateQpcrInputTemplate,
 } from "./index";
 import {
@@ -131,6 +132,53 @@ describe("qPCR user input template", () => {
 
     expect(getSourceCapabilities(source).role).not.toBe("primary-result");
     expect(assessImportReadiness([source])).toMatchObject({ canAnalyze: false, status: "waiting-results" });
+  });
+
+  it("blocks a generic Delta source with missing required columns or row values", () => {
+    const missingColumns = parseDelimitedText(
+      "Delta Cq\n3.0\n",
+      "delta-missing-columns.tsv",
+    );
+    missingColumns.metadata.qpcrAnalysisStart = "delta-cq";
+    const blankValue = parseDelimitedText(
+      "Sample\tAssay\tReplicate\tDelta Cq\nControl\tGENE\t1\t\n",
+      "delta-blank-value.tsv",
+    );
+    blankValue.metadata.qpcrAnalysisStart = "delta-cq";
+
+    expect(validateAnalysisStartSource(missingColumns)?.issues).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: "missing-column", column: "Sample" }),
+      expect.objectContaining({ code: "missing-column", column: "Assay" }),
+      expect.objectContaining({ code: "missing-column", column: "Replicate" }),
+    ]));
+    expect(validateAnalysisStartSource(blankValue)?.issues).toContainEqual(expect.objectContaining({
+      code: "missing-value",
+      sourceSheet: "Sheet1",
+      sourceRowNumber: 2,
+      column: "Delta Cq",
+    }));
+    expect(assessImportReadiness([missingColumns])).toMatchObject({ canAnalyze: false, status: "review-mapping" });
+    expect(assessImportReadiness([blankValue])).toMatchObject({ canAnalyze: false, status: "review-mapping" });
+  });
+
+  it("does not validate an independent layout source as a Delta result after switching starts", () => {
+    const result = parseDelimitedText(
+      "Sample\tAssay\tReplicate\tDelta Cq\nControl\tGENE\t1\t3.0\n",
+      "delta-result.tsv",
+    );
+    const layout = parseDelimitedText(
+      "Well\tSample\tAssay\tAssay Type\nA1\tControl\tGENE\tTarget\n",
+      "old-layout.tsv",
+    );
+    result.metadata.qpcrAnalysisStart = "delta-cq";
+    layout.metadata.qpcrAnalysisStart = "delta-cq";
+
+    expect(validateAnalysisStartSource(layout)).toBeNull();
+    expect(assessImportReadiness([result, layout])).toMatchObject({
+      canAnalyze: true,
+      status: "ready",
+      layoutRequired: false,
+    });
   });
 
   it("blocks an unsupported analysis start instead of silently falling back to Cq", () => {

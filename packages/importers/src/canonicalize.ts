@@ -11,7 +11,7 @@ import type {
   WellRecord,
   SuppliedCalculationRecord,
 } from "../../schemas/src";
-import { createPhysicalWellId, normalizeWell } from "../../schemas/src";
+import { analysisStartPolicy, createPhysicalWellId, normalizeWell } from "../../schemas/src";
 import { applyInstrumentAdapter, selectedTable } from "./adapters";
 
 const NON_DETECTED = /^(?:undetermined|no\s*ct|no\s*cq|n\/?a|na|nan|failed|无扩增|未检出)$/i;
@@ -253,7 +253,7 @@ export function buildCanonicalDataset(inputSources: ImportedSource[]): Canonical
       const qcFlags: QcFlag[] = [];
       const cq = cqValue(cqRaw, isRoche);
       if (analysisStart !== "cq") {
-        const selectedField = analysisStart === "delta-cq" ? "deltaCq" : "deltaDeltaCq";
+        const selectedField = analysisStartPolicy(analysisStart).authoritativeValueField;
         const suppliedValue = numberOrNull(value(rawRow, mappings, selectedField));
         if (suppliedValue !== null && sampleName && targetName) {
           suppliedCalculations.push({
@@ -266,6 +266,15 @@ export function buildCanonicalDataset(inputSources: ImportedSource[]): Canonical
             ...(rawPlateName ? { plateName: rawPlateName } : {}),
             ...(well ? { well } : {}),
             cycleType: text(value(rawRow, mappings, "cycleType")),
+            plateFormat: (() => {
+              const header = rawRow.rawHeaders.find((item) => /^(?:plate\s*format|plate\s*size|板型)$/i.test(item.normalize("NFKC").trim()));
+              const parsed = header ? Number(rawRow.rawValues[header]) : NaN;
+              return parsed === 96 || parsed === 384 ? parsed : undefined;
+            })(),
+            assayType: text(value(rawRow, mappings, "taskType")),
+            tm1: numberOrNull(value(rawRow, mappings, "tm1")),
+            tm2: numberOrNull(value(rawRow, mappings, "tm2")),
+            verificationStatus: "unverified",
             sourceSheet: rawRow.sourceSheet,
             sourceRowNumber: rawRow.sourceRowNumber,
             rawRow,

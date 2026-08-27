@@ -5,7 +5,7 @@ import type { AnalysisStart, CanonicalField, ImportedSource } from "@/packages/s
 import {
   CANONICAL_FIELD_LABELS,
   getSourceCapabilities,
-  validateQpcrInputTemplate,
+  validateAnalysisStartSource,
   writeQpcrInputTemplate,
   type ImportReadiness,
   type ImportSourceRole,
@@ -132,7 +132,7 @@ function SourceCard({
   const { language, l } = useLanguage();
   const table = source.tables.find((item) => item.id === source.selectedTableId) ?? source.tables[0];
   const capabilities = getSourceCapabilities(source);
-  const templateValidation = validateQpcrInputTemplate(source);
+  const templateValidation = validateAnalysisStartSource(source);
   const sourceRole = roleLabel(capabilities.role, l);
   return (
     <article className="source-row">

@@ -196,6 +196,11 @@ export interface SuppliedCalculationRecord {
   plateName?: string;
   well?: string;
   cycleType?: string;
+  plateFormat?: 96 | 384;
+  assayType?: string;
+  tm1?: number | null;
+  tm2?: number | null;
+  verificationStatus: "unverified" | "user-confirmed";
   sourceSheet?: string;
   sourceRowNumber?: number;
   rawRow?: RawImportedRow;
