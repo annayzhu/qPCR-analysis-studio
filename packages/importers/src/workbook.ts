@@ -76,6 +76,14 @@ function normalizeAnalysisStart(value: unknown): string {
   return "invalid";
 }
 
+function settingsValue(matrix: unknown[][], label: RegExp): string {
+  return matrix
+    .filter((row) => label.test(String(row[0] ?? "").normalize("NFKC").trim()))
+    .map((row) => String(row[1] ?? "").normalize("NFKC").trim())
+    .filter(Boolean)
+    .at(-1) ?? "";
+}
+
 export function parseWorkbookBytes(
   bytes: ArrayBuffer,
   fileName: string,
@@ -90,6 +98,15 @@ export function parseWorkbookBytes(
   const settingsMatrix = settingsSheet ? sheetMatrix(settingsSheet) : [];
   const analysisStart = isQpcrTemplate
     ? normalizeAnalysisStart(settingsMatrix[0]?.[1] ?? "Cq/Ct/Cp")
+    : "";
+  const referenceTargets = isQpcrTemplate
+    ? settingsValue(settingsMatrix, /^Reference Target\(s\)\s*\/\s*内参基因$/i)
+    : "";
+  const referenceMethod = isQpcrTemplate
+    ? settingsValue(settingsMatrix, /^Reference Method\s*\/\s*内参处理方法$/i)
+    : "";
+  const calibratorValue = isQpcrTemplate
+    ? settingsValue(settingsMatrix, /^Calibrator\s*\/\s*校准样本$/i)
     : "";
   const tables = workbook.SheetNames.map((sheetName) =>
     tableFromMatrix(sourceId, fileName, sheetName, sheetMatrix(workbook.Sheets[sheetName])),
@@ -108,6 +125,9 @@ export function parseWorkbookBytes(
     metadata: templateVersion ? {
       qpcrTemplateSchemaVersion: templateVersion,
       qpcrAnalysisStart: analysisStart,
+      ...(referenceTargets ? { qpcrReferenceTargets: referenceTargets } : {}),
+      ...(referenceMethod ? { qpcrReferenceMethod: referenceMethod } : {}),
+      ...(calibratorValue ? { qpcrCalibratorValue: calibratorValue } : {}),
     } : {},
     warnings: tables.length ? [] : ["工作簿中没有可读取的工作表"],
   });

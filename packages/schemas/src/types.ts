@@ -206,6 +206,12 @@ export interface SuppliedCalculationRecord {
   rawRow?: RawImportedRow;
 }
 
+export interface SuppliedCalculationProvenance {
+  referenceTargets: string[];
+  referenceMethod: string;
+  calibratorValue: string;
+}
+
 export interface CanonicalDataset {
   id: string;
   createdAt: string;
@@ -214,6 +220,7 @@ export interface CanonicalDataset {
   plate: PlateDefinition | null;
   wells: WellRecord[];
   suppliedCalculations: SuppliedCalculationRecord[];
+  suppliedCalculationProvenance: SuppliedCalculationProvenance | null;
   mappings: FieldMapping[];
   warnings: string[];
   assumptions: string[];

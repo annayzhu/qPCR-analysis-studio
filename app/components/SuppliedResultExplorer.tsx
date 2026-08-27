@@ -2,7 +2,7 @@
 
 import { useMemo, useRef, useState } from "react";
 import XLSX from "xlsx-js-style";
-import type { AnalysisStart, SuppliedCalculationRecord } from "@/packages/schemas/src";
+import type { AnalysisStart, SuppliedCalculationProvenance, SuppliedCalculationRecord } from "@/packages/schemas/src";
 import {
   buildLogRatioAxis,
   buildSuppliedCompleteRows,
@@ -91,20 +91,29 @@ function SuppliedChart({ rows, target, sampleOrder, showSd }: {
   </div>;
 }
 
-export default function SuppliedResultExplorer({ results, records, analysisStart, sampleOrder, targetOrder }: {
+export default function SuppliedResultExplorer({ results, records, analysisStart, sampleOrder, targetOrder, provenance, calibrator }: {
   results: SuppliedCalculationResult[];
   records: SuppliedCalculationRecord[];
   analysisStart: Exclude<AnalysisStart, "cq">;
   sampleOrder: string[];
   targetOrder: string[];
+  provenance: SuppliedCalculationProvenance | null;
+  calibrator: string;
 }) {
   const { l } = useLanguage();
   const [showSd, setShowSd] = useState(false);
+  const effectiveProvenance = useMemo<SuppliedCalculationProvenance>(() => ({
+    referenceTargets: provenance?.referenceTargets ?? [],
+    referenceMethod: provenance?.referenceMethod ?? "",
+    calibratorValue: calibrator || provenance?.calibratorValue || "",
+  }), [calibrator, provenance]);
   const filtered = useMemo(() => results.filter((row) => sampleOrder.includes(row.sampleName) && targetOrder.includes(row.targetName)), [results, sampleOrder, targetOrder]);
-  const completeRows = useMemo(() => buildSuppliedCompleteRows(results, sampleOrder, targetOrder), [results, sampleOrder, targetOrder]);
-  const traceabilityRows = useMemo(() => buildSuppliedTraceabilityRows(records), [records]);
+  const completeRows = useMemo(() => buildSuppliedCompleteRows(results, sampleOrder, targetOrder, effectiveProvenance), [effectiveProvenance, results, sampleOrder, targetOrder]);
+  const traceabilityRows = useMemo(() => buildSuppliedTraceabilityRows(records, effectiveProvenance), [effectiveProvenance, records]);
   const barRows = useMemo(() => buildSuppliedVisualizationBarRows(results, sampleOrder, targetOrder), [results, sampleOrder, targetOrder]);
   const chartTargets = targetOrder.filter((target) => filtered.some((row) => row.targetName === target));
+  const referenceTargets = effectiveProvenance.referenceTargets;
+  const displayedCalibrator = effectiveProvenance.calibratorValue;
   const exportTable = (headers: readonly string[], rows: Array<Record<string, string | number | null>>, fileName: string) => {
     const sheet = XLSX.utils.json_to_sheet(rows, { header: [...headers] });
     sheet["!autofilter"] = { ref: sheet["!ref"] ?? "A1:A1" };
@@ -132,6 +141,16 @@ export default function SuppliedResultExplorer({ results, records, analysisStart
   const barRecords = barRows as unknown as Array<Record<string, string | number | null>>;
   return <div className="result-explorer supplied-result-explorer">
     <div className="supplied-provenance-notice"><b>{analysisStart === "delta-cq" ? l("从用户提供的 ΔCq 开始", "Starting from user-supplied ΔCq") : l("从用户提供的 ΔΔCq 开始", "Starting from user-supplied ΔΔCq")}</b><span>{l("系统不会重建上游 Cq 或孔级扩增 QC；所有输出均标注计算起点与数值来源。", "Upstream Cq and well-level amplification QC are not reconstructed; every output identifies its start and provenance.")}</span></div>
+    <section className={referenceTargets.length ? "supplied-calculation-basis" : "supplied-calculation-basis incomplete"}>
+      <div className="calculation-basis-heading"><p className="eyebrow">CALCULATION BASIS</p><h3>{l("用户计算依据", "User-supplied calculation basis")}</h3><small>{l("仅用于方法溯源，不会再次归一化", "Provenance only; values are not normalized again")}</small></div>
+      <dl>
+        <div><dt>{l("分析起点", "Analysis start")}</dt><dd>{analysisStart === "delta-cq" ? "ΔCq" : "ΔΔCq"}</dd></div>
+        <div><dt>{l("内参基因", "Reference target(s)")}</dt><dd>{referenceTargets.join("; ") || l("未提供", "Not provided")}</dd></div>
+        <div><dt>{l("内参处理方法", "Reference method")}</dt><dd>{effectiveProvenance.referenceMethod || l("未提供", "Not provided")}</dd></div>
+        <div><dt>{l("校准样本", "Calibrator")}</dt><dd>{displayedCalibrator || l("未提供 / 未选择", "Not provided / not selected")}</dd></div>
+      </dl>
+      {!referenceTargets.length && <p className="calculation-basis-warning"><b>{l("内参基因未提供", "Reference target not provided")}</b><span>{l("结果仍可查看，但计算依据不完整；系统不会根据基因名称或数值自动猜测。", "Results remain viewable, but the calculation basis is incomplete. The system will not infer a reference target from names or values.")}</span></p>}
+    </section>
     <section className="result-commandbar"><div className="result-commandbar-summary"><div><h3>{l("结果预览", "Result preview")}</h3><p>{l(`${filtered.length} 条用户计算结果`, `${filtered.length} user-supplied result(s)`)}</p></div></div>
       <div className="result-commandbar-grid supplied-commandbar-grid">
         <div className="result-command-group"><span className="command-group-label">{l("显示", "Display")}</span><button type="button" className={showSd ? "filter-chip active" : "filter-chip"} onClick={() => setShowSd((value) => !value)}>{l("技术复孔 SD", "Technical-replicate SD")}</button></div>

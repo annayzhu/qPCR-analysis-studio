@@ -41,12 +41,15 @@ describe("qPCR user input template", () => {
     expect(workbook.SheetNames).toEqual(["Analysis Settings", "Data", "Example", "Field Dictionary"]);
     expect(settings).toEqual(expect.arrayContaining([
       ["Analysis Start / 分析起点", "Cq/Ct/Cp"],
+      ["Reference Target(s) / 内参基因", ""],
+      ["Reference Method / 内参处理方法", ""],
+      ["Calibrator / 校准样本", ""],
       ["Allowed / 可选值", "Cq/Ct/Cp", "Delta Cq", "Delta Delta Cq"],
     ]));
     expect(QPCR_INPUT_TEMPLATE_HEADERS).toEqual(expect.arrayContaining([
       "Cycle Type", "Delta Cq", "Delta Delta Cq",
     ]));
-    expect(workbook.Sheets["Field Dictionary"].B2?.v).toBe("2.1.0");
+    expect(workbook.Sheets["Field Dictionary"].B2?.v).toBe("2.2.0");
   });
 
   it("documents required fields separately for every analysis start", () => {
@@ -204,7 +207,7 @@ describe("qPCR user input template", () => {
     const headers = XLSX.utils.sheet_to_json<unknown[]>(workbook.Sheets.Data, { header: 1 })[0];
     expect(headers).toEqual(QPCR_INPUT_TEMPLATE_HEADERS);
     expect(workbook.Sheets["Field Dictionary"].A2?.v).toContain("Template Schema Version");
-    expect(workbook.Sheets["Field Dictionary"].B2?.v).toBe("2.1.0");
+    expect(workbook.Sheets["Field Dictionary"].B2?.v).toBe("2.2.0");
   });
 
   it("blocks malformed rows with row-specific template diagnostics", () => {

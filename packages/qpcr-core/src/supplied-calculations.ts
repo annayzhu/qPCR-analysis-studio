@@ -1,4 +1,4 @@
-import type { AnalysisStart, SuppliedCalculationRecord } from "../../schemas/src";
+import type { AnalysisStart, SuppliedCalculationProvenance, SuppliedCalculationRecord } from "../../schemas/src";
 
 export type { SuppliedCalculationRecord } from "../../schemas/src";
 
@@ -30,7 +30,7 @@ export interface SuppliedCalculationResult {
 }
 
 export const SUPPLIED_COMPLETE_HEADERS = [
-  "analysis_start", "value_provenance", "sample", "target", "valid_replicates",
+  "analysis_start", "value_provenance", "reference_targets", "reference_method", "sample", "target", "valid_replicates",
   "delta_cq", "delta_cq_technical_sd", "delta_cq_technical_sem",
   "normalized_quantity_2^-delta_cq", "normalized_quantity_technical_sd", "normalized_quantity_technical_sem",
   "delta_delta_cq", "delta_delta_cq_technical_sd", "delta_delta_cq_technical_sem",
@@ -41,9 +41,9 @@ export const SUPPLIED_COMPLETE_HEADERS = [
 export type SuppliedCompleteRow = Record<(typeof SUPPLIED_COMPLETE_HEADERS)[number], string | number | null>;
 
 export const SUPPLIED_TRACEABILITY_HEADERS = [
-  "analysis_start", "value_provenance", "verification_status", "plate", "plate_format", "well",
+  "analysis_start", "value_provenance", "reference_targets", "reference_method", "calibrator", "verification_status", "plate", "plate_format", "well",
   "sample", "target", "assay_type", "replicate", "supplied_value", "cycle_type", "tm1", "tm2",
-  "source_sheet", "source_row",
+  "source_sheet", "source_row", "warnings",
 ] as const;
 
 export type SuppliedTraceabilityRow = Record<(typeof SUPPLIED_TRACEABILITY_HEADERS)[number], string | number | null>;
@@ -167,10 +167,13 @@ export function buildSuppliedCompleteRows(
   results: SuppliedCalculationResult[],
   sampleOrder: string[],
   targetOrder: string[],
+  provenance: SuppliedCalculationProvenance | null = null,
 ): SuppliedCompleteRow[] {
   return orderResults(results, sampleOrder, targetOrder).map((row) => ({
     analysis_start: row.analysisStart,
     value_provenance: row.valueProvenance,
+    reference_targets: provenance?.referenceTargets.join("; ") || null,
+    reference_method: provenance?.referenceMethod || null,
     sample: row.sampleName,
     target: row.targetName,
     valid_replicates: row.validReplicates,
@@ -186,17 +189,21 @@ export function buildSuppliedCompleteRows(
     "relative_expression_2^-delta_delta_cq": row.relativeExpression,
     relative_expression_technical_sd: row.relativeExpressionSd,
     relative_expression_technical_sem: row.relativeExpressionSem,
-    calibrator: row.calibratorValue,
-    warnings: row.warningCodes.join("; "),
+    calibrator: row.calibratorValue || provenance?.calibratorValue || null,
+    warnings: [...row.warningCodes, ...(!provenance?.referenceTargets.length ? ["REFERENCE_TARGET_NOT_PROVIDED"] : [])].join("; "),
   }));
 }
 
 export function buildSuppliedTraceabilityRows(
   records: SuppliedCalculationRecord[],
+  provenance: SuppliedCalculationProvenance | null = null,
 ): SuppliedTraceabilityRow[] {
   return records.map((record) => ({
     analysis_start: record.analysisStart ?? null,
     value_provenance: "user-supplied",
+    reference_targets: provenance?.referenceTargets.join("; ") || null,
+    reference_method: provenance?.referenceMethod || null,
+    calibrator: provenance?.calibratorValue || null,
     verification_status: record.verificationStatus,
     plate: record.plateName ?? null,
     plate_format: record.plateFormat ?? null,
@@ -211,6 +218,7 @@ export function buildSuppliedTraceabilityRows(
     tm2: record.tm2 ?? null,
     source_sheet: record.sourceSheet ?? null,
     source_row: record.sourceRowNumber ?? null,
+    warnings: !provenance?.referenceTargets.length ? "REFERENCE_TARGET_NOT_PROVIDED" : "",
   }));
 }
 

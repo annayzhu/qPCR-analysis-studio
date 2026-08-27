@@ -181,6 +181,28 @@ export function buildCanonicalDataset(inputSources: ImportedSource[]): Canonical
   const explicitPlateNames = new Set<string>();
   const sourceHasExplicitPlate = new Map<string, boolean>();
   const primaryResultSourceIds = new Set<string>();
+  const splitReferenceTargets = (raw: string) => raw
+    .split(/[;,，；\n]+/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+  const referenceTargetSets = sources
+    .map((source) => splitReferenceTargets(source.metadata.qpcrReferenceTargets ?? ""))
+    .filter((targets) => targets.length);
+  const referenceTargets = [...new Set(referenceTargetSets[0] ?? [])];
+  const referenceTargetSignatures = new Set(referenceTargetSets.map((targets) => [...targets].sort().join("\u241f")));
+  const referenceMethods = [...new Set(sources.map((source) => source.metadata.qpcrReferenceMethod).filter(Boolean))];
+  const calibratorValues = [...new Set(sources.map((source) => source.metadata.qpcrCalibratorValue).filter(Boolean))];
+  const suppliedCalculationProvenance = analysisStart === "cq" ? null : {
+    referenceTargets,
+    referenceMethod: referenceMethods[0] ?? "",
+    calibratorValue: calibratorValues[0] ?? "",
+  };
+  if (analysisStart !== "cq" && !referenceTargets.length) {
+    warnings.push("用户计算结果未提供内参基因；数值仍可分析，但计算依据不完整。");
+  }
+  if (referenceTargetSignatures.size > 1) warnings.push("多个来源文件提供了不同的内参基因集合；当前保留第一个集合，请复核来源文件。");
+  if (referenceMethods.length > 1) warnings.push("多个来源文件提供了不同的内参处理方法；当前保留第一个方法，请复核来源文件。");
+  if (calibratorValues.length > 1) warnings.push("多个来源文件提供了不同的校准样本；当前保留第一个校准样本，请复核来源文件。");
 
   for (const source of sources) {
     const table = selectedTable(source);
@@ -377,6 +399,7 @@ export function buildCanonicalDataset(inputSources: ImportedSource[]): Canonical
     plate,
     wells,
     suppliedCalculations,
+    suppliedCalculationProvenance,
     mappings: allMappings,
     warnings,
     assumptions,
