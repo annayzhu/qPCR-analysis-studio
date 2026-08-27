@@ -119,3 +119,13 @@ Add a complete calculation-results export that preserves selected sample and tar
 - The current calculation model already contains target/reference mean, SD, SEM, and propagated result fields. Delivery should expose and document them consistently rather than creating a second calculation path.
 - The current calculation documentation contains an older statement that fixes calibrator propagated SD at zero. This conflicts with the agreed product behavior and must be updated together with the export.
 - All examples and automated fixtures must use synthetic, de-identified identifiers and must not include real instrument files in public source or issue content.
+
+## Calculation-only provenance amendment (schema 2.2.0 / export 1.1.0)
+
+- `Analysis Settings` also records `Reference Target(s) / 内参基因`, `Reference Method / 内参处理方法`, and `Calibrator / 校准样本` when analysis begins from user-supplied ΔCq or ΔΔCq.
+- These workbook values are immutable source provenance. They never trigger a second normalization and are never inferred from target names or numeric values.
+- `source_calibrator` records the imported upstream calibrator; `calibrator` records a downstream calibrator actually selected for the current result. Changing one must not rewrite the other.
+- An imported `source_calibrator` never activates downstream ΔΔCq calculation. The user must explicitly select a downstream calibrator in Results.
+- Multiple supplied-calculation workbooks with conflicting reference targets, reference methods, or source calibrators are blocked from combined analysis rather than assigning the first workbook's provenance to every row.
+- Supplied-calculation XLSX exports contain `Complete Results`, `Supplied Values`, `Export Metadata`, and `Data Dictionary`. The TSV action downloads both the result TSV and its dictionary TSV.
+- Legacy workbooks without reference metadata remain analyzable and export `REFERENCE_TARGET_NOT_PROVIDED`.

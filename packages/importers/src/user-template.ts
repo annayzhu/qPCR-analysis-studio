@@ -3,7 +3,7 @@ import type { CanonicalField, ImportedSource, ImportedTable, RawImportedRow } fr
 import { analysisStartPolicy, normalizeWell } from "../../schemas/src";
 import { selectedTable } from "./adapters";
 
-export const QPCR_INPUT_TEMPLATE_SCHEMA_VERSION = "2.1.0";
+export const QPCR_INPUT_TEMPLATE_SCHEMA_VERSION = "2.2.0";
 export const QPCR_INPUT_TEMPLATE_HEADERS = [
   "Plate",
   "Plate Format",
@@ -35,7 +35,8 @@ export interface TemplateValidationIssue {
     | "invalid-number"
     | "missing-plate"
     | "duplicate-well"
-    | "duplicate-replicate";
+    | "duplicate-replicate"
+    | "missing-reference-target";
   severity: "error" | "warning";
   sourceSheet: string;
   sourceRowNumber: number | null;
@@ -89,12 +90,16 @@ export function buildQpcrInputTemplateWorkbook(): XLSX.WorkBook {
 
   const settingsRows = [
     ["Analysis Start / 分析起点", "Cq/Ct/Cp"],
+    ["Reference Target(s) / 内参基因", ""],
+    ["Reference Method / 内参处理方法", ""],
+    ["Calibrator / 校准样本", ""],
     ["Allowed / 可选值", "Cq/Ct/Cp", "Delta Cq", "Delta Delta Cq"],
     ["Rule / 规则", "Choose one authoritative start for the entire import set / 整个导入数据只能选择一个正式分析起点"],
     ["Cq/Ct/Cp required / 必填", "Well, Sample, Assay, Assay Type, Replicate, Cq/Ct/Cp"],
     ["Delta Cq required / 必填", "Sample, Assay, Replicate, Delta Cq"],
     ["Delta Delta Cq required / 必填", "Sample, Assay, Replicate, Delta Delta Cq"],
     ["Delta starts / 下游起点", "Plate, Plate Format, Well, Assay Type, and Cycle Type are optional provenance / 均为可选溯源字段；无需板布局"],
+    ["Calculation provenance / 计算依据", "For Delta starts, state all reference targets, their normalization method, and the calibrator used upstream / Δ 起点需填写上游使用的全部内参、归一化方法和校准样本"],
   ];
   const settingsSheet = XLSX.utils.aoa_to_sheet(settingsRows);
   settingsSheet["!cols"] = [{ wch: 30 }, { wch: 78 }, { wch: 20 }, { wch: 24 }];
@@ -206,6 +211,16 @@ function validateAnalysisStartRows(source: ImportedSource): TemplateValidationSu
     "The Data sheet has no data rows. Keep the headers and enter single-well records from row 2.",
   ));
   const analysisStart = source.metadata.qpcrAnalysisStart ?? "cq";
+  if (analysisStart !== "cq" && !source.metadata.qpcrReferenceTargets) issues.push({
+    code: "missing-reference-target",
+    severity: "warning",
+    sourceSheet: "Analysis Settings",
+    sourceRowNumber: 2,
+    column: "Reference Target(s)",
+    suppliedValue: "",
+    messageZh: "未提供内参基因。结果仍可分析，但结果页和导出将标记计算依据不完整。",
+    messageEn: "Reference Target(s) were not provided. Results remain analyzable, but the Results page and exports will mark the calculation basis as incomplete.",
+  });
   const selectedValue: [CanonicalField, string] = analysisStart === "delta-cq"
     ? ["deltaCq", "Delta Cq"]
     : analysisStart === "delta-delta-cq"

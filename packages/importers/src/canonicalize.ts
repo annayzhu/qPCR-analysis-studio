@@ -181,6 +181,31 @@ export function buildCanonicalDataset(inputSources: ImportedSource[]): Canonical
   const explicitPlateNames = new Set<string>();
   const sourceHasExplicitPlate = new Map<string, boolean>();
   const primaryResultSourceIds = new Set<string>();
+  const splitReferenceTargets = (raw: string) => raw
+    .split(/[;,，；\n]+/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+  const suppliedValueField = analysisStartPolicy(analysisStart).authoritativeValueField;
+  const provenanceSources = analysisStart === "cq" ? [] : sources.filter((source) => selectedTable(source)?.suggestedMappings.some((mapping) => (
+    mapping.canonicalField === suppliedValueField && mapping.confidence >= 0.7 && !mapping.conflict
+  )));
+  const referenceTargetSets = provenanceSources
+    .map((source) => [...new Set(splitReferenceTargets(source.metadata.qpcrReferenceTargets ?? ""))]);
+  const referenceTargets = [...new Set(referenceTargetSets[0] ?? [])];
+  const referenceTargetSignatures = new Set(referenceTargetSets.map((targets) => [...targets].sort().join("\u241f")));
+  const referenceMethods = [...new Set(provenanceSources.map((source) => source.metadata.qpcrReferenceMethod ?? ""))];
+  const calibratorValues = [...new Set(provenanceSources.map((source) => source.metadata.qpcrCalibratorValue ?? ""))];
+  const suppliedCalculationProvenance = analysisStart === "cq" ? null : {
+    referenceTargets,
+    referenceMethod: referenceMethods[0] ?? "",
+    calibratorValue: calibratorValues[0] ?? "",
+  };
+  if (analysisStart !== "cq" && !referenceTargets.length) {
+    warnings.push("用户计算结果未提供内参基因；数值仍可分析，但计算依据不完整。");
+  }
+  if (referenceTargetSignatures.size > 1 || referenceMethods.length > 1 || calibratorValues.length > 1) {
+    throw new Error("多个用户计算结果文件声明了不同的内参基因、内参处理方法或来源校准样本，不能合并分析。请统一计算依据后重新导入。");
+  }
 
   for (const source of sources) {
     const table = selectedTable(source);
@@ -377,6 +402,7 @@ export function buildCanonicalDataset(inputSources: ImportedSource[]): Canonical
     plate,
     wells,
     suppliedCalculations,
+    suppliedCalculationProvenance,
     mappings: allMappings,
     warnings,
     assumptions,

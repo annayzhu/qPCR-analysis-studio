@@ -430,13 +430,15 @@ export default function QpcrAnalysisStudio() {
     const probableReference = builtTargets.find((target) => /^(?:gapdh|actb|18s|rplp0|b2m|hprt1)$/i.test(target))
       ?? builtTargets.find((target) => /gapdh|actb|18s|rplp0|b2m|hprt/i.test(target));
     const initialSettings: AnalysisSettings = {
-      referenceTargets: built.analysisStart === "cq" && probableReference ? [probableReference] : [],
+      referenceTargets: built.analysisStart === "cq"
+        ? probableReference ? [probableReference] : []
+        : built.suppliedCalculationProvenance?.referenceTargets ?? [],
       calibratorType: "sample",
       calibratorValue: "",
       replicateWarningThreshold: 0.5,
       tmWarningThreshold: 0.5,
       efficiencyByTarget: {},
-      calculationMode: "delta-cq",
+      calculationMode: built.analysisStart === "delta-delta-cq" ? "delta-delta-cq" : "delta-cq",
     };
     const nextSession = createAnalysisSession(built, nextReadiness.analysisMode, initialSettings);
     const nextView = projectAnalysisSession(nextSession);
@@ -1307,7 +1309,7 @@ export default function QpcrAnalysisStudio() {
                       <p>{l("ΔCq 已由用户提供；校准样本仅用于后续 ΔΔCq 与相对表达量。", "ΔCq is user supplied; the calibrator is used only for downstream ΔΔCq and relative expression.")}</p>
                     </section>}
                   </div>
-                  <SuppliedResultExplorer results={suppliedResults} records={dataset.suppliedCalculations} analysisStart={dataset.analysisStart} sampleOrder={displaySamples} targetOrder={selectedDisplayTargets} />
+                  <SuppliedResultExplorer results={suppliedResults} records={dataset.suppliedCalculations} analysisStart={dataset.analysisStart} sampleOrder={displaySamples} targetOrder={selectedDisplayTargets} provenance={dataset.suppliedCalculationProvenance} />
                 </>}</>}
                 {resultSection === "quantification" && !hasQuantification && <div className="empty-table">{l("当前仅导入了 Tm/熔解结果；添加单孔 Cq/Ct/Cp 后可进行相对定量。", "Only Tm/melt results are currently imported. Add well-level Cq/Ct/Cp data for relative quantification.")}</div>}
                 {resultSection === "melt" && hasMeltAnalysis && <MeltAnalysis wells={appliedWells} />}

@@ -5,6 +5,7 @@ import type { AnalysisStart, CanonicalField, ImportedSource } from "@/packages/s
 import {
   CANONICAL_FIELD_LABELS,
   getSourceCapabilities,
+  QPCR_INPUT_TEMPLATE_SCHEMA_VERSION,
   validateAnalysisStartSource,
   writeQpcrInputTemplate,
   type ImportReadiness,
@@ -232,7 +233,7 @@ export default function ImportManager({
     const url = URL.createObjectURL(new Blob([bytes], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }));
     const anchor = document.createElement("a");
     anchor.href = url;
-    anchor.download = "qpcr-analysis-input-template-v2.1.0.xlsx";
+    anchor.download = `qpcr-analysis-input-template-v${QPCR_INPUT_TEMPLATE_SCHEMA_VERSION}.xlsx`;
     anchor.click();
     URL.revokeObjectURL(url);
   }
@@ -295,7 +296,7 @@ export default function ImportManager({
             <div className="stage-copy">
               <div className="stage-title-line"><h3>{l("仪器结果", "Instrument results")}</h3><span className="stage-kicker">{l("必需", "Required")}</span></div>
               <p>{calculationOnly
-                ? l("导入包含 Sample、Assay、Replicate 及所选 Δ 值的表格；无需板布局。", "Import a table containing Sample, Assay, Replicate, and the selected delta value; no plate layout is required.")
+                ? l("导入包含 Sample、Assay、Replicate 及所选 Δ 值的表格；请在模板中记录内参和计算方法，无需板布局。", "Import a table containing Sample, Assay, Replicate, and the selected delta value. Record the reference target(s) and method in the template; no plate layout is required.")
                 : l("可连续添加 Cq/Ct/Cp、Tm 或熔解分组文件；具备板信息后即可进入对应结果页。", "Add multiple Cq/Ct/Cp, Tm, or melt-group files. Analysis becomes available when plate information is present.")}</p>
             </div>
             <div className="stage-header-actions">

@@ -11,6 +11,10 @@ import {
 import {
   buildSuppliedCompleteRows,
   buildSuppliedTraceabilityRows,
+  SUPPLIED_EXPORT_DICTIONARY,
+  SUPPLIED_COMPLETE_HEADERS,
+  SUPPLIED_RESULTS_EXPORT_SCHEMA_VERSION,
+  SUPPLIED_TRACEABILITY_HEADERS,
   buildCompleteResultRows,
   buildCalculationExportBundle,
   buildCalculationWorkbookBytes,
@@ -40,6 +44,107 @@ function filledTemplateBytes(): ArrayBuffer {
 }
 
 describe("downloadable template to complete-results export", () => {
+  it("preserves supplied-calculation reference provenance without renormalizing Delta Cq", () => {
+    const workbook = buildQpcrInputTemplateWorkbook();
+    workbook.Sheets["Analysis Settings"].B1.v = "Delta Cq";
+    XLSX.utils.sheet_add_aoa(workbook.Sheets["Analysis Settings"], [
+      ["Reference Target(s) / 内参基因", "GAPDH; ACTB"],
+      ["Reference Method / 内参处理方法", "Geometric mean of relative quantities"],
+      ["Calibrator / 校准样本", "Control"],
+    ], { origin: -1 });
+    workbook.Sheets.Data = XLSX.utils.aoa_to_sheet([
+      ["Sample", "Assay", "Replicate", "Delta Cq"],
+      ["Control", "GENE", 1, 3.0],
+      ["Control", "GENE", 2, 3.2],
+    ]);
+    const bytes = XLSX.write(workbook, { bookType: "xlsx", type: "array" }) as ArrayBuffer;
+    const source = parseWorkbookBytes(bytes, "delta-cq-with-reference-provenance.xlsx");
+    const dataset = buildCanonicalDataset([source]);
+
+    expect(source.metadata).toMatchObject({
+      qpcrReferenceTargets: "GAPDH; ACTB",
+      qpcrReferenceMethod: "Geometric mean of relative quantities",
+      qpcrCalibratorValue: "Control",
+    });
+    expect(dataset.suppliedCalculationProvenance).toEqual({
+      referenceTargets: ["GAPDH", "ACTB"],
+      referenceMethod: "Geometric mean of relative quantities",
+      calibratorValue: "Control",
+    });
+
+    const results = calculateFromSuppliedCalculations(dataset.suppliedCalculations, {
+      analysisStart: "delta-cq",
+      calibratorValue: "Alternate downstream calibrator",
+    });
+    expect(results[0].deltaCq).toBeCloseTo(3.1);
+    const [complete] = buildSuppliedCompleteRows(results, ["Control"], ["GENE"], dataset.suppliedCalculationProvenance);
+    expect(complete).toMatchObject({
+      reference_targets: "GAPDH; ACTB",
+      reference_method: "Geometric mean of relative quantities",
+      calibrator: "Alternate downstream calibrator",
+      source_calibrator: "Control",
+    });
+    const [trace] = buildSuppliedTraceabilityRows(dataset.suppliedCalculations, dataset.suppliedCalculationProvenance);
+    expect(trace).toMatchObject({
+      reference_targets: "GAPDH; ACTB",
+      reference_method: "Geometric mean of relative quantities",
+      source_calibrator: "Control",
+    });
+    expect(SUPPLIED_RESULTS_EXPORT_SCHEMA_VERSION).toBe("1.1.0");
+    expect(new Set(SUPPLIED_EXPORT_DICTIONARY.filter((entry) => entry.sheet === "Complete Results").map((entry) => entry.field)))
+      .toEqual(new Set(SUPPLIED_COMPLETE_HEADERS));
+    expect(new Set(SUPPLIED_EXPORT_DICTIONARY.filter((entry) => entry.sheet === "Supplied Values").map((entry) => entry.field)))
+      .toEqual(new Set(SUPPLIED_TRACEABILITY_HEADERS));
+  });
+
+  it("keeps supplied-provenance warnings out of raw-Cq workflows", () => {
+    const makeSource = (referenceTargets: string, method: string, calibrator: string, suffix: string) => {
+      const workbook = buildQpcrInputTemplateWorkbook();
+      workbook.Sheets["Analysis Settings"].B2.v = referenceTargets;
+      workbook.Sheets["Analysis Settings"].B3.v = method;
+      workbook.Sheets["Analysis Settings"].B4.v = calibrator;
+      workbook.Sheets.Data = XLSX.utils.aoa_to_sheet([
+        ["Plate", "Well", "Sample", "Assay", "Assay Type", "Replicate", "Cq/Ct/Cp"],
+        [`Plate ${suffix}`, "A1", `Sample ${suffix}`, "GENE", "Target", 1, 23],
+      ]);
+      const bytes = XLSX.write(workbook, { bookType: "xlsx", type: "array" }) as ArrayBuffer;
+      return parseWorkbookBytes(bytes, `raw-${suffix}.xlsx`);
+    };
+    const dataset = buildCanonicalDataset([
+      makeSource("GAPDH", "Arithmetic mean", "Control A", "A"),
+      makeSource("ACTB", "Geometric mean", "Control B", "B"),
+    ]);
+
+    expect(dataset.analysisStart).toBe("cq");
+    expect(dataset.suppliedCalculationProvenance).toBeNull();
+    expect(dataset.warnings.join("\n")).not.toMatch(/内参基因集合|内参处理方法|校准样本/);
+  });
+
+  it("blocks supplied-calculation workbooks with conflicting source provenance", () => {
+    const makeSource = (referenceTarget: string, calibrator: string, suffix: string) => {
+      const workbook = buildQpcrInputTemplateWorkbook();
+      workbook.Sheets["Analysis Settings"].B1.v = "Delta Cq";
+      workbook.Sheets["Analysis Settings"].B2.v = referenceTarget;
+      workbook.Sheets["Analysis Settings"].B3.v = "Arithmetic mean";
+      workbook.Sheets["Analysis Settings"].B4.v = calibrator;
+      workbook.Sheets.Data = XLSX.utils.aoa_to_sheet([
+        ["Sample", "Assay", "Replicate", "Delta Cq"],
+        [`Sample ${suffix}`, "GENE", 1, 2.5],
+      ]);
+      const bytes = XLSX.write(workbook, { bookType: "xlsx", type: "array" }) as ArrayBuffer;
+      return parseWorkbookBytes(bytes, `delta-${suffix}.xlsx`);
+    };
+
+    expect(() => buildCanonicalDataset([
+      makeSource("GAPDH", "Control A", "A"),
+      makeSource("ACTB", "Control B", "B"),
+    ])).toThrow(/不能合并分析/);
+    expect(() => buildCanonicalDataset([
+      makeSource("GAPDH", "Control A", "A"),
+      makeSource("", "", "Legacy"),
+    ])).toThrow(/不能合并分析/);
+  });
+
   it("runs a Delta Cq template without plate context through the calculation-only seam", () => {
     const workbook = buildQpcrInputTemplateWorkbook();
     workbook.Sheets["Analysis Settings"].B1.v = "Delta Cq";
@@ -51,7 +156,11 @@ describe("downloadable template to complete-results export", () => {
     const bytes = XLSX.write(workbook, { bookType: "xlsx", type: "array" }) as ArrayBuffer;
     const source = parseWorkbookBytes(bytes, "delta-cq-calculation-only.xlsx");
 
-    expect(validateQpcrInputTemplate(source)).toMatchObject({ errorCount: 0 });
+    expect(validateQpcrInputTemplate(source)).toMatchObject({ errorCount: 0, warningCount: 1 });
+    expect(validateQpcrInputTemplate(source)?.issues).toContainEqual(expect.objectContaining({
+      code: "missing-reference-target",
+      severity: "warning",
+    }));
     expect(assessImportReadiness([source])).toMatchObject({
       status: "ready",
       canAnalyze: true,
@@ -63,6 +172,7 @@ describe("downloadable template to complete-results export", () => {
     expect(dataset.plate).toBeNull();
     expect(dataset.wells).toEqual([]);
     expect(dataset.suppliedCalculations).toHaveLength(2);
+    expect(dataset.warnings).toContain("用户计算结果未提供内参基因；数值仍可分析，但计算依据不完整。");
     expect(dataset.suppliedCalculations.every((row) => row.plateId === undefined && row.well === undefined)).toBe(true);
 
     const state = createAnalysisSession(dataset, "quantification", {
@@ -78,11 +188,13 @@ describe("downloadable template to complete-results export", () => {
       deltaCq: 3.1,
       normalizedQuantity: 0.11662912394210093,
     });
-    expect(buildSuppliedCompleteRows(projected.suppliedResults, ["Control"], ["GENE"])[0]).toMatchObject({
+    expect(buildSuppliedCompleteRows(projected.suppliedResults, ["Control"], ["GENE"], dataset.suppliedCalculationProvenance)[0]).toMatchObject({
       analysis_start: "delta-cq",
       value_provenance: "user-supplied",
       sample: "Control",
       target: "GENE",
+      reference_targets: null,
+      warnings: "REFERENCE_TARGET_NOT_PROVIDED",
     });
   });
 
@@ -187,7 +299,7 @@ describe("downloadable template to complete-results export", () => {
   it("round-trips the template through the canonical calculation workflow", () => {
     const source = parseWorkbookBytes(filledTemplateBytes(), "qpcr-input-template.xlsx");
     const validation = validateQpcrInputTemplate(source);
-    expect(source.metadata.qpcrTemplateSchemaVersion).toBe("2.1.0");
+    expect(source.metadata.qpcrTemplateSchemaVersion).toBe("2.2.0");
     expect(source.tables.find((table) => table.id === source.selectedTableId)?.sourceSheet).toBe("Data");
     expect(validation).toMatchObject({ totalRows: 8, detectedCount: 8, nonDetectedCount: 0, errorCount: 0 });
 
