@@ -1,4 +1,5 @@
 export * from "./adapters";
+export * from "./analysis-start-transition";
 export * from "./canonicalize";
 export * from "./field-dictionary";
 export * from "./field-mapping";

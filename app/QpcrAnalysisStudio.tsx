@@ -18,6 +18,7 @@ import {
   assessImportReadiness,
   buildCanonicalDataset,
   parseBrowserFile,
+  transitionAnalysisStart,
   validateAnalysisStartSource,
 } from "@/packages/importers/src";
 import {
@@ -521,14 +522,21 @@ export default function QpcrAnalysisStudio() {
   }
 
   function changeAnalysisStart(next: AnalysisStart) {
-    setAnalysisStart(next);
-    setSources((current) => current.map((source) => ({
-      ...source,
-      metadata: { ...source.metadata, qpcrAnalysisStart: next },
-    })));
-    setAnalysisSession(null);
-    setNeedsRebuild(sources.length > 0);
-    setError("");
+    const transitioned = transitionAnalysisStart({
+      analysisStart,
+      sources,
+      analysisSession,
+      needsRebuild,
+      error,
+    }, next);
+    if (transitioned.analysisStart === analysisStart) return;
+    setAnalysisStart(transitioned.analysisStart);
+    setSources(transitioned.sources);
+    setAnalysisSession(transitioned.analysisSession);
+    setNeedsRebuild(transitioned.needsRebuild);
+    setError(transitioned.error);
+    if (resultInput.current) resultInput.current.value = "";
+    if (layoutInput.current) layoutInput.current.value = "";
   }
 
   function removeSource(sourceId: string) {
