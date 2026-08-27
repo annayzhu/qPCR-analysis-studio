@@ -1206,7 +1206,7 @@ export default function QpcrAnalysisStudio() {
                       <p>{l("设置后计算 ΔΔCq 与相对表达量；未提供扩增效率时按 100% 计算并记录假设。", "A calibrator enables ΔΔCq and relative expression. Missing amplification efficiency is recorded and assumed to be 100%.")}</p>
                     </section>
                   </div>
-                  {!referenceTargets.length ? <div className="empty-table">{l("请先在第 1 区选择至少一个内参基因。", "Select at least one reference target in section 1.")}</div> : <ResultExplorer results={relativeResults} sampleOrder={displaySamples} targetOrder={selectedDisplayTargets} calculationMode={calibrator ? "delta-delta-cq" : "delta-cq"} provenanceWarnings={resultExportWarnings} />}
+                  {!referenceTargets.length ? <div className="empty-table">{l("请先在第 1 区选择至少一个内参基因。", "Select at least one reference target in section 1.")}</div> : <ResultExplorer results={relativeResults} wells={appliedWells} sampleOrder={displaySamples} targetOrder={selectedDisplayTargets} settings={sessionView!.settings} provenanceWarnings={resultExportWarnings} />}
                 </>}
                 {resultSection === "quantification" && !hasQuantification && <div className="empty-table">{l("当前仅导入了 Tm/熔解结果；添加单孔 Cq/Ct/Cp 后可进行相对定量。", "Only Tm/melt results are currently imported. Add well-level Cq/Ct/Cp data for relative quantification.")}</div>}
                 {resultSection === "melt" && hasMeltAnalysis && <MeltAnalysis wells={appliedWells} />}

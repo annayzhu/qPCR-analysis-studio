@@ -2,16 +2,18 @@
 
 import { useMemo, useRef, useState } from "react";
 import XLSX from "xlsx-js-style";
-import type { AnalysisSettings, RelativeQuantificationResult } from "@/packages/schemas/src";
+import type { AnalysisSettings, RelativeQuantificationResult, WellRecord } from "@/packages/schemas/src";
 import {
-  buildCompleteResultRows,
+  buildCalculationExportBundle,
+  buildCalculationWorkbookBytes,
   buildLogRatioAxis,
   buildVisualizationBarRows,
   chartLabelVisualUnits,
-  COMPLETE_RESULTS_DICTIONARY,
   COMPLETE_RESULTS_HEADERS,
+  PLATE_SUMMARY_HEADERS,
   mapRatioToY,
   VISUALIZATION_BAR_HEADERS,
+  WELL_CALCULATION_HEADERS,
   wrapChartLabel,
 } from "@/packages/qpcr-core/src";
 import { useLanguage } from "../i18n";
@@ -272,13 +274,14 @@ function ExpressionChart({
 
 interface ResultExplorerProps {
   results: RelativeQuantificationResult[];
+  wells: WellRecord[];
   sampleOrder: string[];
   targetOrder: string[];
-  calculationMode: AnalysisSettings["calculationMode"];
+  settings: AnalysisSettings;
   provenanceWarnings?: string[];
 }
 
-export default function ResultExplorer({ results, sampleOrder, targetOrder, calculationMode, provenanceWarnings = [] }: ResultExplorerProps) {
+export default function ResultExplorer({ results, wells, sampleOrder, targetOrder, settings, provenanceWarnings = [] }: ResultExplorerProps) {
   const { language, l } = useLanguage();
   const [warningOnly, setWarningOnly] = useState(false);
   const [showTechnicalSd, setShowTechnicalSd] = useState(false);
@@ -310,47 +313,33 @@ export default function ResultExplorer({ results, sampleOrder, targetOrder, calc
     () => buildVisualizationBarRows(results, sampleOrder, targetOrder),
     [results, sampleOrder, targetOrder],
   );
-  const completeRows = useMemo(
-    () => buildCompleteResultRows(results, sampleOrder, targetOrder, calculationMode, provenanceWarnings),
-    [calculationMode, provenanceWarnings, results, sampleOrder, targetOrder],
+  const calculationExport = useMemo(
+    () => buildCalculationExportBundle(wells, results, sampleOrder, targetOrder, settings, provenanceWarnings),
+    [provenanceWarnings, results, sampleOrder, settings, targetOrder, wells],
   );
+  const completeRows = calculationExport.completeRows;
+  const visualizationStudioUrl = process.env.NEXT_PUBLIC_VISUALIZATION_STUDIO_URL?.trim() || "http://localhost:3400/?plot=bar";
 
   function exportCompleteExcel() {
-    const resultValues = completeRows.map((row) => COMPLETE_RESULTS_HEADERS.map((header) => row[header] ?? ""));
-    const worksheet = XLSX.utils.aoa_to_sheet([[...COMPLETE_RESULTS_HEADERS], ...resultValues]);
-    worksheet["!cols"] = COMPLETE_RESULTS_HEADERS.map((header) => ({ wch: Math.min(46, Math.max(14, header.length + 2)) }));
-    worksheet["!autofilter"] = { ref: `A1:${XLSX.utils.encode_col(COMPLETE_RESULTS_HEADERS.length - 1)}${resultValues.length + 1}` };
-    COMPLETE_RESULTS_HEADERS.forEach((_, index) => {
-      const cell = worksheet[XLSX.utils.encode_cell({ r: 0, c: index })];
-      if (cell) cell.s = { font: { bold: true, color: { rgb: "FFFFFF" } }, fill: { patternType: "solid", fgColor: { rgb: "315F5B" } }, alignment: { horizontal: "center", wrapText: true } };
-    });
-    const dictionary = XLSX.utils.json_to_sheet(COMPLETE_RESULTS_DICTIONARY.map((item) => ({
-      field: item.field,
-      "中文定义": item.definitionZh,
-      "English definition": item.definitionEn,
-    })));
-    dictionary["!cols"] = [{ wch: 44 }, { wch: 54 }, { wch: 64 }];
-    const workbook = XLSX.utils.book_new();
-    workbook.Props = { Title: "qPCR complete calculation results", Subject: "Technical-replicate statistics and propagated uncertainty", Author: "qPCR Analysis Studio" };
-    XLSX.utils.book_append_sheet(workbook, worksheet, "Complete Results");
-    XLSX.utils.book_append_sheet(workbook, dictionary, "Data Dictionary");
-    const bytes = XLSX.write(workbook, { bookType: "xlsx", type: "array", cellStyles: true });
+    const bytes = buildCalculationWorkbookBytes(calculationExport);
     downloadBlob(new Blob([bytes], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }), "qpcr-complete-calculation-results.xlsx");
   }
 
   function exportCompleteTsv() {
     const escapeCell = (value: string | number | null) => String(value ?? "").replace(/[\t\r\n]+/g, " ");
-    const lines = [
-      COMPLETE_RESULTS_HEADERS.join("\t"),
-      ...completeRows.map((row) => COMPLETE_RESULTS_HEADERS.map((header) => escapeCell(row[header])).join("\t")),
-    ];
-    downloadBlob(new Blob(["\uFEFF", lines.join("\r\n")], { type: "text/tab-separated-values;charset=utf-8" }), "qpcr-complete-calculation-results.tsv");
+    const downloadRows = (headers: readonly string[], rows: Array<Record<string, string | number | null>>, fileName: string) => {
+      const lines = [headers.join("\t"), ...rows.map((row) => headers.map((header) => escapeCell(row[header])).join("\t"))];
+      downloadBlob(new Blob(["\uFEFF", lines.join("\r\n")], { type: "text/tab-separated-values;charset=utf-8" }), fileName);
+    };
+    downloadRows(COMPLETE_RESULTS_HEADERS, calculationExport.completeRows, "qpcr-complete-results.tsv");
+    downloadRows(WELL_CALCULATION_HEADERS, calculationExport.wellRows, "qpcr-well-calculations.tsv");
+    downloadRows(PLATE_SUMMARY_HEADERS, calculationExport.plateRows, "qpcr-plate-summaries.tsv");
     const dictionaryLines = [
-      "field\tdefinition_zh\tdefinition_en",
-      ...COMPLETE_RESULTS_DICTIONARY.map((item) => [item.field, item.definitionZh, item.definitionEn]
+      "sheet\tfield\tlevel_zh\tdefinition_zh\tdefinition_en\tformula_or_source\tunit\tcaution_zh\tcaution_en",
+      ...calculationExport.dictionary.map((item) => [item.sheet, item.field, item.levelZh, item.definitionZh, item.definitionEn, item.formula, item.unit, item.cautionZh, item.cautionEn]
         .map((value) => value.replace(/[\t\r\n]+/g, " ")).join("\t")),
     ];
-    downloadBlob(new Blob(["\uFEFF", dictionaryLines.join("\r\n")], { type: "text/tab-separated-values;charset=utf-8" }), "qpcr-complete-calculation-results-data-dictionary.tsv");
+    downloadBlob(new Blob(["\uFEFF", dictionaryLines.join("\r\n")], { type: "text/tab-separated-values;charset=utf-8" }), "qpcr-calculation-data-dictionary.tsv");
   }
 
   function exportVisualizationExcel() {
@@ -444,25 +433,35 @@ export default function ResultExplorer({ results, sampleOrder, targetOrder, calc
           <div className="result-command-group result-export-group">
             <span className="command-group-label">{l("完整计算结果", "Complete results")}</span>
             <div className="visualization-export-actions">
-              <button type="button" disabled={!completeRows.length} onClick={exportCompleteExcel}>{l("Excel（含字典）", "Excel + dictionary")}</button>
-              <button type="button" disabled={!completeRows.length} onClick={exportCompleteTsv}>{l("TSV + 字典", "TSV + dictionary")}</button>
+              <button type="button" disabled={!completeRows.length} onClick={exportCompleteExcel}>{l("Excel（5张表）", "Excel · 5 sheets")}</button>
+              <button type="button" disabled={!completeRows.length} onClick={exportCompleteTsv}>{l("TSV（4个文件）", "TSV · 4 files")}</button>
             </div>
           </div>
 
           <div className="result-command-group result-export-group visualization-studio-export-group">
-            <span className="command-group-label">Visualization Studio</span>
+            <span className="command-group-label">Visualization Studio · {l("柱状图格式", "Bar-chart format")}</span>
             <div className="visualization-export-actions">
-              <button type="button" disabled={!visualizationRows.length} onClick={exportVisualizationExcel}>{l("导出 Excel", "Export Excel")}</button>
-              <button type="button" disabled={!visualizationRows.length} onClick={exportVisualizationTsv}>{l("导出 TSV", "Export TSV")}</button>
+              <button type="button" disabled={!visualizationRows.length} onClick={exportVisualizationExcel}>{l("柱状图 Excel", "Bar Excel")}</button>
+              <button type="button" disabled={!visualizationRows.length} onClick={exportVisualizationTsv}>{l("柱状图 TSV", "Bar TSV")}</button>
+              <a className="visualization-studio-link" href={visualizationStudioUrl} target="_blank" rel="noreferrer">{l("打开 Bar 图（本地）↗", "Open Bar chart locally ↗")}</a>
             </div>
+            <small className="export-format-hint">category · value · sd · sem · group</small>
           </div>
         </div>
 
         <details className="result-method-details">
-          <summary>{l("统计与导出说明", "Statistics and export notes")}</summary>
+          <summary>{l("每个参数是什么意思？", "What does each parameter mean?")}</summary>
+          <div className="calculation-explanation-grid">
+            <p><b>Mean Cq</b>{l("：同板、同一样本、同一基因的有效技术复孔算术均值。", ": arithmetic mean of valid technical replicates within the same plate, sample, and assay.")}</p>
+            <p><b>SD</b>{l("：技术复孔 Cq 的样本标准差，分母 n−1，描述孔间离散。n<2 时为空。", ": sample standard deviation of technical-replicate Cq values (n−1), describing well-to-well spread; blank when n<2.")}</p>
+            <p><b>SEM</b>{l("：SD/√n，描述技术复孔 mean Cq 的精度；不是生物学重复误差或置信区间。", ": SD/√n, describing precision of the technical-replicate mean Cq; not biological variation or a confidence interval.")}</p>
+            <p><b>{l("传播 SD", "Propagated SD")}</b>{l("：做减法时把上游技术 SD 按 √(SD₁²+SD₂²) 合并；指数变换后用 ln(base)×结果×SD。", ": combines upstream technical SD values by √(SD₁²+SD₂²) for subtraction, then uses ln(base)×result×SD after exponentiation.")}</p>
+            <p><b>{l("传播 SEM", "Propagated SEM")}</b>{l("：使用同一传播公式，但起点是各步骤的 SEM（每个 SEM=SD/√n）。它不是 P 值，也不包含生物学重复。", ": uses the same propagation rules but starts from each step's SEM (SEM=SD/√n). It is not a P value and does not include biological replication.")}</p>
+            <p><b>ΔCq / ΔΔCq</b>{l("：ΔCq=目标 mean Cq−内参中心；ΔΔCq=样本 ΔCq−校准样本 ΔCq。校准样本中心虽为 1，其技术误差仍可非零。", ": ΔCq=target mean Cq−reference center; ΔΔCq=sample ΔCq−calibrator ΔCq. Although the calibrator center is 1, its technical uncertainty may be nonzero.")}</p>
+          </div>
           <p>{l(
-            "误差线默认关闭。启用后显示技术复孔传播 SD，仅描述技术重复性。完整结果导出包含目标与内参的 mean、样本 SD、SEM 及各级传播误差；Visualization Studio 仍严格使用 category、value、sd、sem、group 五列。",
-            "Error bars are off by default. When enabled, propagated technical SD describes technical repeatability only. Complete-results exports include target/reference means, sample SD, SEM, and propagated uncertainty; Visualization Studio retains exactly category, value, sd, sem, and group.",
+            "完整 Excel 含 5 张表：最终结果、逐孔计算、板内汇总、计算步骤和数据字典。逐孔表也计算内参孔自身的 Cq−内参 mean，便于独立复核或用 ΔCq/ΔΔCq 自行绘图。Visualization Studio 柱状图文件固定为 category、value、sd、sem、group 五列。",
+            "The complete Excel contains five sheets: final results, per-well calculations, plate summaries, calculation guide, and data dictionary. The well sheet also calculates reference wells against their own reference mean for independent checking or custom ΔCq/ΔΔCq plotting. Visualization Studio bar files retain exactly category, value, sd, sem, and group.",
           )}</p>
         </details>
       </section>

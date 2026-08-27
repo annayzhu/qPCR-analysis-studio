@@ -13,7 +13,8 @@
 7. 原始物理孔测量只读；布局修正以草稿、应用快照和审计记录分层保存。
 8. 复孔 QC、可疑孔提示、手动排除/恢复、审计记录。
 9. ΔCq、ΔΔCq、2^-\DeltaCq、2^-\Delta\DeltaCq 及多内参接口。
-10. 完整结果 XLSX/TSV 导出目标与内参的技术复孔 mean、样本 SD、SEM 和传播误差；Visualization Studio 五列表保持不变。
+10. 完整结果 XLSX 分层导出最终结果、逐孔计算、板内汇总、计算指南和数据字典；逐孔保留原始 Cq/Cp、同板内参中心及 `well Cq − reference mean`。
+11. Visualization Studio 导出明确为 Bar 图五列格式：`category`、`value`、`sd`、`sem`、`group`。
 
 ## 架构
 
@@ -38,6 +39,8 @@ npm run dev
 ```
 
 默认开发地址由 vinext 输出，通常是 `http://localhost:3000` 或下一个可用端口。
+
+“打开 Bar 图”默认链接到 Visualization Studio 本地独立版 `http://localhost:3400/?plot=bar`。部署时可通过 `NEXT_PUBLIC_VISUALIZATION_STUDIO_URL` 指向实际的 Visualization Studio 地址。
 
 ## 验证
 
