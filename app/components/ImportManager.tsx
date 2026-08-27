@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, useState, type DragEvent } from "react";
-import type { CanonicalField, ImportedSource } from "@/packages/schemas/src";
+import type { AnalysisStart, CanonicalField, ImportedSource } from "@/packages/schemas/src";
 import {
   CANONICAL_FIELD_LABELS,
   getSourceCapabilities,
@@ -106,12 +106,14 @@ interface ImportManagerProps {
   alignmentReviewRequired: boolean;
   resultWithoutAnnotationCount: number;
   annotationWithoutResultCount: number;
+  analysisStart: AnalysisStart;
   onPickResults: () => void;
   onPickLayout: () => void;
   onImportFiles: (files: FileList | File[]) => void | Promise<void>;
   onRemoveSource: (sourceId: string) => void;
   onUpdateSelectedTable: (sourceId: string, tableId: string) => void;
   onUpdateMapping: (sourceId: string, sourceColumn: string, canonicalField: CanonicalField | null) => void;
+  onAnalysisStartChange: (analysisStart: AnalysisStart) => void;
   onRebuild: () => void;
   onContinue: () => void;
 }
@@ -209,12 +211,14 @@ export default function ImportManager({
   alignmentReviewRequired,
   resultWithoutAnnotationCount,
   annotationWithoutResultCount,
+  analysisStart,
   onPickResults,
   onPickLayout,
   onImportFiles,
   onRemoveSource,
   onUpdateSelectedTable,
   onUpdateMapping,
+  onAnalysisStartChange,
   onRebuild,
   onContinue,
 }: ImportManagerProps) {
@@ -227,7 +231,7 @@ export default function ImportManager({
     const url = URL.createObjectURL(new Blob([bytes], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }));
     const anchor = document.createElement("a");
     anchor.href = url;
-    anchor.download = "qpcr-analysis-input-template-v1.0.0.xlsx";
+    anchor.download = "qpcr-analysis-input-template-v2.0.0.xlsx";
     anchor.click();
     URL.revokeObjectURL(url);
   }
@@ -256,6 +260,32 @@ export default function ImportManager({
           )}</span>
         </div>
       )}
+
+      <section className="analysis-start-panel" aria-label={l("选择分析起点", "Select analysis start")}>
+        <div>
+          <p className="eyebrow">ANALYSIS START</p>
+          <h3>{l("选择分析起点", "Select analysis start")}</h3>
+          <p>{l("一次分析只使用一个正式起点；其他已填写数值仅保留用于溯源和核验。", "One authoritative start is used per analysis; other supplied values are retained only for provenance and checks.")}</p>
+        </div>
+        <div className="analysis-start-options" role="radiogroup" aria-label={l("分析起点", "Analysis start")}>
+          {([
+            ["cq", l("从 Cq/Ct/Cp 开始", "Start from Cq/Ct/Cp"), l("完整孔级 QC 与归一化", "Full well-level QC and normalization")],
+            ["delta-cq", l("从 ΔCq 开始", "Start from ΔCq"), l("用户已完成内参归一化", "Reference normalization already completed")],
+            ["delta-delta-cq", l("从 ΔΔCq 开始", "Start from ΔΔCq"), l("用户已完成归一化和校准", "Normalization and calibration already completed")],
+          ] as Array<[AnalysisStart, string, string]>).map(([value, label, description]) => (
+            <button
+              type="button"
+              role="radio"
+              aria-checked={analysisStart === value}
+              className={analysisStart === value ? "analysis-start-option active" : "analysis-start-option"}
+              key={value}
+              onClick={() => onAnalysisStartChange(value)}
+            >
+              <span>{analysisStart === value ? "●" : "○"}</span><b>{label}</b><small>{description}</small>
+            </button>
+          ))}
+        </div>
+      </section>
 
       <div className="import-stage-grid" aria-label={l("分阶段数据导入", "Staged data import")}>
         <article className="import-stage primary-stage">

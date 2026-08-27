@@ -3,6 +3,7 @@ import XLSX from "xlsx-js-style";
 import {
   buildCanonicalDataset,
   buildQpcrInputTemplateWorkbook,
+  assessImportReadiness,
   parseWorkbookBytes,
   QPCR_INPUT_TEMPLATE_HEADERS,
   validateQpcrInputTemplate,
@@ -13,6 +14,7 @@ import {
   buildCalculationWorkbookBytes,
   buildVisualizationBarRows,
   calculateRelativeQuantification,
+  calculateFromSuppliedCalculations,
   COMPLETE_RESULTS_HEADERS,
   VISUALIZATION_BAR_HEADERS,
 } from "../../qpcr-core/src";
@@ -21,24 +23,70 @@ function filledTemplateBytes(): ArrayBuffer {
   const workbook = buildQpcrInputTemplateWorkbook();
   const rows: Array<Array<string | number>> = [
     [...QPCR_INPUT_TEMPLATE_HEADERS],
-    ["Plate 01", 96, "A1", "Control", "REF", "Reference", 1, 20.0, 82.1, ""],
-    ["Plate 01", 96, "A2", "Control", "REF", "Reference", 2, 20.2, 82.2, ""],
-    ["Plate 01", 96, "A3", "Control", "GENE", "Target", 1, 23.0, 84.1, ""],
-    ["Plate 01", 96, "A4", "Control", "GENE", "Target", 2, 23.2, 84.2, ""],
-    ["Plate 01", 96, "B1", "Treat", "REF", "Reference", 1, 20.1, 82.1, ""],
-    ["Plate 01", 96, "B2", "Treat", "REF", "Reference", 2, 20.3, 82.2, ""],
-    ["Plate 01", 96, "B3", "Treat", "GENE", "Target", 1, 22.1, 84.1, ""],
-    ["Plate 01", 96, "B4", "Treat", "GENE", "Target", 2, 22.3, 84.2, ""],
+    ["Plate 01", 96, "A1", "Control", "REF", "Reference", 1, "Cq", 20.0, "", "", 82.1, ""],
+    ["Plate 01", 96, "A2", "Control", "REF", "Reference", 2, "Cq", 20.2, "", "", 82.2, ""],
+    ["Plate 01", 96, "A3", "Control", "GENE", "Target", 1, "Cq", 23.0, "", "", 84.1, ""],
+    ["Plate 01", 96, "A4", "Control", "GENE", "Target", 2, "Cq", 23.2, "", "", 84.2, ""],
+    ["Plate 01", 96, "B1", "Treat", "REF", "Reference", 1, "Cq", 20.1, "", "", 82.1, ""],
+    ["Plate 01", 96, "B2", "Treat", "REF", "Reference", 2, "Cq", 20.3, "", "", 82.2, ""],
+    ["Plate 01", 96, "B3", "Treat", "GENE", "Target", 1, "Cq", 22.1, "", "", 84.1, ""],
+    ["Plate 01", 96, "B4", "Treat", "GENE", "Target", 2, "Cq", 22.3, "", "", 84.2, ""],
   ];
   workbook.Sheets.Data = XLSX.utils.aoa_to_sheet(rows);
   return XLSX.write(workbook, { bookType: "xlsx", type: "array", cellStyles: true }) as ArrayBuffer;
 }
 
 describe("downloadable template to complete-results export", () => {
+  it("keeps version 1.0 workbooks on the Cq start", () => {
+    const workbook = XLSX.utils.book_new();
+    const oldHeaders = ["Plate", "Plate Format", "Well", "Sample", "Assay", "Assay Type", "Replicate", "Cq/Ct/Cp", "Tm1", "Tm2"];
+    XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([
+      oldHeaders,
+      ["Plate 01", 96, "A1", "Control", "REF", "Reference", 1, 20.0, 82.1, ""],
+      ["Plate 01", 96, "A2", "Control", "GENE", "Target", 1, 23.0, 84.1, ""],
+    ]), "Data");
+    XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([
+      ["qPCR Analysis Studio Input Template / qPCR 分析数据导入模板"],
+      ["Template Schema Version / 模板版本", "1.0.0"],
+    ]), "Field Dictionary");
+    const bytes = XLSX.write(workbook, { bookType: "xlsx", type: "array" }) as ArrayBuffer;
+    const source = parseWorkbookBytes(bytes, "legacy-v1-template.xlsx");
+
+    expect(source.metadata).toMatchObject({ qpcrTemplateSchemaVersion: "1.0.0", qpcrAnalysisStart: "cq" });
+    expect(validateQpcrInputTemplate(source)?.errorCount).toBe(0);
+    expect(buildCanonicalDataset([source]).analysisStart).toBe("cq");
+  });
+
+  it("round-trips user-supplied Delta Cq from the workbook start into analysis", () => {
+    const workbook = buildQpcrInputTemplateWorkbook();
+    workbook.Sheets["Analysis Settings"].B1.v = "Delta Cq";
+    workbook.Sheets.Data = XLSX.utils.aoa_to_sheet([
+      [...QPCR_INPUT_TEMPLATE_HEADERS],
+      ["Plate 01", 96, "A1", "Control", "GENE", "Target", 1, "Ct", "", 3.0, "", "", ""],
+      ["Plate 01", 96, "A2", "Control", "GENE", "Target", 2, "Ct", "", 3.2, "", "", ""],
+    ]);
+    const bytes = XLSX.write(workbook, { bookType: "xlsx", type: "array" }) as ArrayBuffer;
+    const source = parseWorkbookBytes(bytes, "delta-cq-template.xlsx");
+
+    expect(validateQpcrInputTemplate(source)?.errorCount).toBe(0);
+    expect(assessImportReadiness([source])).toMatchObject({ status: "ready", canAnalyze: true });
+    const dataset = buildCanonicalDataset([source]);
+    expect(dataset.analysisStart).toBe("delta-cq");
+    expect(dataset.suppliedCalculations.map((row) => row.value)).toEqual([3, 3.2]);
+    expect(dataset.wells.every((well) => well.cq === null)).toBe(true);
+
+    const [result] = calculateFromSuppliedCalculations(dataset.suppliedCalculations, {
+      analysisStart: "delta-cq",
+      calibratorValue: "",
+    });
+    expect(result.deltaCq).toBeCloseTo(3.1);
+    expect(result.normalizedQuantity).toBeCloseTo(0.1166291239);
+  });
+
   it("round-trips the template through the canonical calculation workflow", () => {
     const source = parseWorkbookBytes(filledTemplateBytes(), "qpcr-input-template.xlsx");
     const validation = validateQpcrInputTemplate(source);
-    expect(source.metadata.qpcrTemplateSchemaVersion).toBe("1.0.0");
+    expect(source.metadata.qpcrTemplateSchemaVersion).toBe("2.0.0");
     expect(source.tables.find((table) => table.id === source.selectedTableId)?.sourceSheet).toBe("Data");
     expect(validation).toMatchObject({ totalRows: 8, detectedCount: 8, nonDetectedCount: 0, errorCount: 0 });
 

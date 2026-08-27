@@ -4,10 +4,12 @@ import type {
   FieldMapping,
   ImportedSource,
   InstrumentType,
+  AnalysisStart,
   PlateDefinition,
   QcFlag,
   RawImportedRow,
   WellRecord,
+  SuppliedCalculationRecord,
 } from "../../schemas/src";
 import { createPhysicalWellId, normalizeWell } from "../../schemas/src";
 import { applyInstrumentAdapter, selectedTable } from "./adapters";
@@ -167,7 +169,12 @@ function detectPlate(wells: string[], instrumentType: InstrumentType): PlateDefi
 
 export function buildCanonicalDataset(inputSources: ImportedSource[]): CanonicalDataset {
   const sources = inputSources.map(applyInstrumentAdapter);
+  const declaredStarts = [...new Set(sources
+    .map((source) => source.metadata.qpcrAnalysisStart as AnalysisStart | undefined)
+    .filter((start): start is AnalysisStart => Boolean(start)))];
+  const analysisStart: AnalysisStart = declaredStarts.length === 1 ? declaredStarts[0] : "cq";
   const partials = new Map<string, PartialWell>();
+  const suppliedCalculations: SuppliedCalculationRecord[] = [];
   const warnings: string[] = [];
   const assumptions: string[] = [];
   const allMappings: FieldMapping[] = [];
@@ -246,6 +253,25 @@ export function buildCanonicalDataset(inputSources: ImportedSource[]): Canonical
       const omitHeader = mappings.omit ?? "";
       const qcFlags: QcFlag[] = [];
       const cq = cqValue(cqRaw, isRoche);
+      if (analysisStart !== "cq") {
+        const selectedField = analysisStart === "delta-cq" ? "deltaCq" : "deltaDeltaCq";
+        const suppliedValue = numberOrNull(value(rawRow, mappings, selectedField));
+        if (suppliedValue !== null && sampleName && targetName) {
+          suppliedCalculations.push({
+            sampleName,
+            targetName,
+            replicate: numberOrNull(value(rawRow, mappings, "replicate")),
+            value: suppliedValue,
+            analysisStart,
+            plateId: plate.plateId,
+            well,
+            cycleType: text(value(rawRow, mappings, "cycleType")),
+            sourceSheet: rawRow.sourceSheet,
+            sourceRowNumber: rawRow.sourceRowNumber,
+            rawRow,
+          });
+        }
+      }
       if (cq.cqStatus === "invalid") {
         qcFlags.push({ code: "INVALID_CQ", severity: "error", message: cq.cqReason, source: "import" });
       }
@@ -334,8 +360,10 @@ export function buildCanonicalDataset(inputSources: ImportedSource[]): Canonical
     id: stableId("dataset", sources.map((source) => source.id).join(":")),
     createdAt: new Date().toISOString(),
     sources,
+    analysisStart,
     plate,
     wells,
+    suppliedCalculations,
     mappings: allMappings,
     warnings,
     assumptions,

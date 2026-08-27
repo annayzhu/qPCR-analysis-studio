@@ -7,3 +7,4 @@ export * from "./qc";
 export * from "./visualization-export";
 export * from "./complete-results-export";
 export * from "./calculation-workbook";
+export * from "./supplied-calculations";

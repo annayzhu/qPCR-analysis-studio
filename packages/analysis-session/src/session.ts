@@ -15,10 +15,11 @@ import {
   getAnalysisBlockingError,
   getUnresolvedAlignmentIssues,
 } from "../../importers/src";
-import type { LayoutTransferRequest, LayoutTransferResult, QcWorkspaceState } from "../../qpcr-core/src";
+import type { LayoutTransferRequest, LayoutTransferResult, QcWorkspaceState, SuppliedCalculationResult } from "../../qpcr-core/src";
 import {
   buildQcWorkspaceState,
   calculateRelativeQuantification,
+  calculateFromSuppliedCalculations,
   previewLayoutTransfer,
   restoreWellsToBaseline,
   setWellExclusion,
@@ -74,6 +75,7 @@ export interface AnalysisSessionReadModel {
   draftQcState: QcWorkspaceState;
   appliedQcState: QcWorkspaceState;
   relativeResults: RelativeQuantificationResult[];
+  suppliedResults: SuppliedCalculationResult[];
   pendingCount: number;
   analysisLocked: boolean;
   alignmentReviewPending: boolean;
@@ -205,9 +207,15 @@ export function projectAnalysisSession(state: AnalysisSessionState): AnalysisSes
     blockingError,
     draftQcState: buildQcWorkspaceState(state.draftWells),
     appliedQcState: buildQcWorkspaceState(state.appliedWells),
-    relativeResults: state.settings.referenceTargets.length
+    relativeResults: state.dataset.analysisStart === "cq" && state.settings.referenceTargets.length
       ? calculateRelativeQuantification(state.appliedWells, state.settings)
       : [],
+    suppliedResults: state.dataset.analysisStart === "cq"
+      ? []
+      : calculateFromSuppliedCalculations(state.dataset.suppliedCalculations, {
+          analysisStart: state.dataset.analysisStart,
+          calibratorValue: state.settings.calibratorValue,
+        }),
     pendingCount,
     analysisLocked: alignmentReviewPending || pendingCount > 0,
     alignmentReviewPending,

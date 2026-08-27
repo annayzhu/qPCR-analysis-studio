@@ -57,7 +57,7 @@ export function assessDatasetAlignment(
   dataset: CanonicalDataset,
   analysisMode: ImportReadiness["analysisMode"],
 ): DatasetAlignment {
-  if (analysisMode !== "quantification") {
+  if (analysisMode !== "quantification" || dataset.analysisStart !== "cq") {
     return {
       status: "not-applicable",
       joinedDetectedCount: 0,
@@ -141,7 +141,7 @@ export function getAnalysisBlockingError(
   dataset: CanonicalDataset,
   analysisMode: ImportReadiness["analysisMode"],
 ): string | null {
-  if (analysisMode !== "quantification") return null;
+  if (analysisMode !== "quantification" || dataset.analysisStart !== "cq") return null;
   return assessDatasetAlignment(dataset, analysisMode).joinedDetectedCount
     ? null
     : "未找到与样本和基因正确合并的有效 Cq/Ct/Cp。请检查结果文件与板布局的板名和孔位是否对应。";
@@ -179,9 +179,13 @@ export function getSourceCapabilities(source: ImportedSource): SourceCapabilitie
   const hasSampleName = fieldSet.has("sampleName");
   const hasTargetName = fieldSet.has("targetName");
   const includesPlateLayout = hasWell && hasSampleName && hasTargetName;
+  const analysisStart = source.metadata.qpcrAnalysisStart;
+  const hasSelectedCalculation =
+    (analysisStart === "delta-cq" && fieldSet.has("deltaCq"))
+    || (analysisStart === "delta-delta-cq" && fieldSet.has("deltaDeltaCq"));
 
   let role: ImportSourceRole = "unknown";
-  if (hasCq) role = "primary-result";
+  if (hasCq || hasSelectedCalculation) role = "primary-result";
   else if (hasTm || hasMeltSummary) role = "supplemental-result";
   else if (includesPlateLayout) role = "plate-layout";
 

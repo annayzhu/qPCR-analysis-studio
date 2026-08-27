@@ -60,6 +60,14 @@ _Avoid_: Reference Target
 The QC, melt review, relative-quantification results, warnings, and calculation settings derived from one Applied Snapshot.
 _Avoid_: Draft result, chart data
 
+**Analysis Start**:
+The user-confirmed calculation boundary: raw Cq/Ct/Cp, supplied delta Cq, or supplied delta-delta Cq. Required fields, available QC, and downstream calculations are determined by this one workbook-level choice.
+_Avoid_: Auto-detected formula stage, per-row start
+
+**Supplied Calculation**:
+A user-provided delta Cq or delta-delta Cq value retained independently from Raw Measurements, together with source row, selected Analysis Start, and verification status.
+_Avoid_: Raw measurement, silently recomputed value
+
 **Publication Artifact**:
 A table, chart, workbook, TSV, SVG, or PNG projected from one Analysis Snapshot without recalculating its scientific values.
 _Avoid_: Independent analysis, recomputed export

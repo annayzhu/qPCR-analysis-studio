@@ -30,13 +30,85 @@ describe("field mapping", () => {
 });
 
 describe("qPCR user input template", () => {
-  it("contains the three specified sheets and exact canonical headers", () => {
+  it("offers one workbook-level analysis start and downstream calculation columns", () => {
     const workbook = buildQpcrInputTemplateWorkbook();
-    expect(workbook.SheetNames).toEqual(["Data", "Example", "Field Dictionary"]);
+    const settings = XLSX.utils.sheet_to_json<Array<string | number>>(
+      workbook.Sheets["Analysis Settings"],
+      { header: 1 },
+    );
+
+    expect(workbook.SheetNames).toEqual(["Analysis Settings", "Data", "Example", "Field Dictionary"]);
+    expect(settings).toEqual(expect.arrayContaining([
+      ["Analysis Start / 分析起点", "Cq/Ct/Cp"],
+      ["Allowed / 可选值", "Cq/Ct/Cp", "Delta Cq", "Delta Delta Cq"],
+    ]));
+    expect(QPCR_INPUT_TEMPLATE_HEADERS).toEqual(expect.arrayContaining([
+      "Cycle Type", "Delta Cq", "Delta Delta Cq",
+    ]));
+    expect(workbook.Sheets["Field Dictionary"].B2?.v).toBe("2.0.0");
+  });
+
+  it("validates a template from the selected Delta Cq start without requiring Cq values", () => {
+    const workbook = buildQpcrInputTemplateWorkbook();
+    workbook.Sheets["Analysis Settings"].B1.v = "Delta Cq";
+    workbook.Sheets.Data = XLSX.utils.aoa_to_sheet([
+      [...QPCR_INPUT_TEMPLATE_HEADERS],
+      ["Plate 01", 96, "A1", "Control", "GENE", "Target", 1, "Ct", "", 3.0, "", "", ""],
+      ["Plate 01", 96, "A2", "Control", "GENE", "Target", 2, "Ct", "", 3.2, "", "", ""],
+    ]);
+
+    const bytes = XLSX.write(workbook, { bookType: "xlsx", type: "array" }) as ArrayBuffer;
+    const source = parseWorkbookBytes(bytes, "delta-cq-template.xlsx");
+    const validation = validateQpcrInputTemplate(source);
+
+    expect(source.metadata.qpcrAnalysisStart).toBe("delta-cq");
+    expect(validation).toMatchObject({ totalRows: 2, detectedCount: 2, errorCount: 0 });
+  });
+
+  it("treats a Delta Cq template without an unused Cq column as a quantification source", () => {
+    const workbook = buildQpcrInputTemplateWorkbook();
+    workbook.Sheets["Analysis Settings"].B1.v = "Delta Cq";
+    workbook.Sheets.Data = XLSX.utils.aoa_to_sheet([
+      ["Plate", "Plate Format", "Well", "Sample", "Assay", "Assay Type", "Replicate", "Delta Cq"],
+      ["Plate 01", 96, "A1", "Control", "GENE", "Target", 1, 3.0],
+      ["Plate 01", 96, "A2", "Control", "GENE", "Target", 2, 3.2],
+    ]);
+
+    const bytes = XLSX.write(workbook, { bookType: "xlsx", type: "array" }) as ArrayBuffer;
+    const source = parseWorkbookBytes(bytes, "delta-cq-without-cq-column.xlsx");
+
+    expect(validateQpcrInputTemplate(source)).toMatchObject({ errorCount: 0 });
+    expect(getSourceCapabilities(source)).toMatchObject({ role: "primary-result", hasCq: false });
+    expect(assessImportReadiness([source])).toMatchObject({
+      analysisMode: "quantification",
+      canAnalyze: true,
+    });
+  });
+
+  it("blocks an unsupported analysis start instead of silently falling back to Cq", () => {
+    const workbook = buildQpcrInputTemplateWorkbook();
+    workbook.Sheets["Analysis Settings"].B1.v = "Start wherever data exists";
+    const bytes = XLSX.write(workbook, { bookType: "xlsx", type: "array" }) as ArrayBuffer;
+    const source = parseWorkbookBytes(bytes, "invalid-analysis-start.xlsx");
+    const validation = validateQpcrInputTemplate(source)!;
+
+    expect(source.metadata.qpcrAnalysisStart).toBe("invalid");
+    expect(validation.issues).toContainEqual(expect.objectContaining({
+      code: "invalid-analysis-start",
+      severity: "error",
+      sourceSheet: "Analysis Settings",
+      column: "Analysis Start",
+    }));
+    expect(assessImportReadiness([source])).toMatchObject({ canAnalyze: false, status: "review-mapping" });
+  });
+
+  it("contains the four specified sheets and exact canonical headers", () => {
+    const workbook = buildQpcrInputTemplateWorkbook();
+    expect(workbook.SheetNames).toEqual(["Analysis Settings", "Data", "Example", "Field Dictionary"]);
     const headers = XLSX.utils.sheet_to_json<unknown[]>(workbook.Sheets.Data, { header: 1 })[0];
     expect(headers).toEqual(QPCR_INPUT_TEMPLATE_HEADERS);
     expect(workbook.Sheets["Field Dictionary"].A2?.v).toContain("Template Schema Version");
-    expect(workbook.Sheets["Field Dictionary"].B2?.v).toBe("1.0.0");
+    expect(workbook.Sheets["Field Dictionary"].B2?.v).toBe("2.0.0");
   });
 
   it("blocks malformed rows with row-specific template diagnostics", () => {
