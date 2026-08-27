@@ -5,6 +5,7 @@ import type { AnalysisStart, CanonicalField, ImportedSource } from "@/packages/s
 import {
   CANONICAL_FIELD_LABELS,
   getSourceCapabilities,
+  QPCR_INPUT_TEMPLATE_SCHEMA_VERSION,
   validateAnalysisStartSource,
   writeQpcrInputTemplate,
   type ImportReadiness,
@@ -232,7 +233,7 @@ export default function ImportManager({
     const url = URL.createObjectURL(new Blob([bytes], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }));
     const anchor = document.createElement("a");
     anchor.href = url;
-    anchor.download = "qpcr-analysis-input-template-v2.2.0.xlsx";
+    anchor.download = `qpcr-analysis-input-template-v${QPCR_INPUT_TEMPLATE_SCHEMA_VERSION}.xlsx`;
     anchor.click();
     URL.revokeObjectURL(url);
   }

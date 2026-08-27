@@ -11,6 +11,10 @@ import {
 import {
   buildSuppliedCompleteRows,
   buildSuppliedTraceabilityRows,
+  SUPPLIED_EXPORT_DICTIONARY,
+  SUPPLIED_COMPLETE_HEADERS,
+  SUPPLIED_RESULTS_EXPORT_SCHEMA_VERSION,
+  SUPPLIED_TRACEABILITY_HEADERS,
   buildCompleteResultRows,
   buildCalculationExportBundle,
   buildCalculationWorkbookBytes,
@@ -70,21 +74,50 @@ describe("downloadable template to complete-results export", () => {
 
     const results = calculateFromSuppliedCalculations(dataset.suppliedCalculations, {
       analysisStart: "delta-cq",
-      calibratorValue: "",
+      calibratorValue: "Alternate downstream calibrator",
     });
     expect(results[0].deltaCq).toBeCloseTo(3.1);
     const [complete] = buildSuppliedCompleteRows(results, ["Control"], ["GENE"], dataset.suppliedCalculationProvenance);
     expect(complete).toMatchObject({
       reference_targets: "GAPDH; ACTB",
       reference_method: "Geometric mean of relative quantities",
-      calibrator: "Control",
+      calibrator: "Alternate downstream calibrator",
+      source_calibrator: "Control",
     });
     const [trace] = buildSuppliedTraceabilityRows(dataset.suppliedCalculations, dataset.suppliedCalculationProvenance);
     expect(trace).toMatchObject({
       reference_targets: "GAPDH; ACTB",
       reference_method: "Geometric mean of relative quantities",
-      calibrator: "Control",
+      source_calibrator: "Control",
     });
+    expect(SUPPLIED_RESULTS_EXPORT_SCHEMA_VERSION).toBe("1.1.0");
+    expect(new Set(SUPPLIED_EXPORT_DICTIONARY.filter((entry) => entry.sheet === "Complete Results").map((entry) => entry.field)))
+      .toEqual(new Set(SUPPLIED_COMPLETE_HEADERS));
+    expect(new Set(SUPPLIED_EXPORT_DICTIONARY.filter((entry) => entry.sheet === "Supplied Values").map((entry) => entry.field)))
+      .toEqual(new Set(SUPPLIED_TRACEABILITY_HEADERS));
+  });
+
+  it("keeps supplied-provenance warnings out of raw-Cq workflows", () => {
+    const makeSource = (referenceTargets: string, method: string, calibrator: string, suffix: string) => {
+      const workbook = buildQpcrInputTemplateWorkbook();
+      workbook.Sheets["Analysis Settings"].B2.v = referenceTargets;
+      workbook.Sheets["Analysis Settings"].B3.v = method;
+      workbook.Sheets["Analysis Settings"].B4.v = calibrator;
+      workbook.Sheets.Data = XLSX.utils.aoa_to_sheet([
+        ["Plate", "Well", "Sample", "Assay", "Assay Type", "Replicate", "Cq/Ct/Cp"],
+        [`Plate ${suffix}`, "A1", `Sample ${suffix}`, "GENE", "Target", 1, 23],
+      ]);
+      const bytes = XLSX.write(workbook, { bookType: "xlsx", type: "array" }) as ArrayBuffer;
+      return parseWorkbookBytes(bytes, `raw-${suffix}.xlsx`);
+    };
+    const dataset = buildCanonicalDataset([
+      makeSource("GAPDH", "Arithmetic mean", "Control A", "A"),
+      makeSource("ACTB", "Geometric mean", "Control B", "B"),
+    ]);
+
+    expect(dataset.analysisStart).toBe("cq");
+    expect(dataset.suppliedCalculationProvenance).toBeNull();
+    expect(dataset.warnings.join("\n")).not.toMatch(/内参基因集合|内参处理方法|校准样本/);
   });
 
   it("runs a Delta Cq template without plate context through the calculation-only seam", () => {

@@ -185,13 +185,13 @@ export function buildCanonicalDataset(inputSources: ImportedSource[]): Canonical
     .split(/[;,，；\n]+/)
     .map((item) => item.trim())
     .filter(Boolean);
-  const referenceTargetSets = sources
-    .map((source) => splitReferenceTargets(source.metadata.qpcrReferenceTargets ?? ""))
+  const referenceTargetSets = analysisStart === "cq" ? [] : sources
+    .map((source) => [...new Set(splitReferenceTargets(source.metadata.qpcrReferenceTargets ?? ""))])
     .filter((targets) => targets.length);
   const referenceTargets = [...new Set(referenceTargetSets[0] ?? [])];
   const referenceTargetSignatures = new Set(referenceTargetSets.map((targets) => [...targets].sort().join("\u241f")));
-  const referenceMethods = [...new Set(sources.map((source) => source.metadata.qpcrReferenceMethod).filter(Boolean))];
-  const calibratorValues = [...new Set(sources.map((source) => source.metadata.qpcrCalibratorValue).filter(Boolean))];
+  const referenceMethods = analysisStart === "cq" ? [] : [...new Set(sources.map((source) => source.metadata.qpcrReferenceMethod).filter(Boolean))];
+  const calibratorValues = analysisStart === "cq" ? [] : [...new Set(sources.map((source) => source.metadata.qpcrCalibratorValue).filter(Boolean))];
   const suppliedCalculationProvenance = analysisStart === "cq" ? null : {
     referenceTargets,
     referenceMethod: referenceMethods[0] ?? "",

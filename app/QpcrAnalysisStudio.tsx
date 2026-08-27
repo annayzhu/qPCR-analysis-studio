@@ -1311,7 +1311,7 @@ export default function QpcrAnalysisStudio() {
                       <p>{l("ΔCq 已由用户提供；校准样本仅用于后续 ΔΔCq 与相对表达量。", "ΔCq is user supplied; the calibrator is used only for downstream ΔΔCq and relative expression.")}</p>
                     </section>}
                   </div>
-                  <SuppliedResultExplorer results={suppliedResults} records={dataset.suppliedCalculations} analysisStart={dataset.analysisStart} sampleOrder={displaySamples} targetOrder={selectedDisplayTargets} provenance={dataset.suppliedCalculationProvenance} calibrator={calibrator} />
+                  <SuppliedResultExplorer results={suppliedResults} records={dataset.suppliedCalculations} analysisStart={dataset.analysisStart} sampleOrder={displaySamples} targetOrder={selectedDisplayTargets} provenance={dataset.suppliedCalculationProvenance} />
                 </>}</>}
                 {resultSection === "quantification" && !hasQuantification && <div className="empty-table">{l("当前仅导入了 Tm/熔解结果；添加单孔 Cq/Ct/Cp 后可进行相对定量。", "Only Tm/melt results are currently imported. Add well-level Cq/Ct/Cp data for relative quantification.")}</div>}
                 {resultSection === "melt" && hasMeltAnalysis && <MeltAnalysis wells={appliedWells} />}

@@ -30,7 +30,7 @@ export interface SuppliedCalculationResult {
 }
 
 export const SUPPLIED_COMPLETE_HEADERS = [
-  "analysis_start", "value_provenance", "reference_targets", "reference_method", "sample", "target", "valid_replicates",
+  "analysis_start", "value_provenance", "reference_targets", "reference_method", "source_calibrator", "sample", "target", "valid_replicates",
   "delta_cq", "delta_cq_technical_sd", "delta_cq_technical_sem",
   "normalized_quantity_2^-delta_cq", "normalized_quantity_technical_sd", "normalized_quantity_technical_sem",
   "delta_delta_cq", "delta_delta_cq_technical_sd", "delta_delta_cq_technical_sem",
@@ -41,12 +41,80 @@ export const SUPPLIED_COMPLETE_HEADERS = [
 export type SuppliedCompleteRow = Record<(typeof SUPPLIED_COMPLETE_HEADERS)[number], string | number | null>;
 
 export const SUPPLIED_TRACEABILITY_HEADERS = [
-  "analysis_start", "value_provenance", "reference_targets", "reference_method", "calibrator", "verification_status", "plate", "plate_format", "well",
+  "analysis_start", "value_provenance", "reference_targets", "reference_method", "source_calibrator", "verification_status", "plate", "plate_format", "well",
   "sample", "target", "assay_type", "replicate", "supplied_value", "cycle_type", "tm1", "tm2",
   "source_sheet", "source_row", "warnings",
 ] as const;
 
 export type SuppliedTraceabilityRow = Record<(typeof SUPPLIED_TRACEABILITY_HEADERS)[number], string | number | null>;
+
+export const SUPPLIED_RESULTS_EXPORT_SCHEMA_VERSION = "1.1.0";
+
+export interface SuppliedExportDictionaryEntry {
+  sheet: "Complete Results" | "Supplied Values";
+  field: string;
+  definitionZh: string;
+  definitionEn: string;
+}
+
+const SHARED_SUPPLIED_EXPORT_DEFINITIONS: Record<string, [string, string]> = {
+  analysis_start: ["本次分析采用的用户计算起点：delta-cq 或 delta-delta-cq。", "Authoritative user-supplied calculation start: delta-cq or delta-delta-cq."],
+  value_provenance: ["数值来源；user-supplied 表示由用户提供，不由系统从 Cq 重建。", "Value origin; user-supplied means the value was provided by the user and not reconstructed from Cq."],
+  reference_targets: ["用户声明的上游内参基因；仅用于溯源，不参与再次归一化。", "User-declared upstream reference target(s); provenance only and never used to normalize again."],
+  reference_method: ["用户声明的多内参或归一化处理方法；系统不据此重算。", "User-declared reference/normalization method; the system does not recalculate from it."],
+  source_calibrator: ["导入文件声明的上游校准样本；与结果页后来选择的下游校准样本分开保存。", "Upstream calibrator declared by the imported file, stored separately from any downstream calibrator selected later."],
+  sample: ["样本名称。", "Sample name."],
+  target: ["目标基因或 Assay 名称。", "Target gene or assay name."],
+  warnings: ["与该结果或原始输入行相关的可追溯警告代码。", "Traceable warning codes associated with the result or supplied row."],
+};
+
+const COMPLETE_ONLY_DEFINITIONS: Record<string, [string, string]> = {
+  valid_replicates: ["进入汇总计算的有效技术复孔数；不是生物学样本量。", "Valid technical-replicate count used in the summary; not biological sample size."],
+  delta_cq: ["用户提供 ΔCq 的技术复孔算术均值。", "Arithmetic mean of user-supplied technical-replicate ΔCq values."],
+  delta_cq_technical_sd: ["用户提供 ΔCq 技术复孔的样本标准差（n−1）。", "Sample standard deviation (n−1) of user-supplied technical-replicate ΔCq values."],
+  delta_cq_technical_sem: ["ΔCq 技术复孔 SD/√n。", "ΔCq technical-replicate SD divided by √n."],
+  "normalized_quantity_2^-delta_cq": ["由平均 ΔCq 计算的 2^-ΔCq。", "2^-ΔCq calculated from the mean ΔCq."],
+  normalized_quantity_technical_sd: ["将 ΔCq 技术 SD 通过 2^-x 一阶传播得到的 SD。", "SD propagated from ΔCq technical SD through the 2^-x transform."],
+  normalized_quantity_technical_sem: ["将 ΔCq 技术 SEM 通过 2^-x 一阶传播得到的 SEM。", "SEM propagated from ΔCq technical SEM through the 2^-x transform."],
+  delta_delta_cq: ["用户提供 ΔΔCq 的均值，或由用户提供 ΔCq 与当前下游校准样本计算。", "Mean user-supplied ΔΔCq, or ΔΔCq calculated from supplied ΔCq and the active downstream calibrator."],
+  delta_delta_cq_technical_sd: ["ΔΔCq 的技术复孔传播 SD。", "Propagated technical-replicate SD of ΔΔCq."],
+  delta_delta_cq_technical_sem: ["ΔΔCq 的技术复孔传播 SEM。", "Propagated technical-replicate SEM of ΔΔCq."],
+  "relative_expression_2^-delta_delta_cq": ["由 ΔΔCq 计算的相对表达量 2^-ΔΔCq。", "Relative expression 2^-ΔΔCq calculated from ΔΔCq."],
+  relative_expression_technical_sd: ["相对表达量的一阶传播技术 SD。", "First-order propagated technical SD of relative expression."],
+  relative_expression_technical_sem: ["相对表达量的一阶传播技术 SEM。", "First-order propagated technical SEM of relative expression."],
+  calibrator: ["本次结果计算实际使用的下游校准样本；为空表示未进行该步校准。", "Active downstream calibrator actually used for this result; blank means no downstream calibration was performed."],
+};
+
+const TRACEABILITY_ONLY_DEFINITIONS: Record<string, [string, string]> = {
+  verification_status: ["该用户提供值的核验状态。", "Verification status of the user-supplied value."],
+  plate: ["可选的来源孔板标识，仅用于溯源。", "Optional source plate identifier for provenance only."],
+  plate_format: ["可选的来源板规格（96 或 384）。", "Optional source plate format (96 or 384)."],
+  well: ["可选的来源物理孔位，仅用于溯源。", "Optional source physical well for provenance only."],
+  assay_type: ["用户提供的 Assay 类型或角色。", "User-supplied assay type or role."],
+  replicate: ["用户提供的技术复孔序号。", "User-supplied technical-replicate identifier."],
+  supplied_value: ["用户导入的原始 ΔCq 或 ΔΔCq 数值，未被系统改写。", "Original imported ΔCq or ΔΔCq value, unchanged by the system."],
+  cycle_type: ["用户提供的周期值类型标签。", "User-supplied cycle-value type label."],
+  tm1: ["可选的第一熔解峰温度。", "Optional first melting-peak temperature."],
+  tm2: ["可选的第二熔解峰温度。", "Optional second melting-peak temperature."],
+  source_sheet: ["原始工作表名称。", "Original worksheet name."],
+  source_row: ["原始工作表中的 1-based 行号。", "One-based row number in the original worksheet."],
+};
+
+function suppliedDictionaryEntries(
+  sheet: SuppliedExportDictionaryEntry["sheet"],
+  headers: readonly string[],
+  specific: Record<string, [string, string]>,
+): SuppliedExportDictionaryEntry[] {
+  return headers.map((field) => {
+    const [definitionZh, definitionEn] = SHARED_SUPPLIED_EXPORT_DEFINITIONS[field] ?? specific[field] ?? [field, field];
+    return { sheet, field, definitionZh, definitionEn };
+  });
+}
+
+export const SUPPLIED_EXPORT_DICTIONARY: SuppliedExportDictionaryEntry[] = [
+  ...suppliedDictionaryEntries("Complete Results", SUPPLIED_COMPLETE_HEADERS, COMPLETE_ONLY_DEFINITIONS),
+  ...suppliedDictionaryEntries("Supplied Values", SUPPLIED_TRACEABILITY_HEADERS, TRACEABILITY_ONLY_DEFINITIONS),
+];
 
 export interface SuppliedVisualizationBarRow {
   category: string;
@@ -174,6 +242,7 @@ export function buildSuppliedCompleteRows(
     value_provenance: row.valueProvenance,
     reference_targets: provenance?.referenceTargets.join("; ") || null,
     reference_method: provenance?.referenceMethod || null,
+    source_calibrator: provenance?.calibratorValue || null,
     sample: row.sampleName,
     target: row.targetName,
     valid_replicates: row.validReplicates,
@@ -189,7 +258,7 @@ export function buildSuppliedCompleteRows(
     "relative_expression_2^-delta_delta_cq": row.relativeExpression,
     relative_expression_technical_sd: row.relativeExpressionSd,
     relative_expression_technical_sem: row.relativeExpressionSem,
-    calibrator: row.calibratorValue || provenance?.calibratorValue || null,
+    calibrator: row.calibratorValue || null,
     warnings: [...row.warningCodes, ...(!provenance?.referenceTargets.length ? ["REFERENCE_TARGET_NOT_PROVIDED"] : [])].join("; "),
   }));
 }
@@ -203,7 +272,7 @@ export function buildSuppliedTraceabilityRows(
     value_provenance: "user-supplied",
     reference_targets: provenance?.referenceTargets.join("; ") || null,
     reference_method: provenance?.referenceMethod || null,
-    calibrator: provenance?.calibratorValue || null,
+    source_calibrator: provenance?.calibratorValue || null,
     verification_status: record.verificationStatus,
     plate: record.plateName ?? null,
     plate_format: record.plateFormat ?? null,

@@ -10,6 +10,8 @@ import {
   buildSuppliedVisualizationBarRows,
   mapRatioToY,
   SUPPLIED_COMPLETE_HEADERS,
+  SUPPLIED_EXPORT_DICTIONARY,
+  SUPPLIED_RESULTS_EXPORT_SCHEMA_VERSION,
   SUPPLIED_TRACEABILITY_HEADERS,
   type SuppliedCalculationResult,
   VISUALIZATION_BAR_HEADERS,
@@ -91,29 +93,23 @@ function SuppliedChart({ rows, target, sampleOrder, showSd }: {
   </div>;
 }
 
-export default function SuppliedResultExplorer({ results, records, analysisStart, sampleOrder, targetOrder, provenance, calibrator }: {
+export default function SuppliedResultExplorer({ results, records, analysisStart, sampleOrder, targetOrder, provenance }: {
   results: SuppliedCalculationResult[];
   records: SuppliedCalculationRecord[];
   analysisStart: Exclude<AnalysisStart, "cq">;
   sampleOrder: string[];
   targetOrder: string[];
   provenance: SuppliedCalculationProvenance | null;
-  calibrator: string;
 }) {
   const { l } = useLanguage();
   const [showSd, setShowSd] = useState(false);
-  const effectiveProvenance = useMemo<SuppliedCalculationProvenance>(() => ({
-    referenceTargets: provenance?.referenceTargets ?? [],
-    referenceMethod: provenance?.referenceMethod ?? "",
-    calibratorValue: calibrator || provenance?.calibratorValue || "",
-  }), [calibrator, provenance]);
   const filtered = useMemo(() => results.filter((row) => sampleOrder.includes(row.sampleName) && targetOrder.includes(row.targetName)), [results, sampleOrder, targetOrder]);
-  const completeRows = useMemo(() => buildSuppliedCompleteRows(results, sampleOrder, targetOrder, effectiveProvenance), [effectiveProvenance, results, sampleOrder, targetOrder]);
-  const traceabilityRows = useMemo(() => buildSuppliedTraceabilityRows(records, effectiveProvenance), [effectiveProvenance, records]);
+  const completeRows = useMemo(() => buildSuppliedCompleteRows(results, sampleOrder, targetOrder, provenance), [provenance, results, sampleOrder, targetOrder]);
+  const traceabilityRows = useMemo(() => buildSuppliedTraceabilityRows(records, provenance), [provenance, records]);
   const barRows = useMemo(() => buildSuppliedVisualizationBarRows(results, sampleOrder, targetOrder), [results, sampleOrder, targetOrder]);
   const chartTargets = targetOrder.filter((target) => filtered.some((row) => row.targetName === target));
-  const referenceTargets = effectiveProvenance.referenceTargets;
-  const displayedCalibrator = effectiveProvenance.calibratorValue;
+  const referenceTargets = provenance?.referenceTargets ?? [];
+  const displayedCalibrator = provenance?.calibratorValue ?? "";
   const exportTable = (headers: readonly string[], rows: Array<Record<string, string | number | null>>, fileName: string) => {
     const sheet = XLSX.utils.json_to_sheet(rows, { header: [...headers] });
     sheet["!autofilter"] = { ref: sheet["!ref"] ?? "A1:A1" };
@@ -127,14 +123,42 @@ export default function SuppliedResultExplorer({ results, records, analysisStart
     const lines = [headers.join("\t"), ...rows.map((row) => headers.map((header) => clean(row[header])).join("\t"))];
     downloadBlob(new Blob(["\uFEFF", lines.join("\r\n")], { type: "text/tab-separated-values;charset=utf-8" }), fileName);
   };
+  const exportSuppliedTsvBundle = () => {
+    exportTsv(SUPPLIED_COMPLETE_HEADERS, completeRows, "qpcr-supplied-calculation-results.tsv");
+    const dictionaryRows = SUPPLIED_EXPORT_DICTIONARY.map((entry) => ({
+      schema_version: SUPPLIED_RESULTS_EXPORT_SCHEMA_VERSION,
+      sheet: entry.sheet,
+      field: entry.field,
+      definition_zh: entry.definitionZh,
+      definition_en: entry.definitionEn,
+    }));
+    exportTsv(["schema_version", "sheet", "field", "definition_zh", "definition_en"], dictionaryRows, "qpcr-supplied-calculation-data-dictionary.tsv");
+  };
   const exportCompleteWorkbook = () => {
     const workbook = XLSX.utils.book_new();
     const resultSheet = XLSX.utils.json_to_sheet(completeRows, { header: [...SUPPLIED_COMPLETE_HEADERS] });
     resultSheet["!autofilter"] = { ref: resultSheet["!ref"] ?? "A1:A1" };
     const traceabilitySheet = XLSX.utils.json_to_sheet(traceabilityRows, { header: [...SUPPLIED_TRACEABILITY_HEADERS] });
     traceabilitySheet["!autofilter"] = { ref: traceabilitySheet["!ref"] ?? "A1:A1" };
+    const metadataSheet = XLSX.utils.aoa_to_sheet([
+      ["Export Schema Version", SUPPLIED_RESULTS_EXPORT_SCHEMA_VERSION],
+      ["Analysis Start", analysisStart],
+      ["Value Provenance", "user-supplied"],
+      ["Reference Target(s)", referenceTargets.join("; ")],
+      ["Reference Method", provenance?.referenceMethod ?? ""],
+      ["Source Calibrator", displayedCalibrator],
+    ]);
+    const dictionarySheet = XLSX.utils.json_to_sheet(SUPPLIED_EXPORT_DICTIONARY.map((entry) => ({
+      schema_version: SUPPLIED_RESULTS_EXPORT_SCHEMA_VERSION,
+      sheet: entry.sheet,
+      field: entry.field,
+      definition_zh: entry.definitionZh,
+      definition_en: entry.definitionEn,
+    })));
     XLSX.utils.book_append_sheet(workbook, resultSheet, "Complete Results");
     XLSX.utils.book_append_sheet(workbook, traceabilitySheet, "Supplied Values");
+    XLSX.utils.book_append_sheet(workbook, metadataSheet, "Export Metadata");
+    XLSX.utils.book_append_sheet(workbook, dictionarySheet, "Data Dictionary");
     const bytes = XLSX.write(workbook, { bookType: "xlsx", type: "array", cellStyles: true });
     downloadBlob(new Blob([bytes], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }), "qpcr-supplied-calculation-results.xlsx");
   };
@@ -146,15 +170,15 @@ export default function SuppliedResultExplorer({ results, records, analysisStart
       <dl>
         <div><dt>{l("分析起点", "Analysis start")}</dt><dd>{analysisStart === "delta-cq" ? "ΔCq" : "ΔΔCq"}</dd></div>
         <div><dt>{l("内参基因", "Reference target(s)")}</dt><dd>{referenceTargets.join("; ") || l("未提供", "Not provided")}</dd></div>
-        <div><dt>{l("内参处理方法", "Reference method")}</dt><dd>{effectiveProvenance.referenceMethod || l("未提供", "Not provided")}</dd></div>
-        <div><dt>{l("校准样本", "Calibrator")}</dt><dd>{displayedCalibrator || l("未提供 / 未选择", "Not provided / not selected")}</dd></div>
+        <div><dt>{l("内参处理方法", "Reference method")}</dt><dd>{provenance?.referenceMethod || l("未提供", "Not provided")}</dd></div>
+        <div><dt>{l("来源校准样本", "Source calibrator")}</dt><dd>{displayedCalibrator || l("未提供", "Not provided")}</dd></div>
       </dl>
       {!referenceTargets.length && <p className="calculation-basis-warning"><b>{l("内参基因未提供", "Reference target not provided")}</b><span>{l("结果仍可查看，但计算依据不完整；系统不会根据基因名称或数值自动猜测。", "Results remain viewable, but the calculation basis is incomplete. The system will not infer a reference target from names or values.")}</span></p>}
     </section>
     <section className="result-commandbar"><div className="result-commandbar-summary"><div><h3>{l("结果预览", "Result preview")}</h3><p>{l(`${filtered.length} 条用户计算结果`, `${filtered.length} user-supplied result(s)`)}</p></div></div>
       <div className="result-commandbar-grid supplied-commandbar-grid">
         <div className="result-command-group"><span className="command-group-label">{l("显示", "Display")}</span><button type="button" className={showSd ? "filter-chip active" : "filter-chip"} onClick={() => setShowSd((value) => !value)}>{l("技术复孔 SD", "Technical-replicate SD")}</button></div>
-        <div className="result-command-group result-export-group"><span className="command-group-label">{l("完整计算结果", "Complete results")}</span><div className="visualization-export-actions"><button type="button" onClick={exportCompleteWorkbook}>Excel</button><button type="button" onClick={() => exportTsv(SUPPLIED_COMPLETE_HEADERS, completeRows, "qpcr-supplied-calculation-results.tsv")}>TSV</button></div><small className="export-format-hint">{l("Excel 含 Supplied Values 原始行溯源表", "Excel includes a Supplied Values traceability sheet")}</small></div>
+        <div className="result-command-group result-export-group"><span className="command-group-label">{l("完整计算结果", "Complete results")}</span><div className="visualization-export-actions"><button type="button" onClick={exportCompleteWorkbook}>Excel</button><button type="button" onClick={exportSuppliedTsvBundle}>TSV</button></div><small className="export-format-hint">{l("Excel 含溯源、版本与数据字典；TSV 同时下载字典", "Excel includes provenance, version, and dictionary sheets; TSV also downloads its dictionary")}</small></div>
         <div className="result-command-group result-export-group visualization-studio-export-group"><span className="command-group-label">Visualization Studio · {l("柱状图格式", "Bar-chart format")}</span><div className="visualization-export-actions"><button type="button" onClick={() => exportTable(VISUALIZATION_BAR_HEADERS, barRecords, "qpcr-visualization-bar.xlsx")}>{l("柱状图 Excel", "Bar Excel")}</button><button type="button" onClick={() => exportTsv(VISUALIZATION_BAR_HEADERS, barRecords, "qpcr-visualization-bar.tsv")}>{l("柱状图 TSV", "Bar TSV")}</button></div><small className="export-format-hint">category · value · sd · sem · group</small></div>
       </div>
     </section>
