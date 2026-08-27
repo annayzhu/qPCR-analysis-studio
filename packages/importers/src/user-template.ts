@@ -1,9 +1,9 @@
 import XLSX from "xlsx-js-style";
 import type { CanonicalField, ImportedSource, ImportedTable, RawImportedRow } from "../../schemas/src";
-import { normalizeWell } from "../../schemas/src";
+import { analysisStartPolicy, normalizeWell } from "../../schemas/src";
 import { selectedTable } from "./adapters";
 
-export const QPCR_INPUT_TEMPLATE_SCHEMA_VERSION = "2.0.0";
+export const QPCR_INPUT_TEMPLATE_SCHEMA_VERSION = "2.1.0";
 export const QPCR_INPUT_TEMPLATE_HEADERS = [
   "Plate",
   "Plate Format",
@@ -20,7 +20,7 @@ export const QPCR_INPUT_TEMPLATE_HEADERS = [
   "Tm2",
 ] as const;
 
-const REQUIRED_HEADERS = new Set(["Well", "Sample", "Assay", "Assay Type", "Replicate", "Cq/Ct/Cp"]);
+const REQUIRED_HEADERS = new Set(["Sample", "Assay", "Replicate"]);
 const NON_DETECTED = /^(?:undetermined|no\s*ct|no\s*cq|n\/?a|na|nan|failed|无扩增|未检出)$/i;
 
 export interface TemplateValidationIssue {
@@ -91,6 +91,10 @@ export function buildQpcrInputTemplateWorkbook(): XLSX.WorkBook {
     ["Analysis Start / 分析起点", "Cq/Ct/Cp"],
     ["Allowed / 可选值", "Cq/Ct/Cp", "Delta Cq", "Delta Delta Cq"],
     ["Rule / 规则", "Choose one authoritative start for the entire import set / 整个导入数据只能选择一个正式分析起点"],
+    ["Cq/Ct/Cp required / 必填", "Well, Sample, Assay, Assay Type, Replicate, Cq/Ct/Cp"],
+    ["Delta Cq required / 必填", "Sample, Assay, Replicate, Delta Cq"],
+    ["Delta Delta Cq required / 必填", "Sample, Assay, Replicate, Delta Delta Cq"],
+    ["Delta starts / 下游起点", "Plate, Plate Format, Well, Assay Type, and Cycle Type are optional provenance / 均为可选溯源字段；无需板布局"],
   ];
   const settingsSheet = XLSX.utils.aoa_to_sheet(settingsRows);
   settingsSheet["!cols"] = [{ wch: 30 }, { wch: 78 }, { wch: 20 }, { wch: 24 }];
@@ -126,15 +130,15 @@ export function buildQpcrInputTemplateWorkbook(): XLSX.WorkBook {
     ["Field", "Requirement", "中文说明", "English definition", "Allowed values / unit", "Accepted synonyms"],
     ["Plate", "Conditional", "孔板名称；多板数据必填", "Plate identifier; required for multi-plate data", "Text", "Plate Name, Plate ID, 板编号"],
     ["Plate Format", "Optional", "显式板型；填写后孔位必须在该板范围内", "Explicit plate format; wells must fit this format when supplied", "96 or 384", "板型, Plate Size"],
-    ["Well", "Required", "物理孔位", "Physical well coordinate", "A1–H12 (96) or A1–P24 (384)", "Well Position, Pos, 孔位"],
-    ["Sample", "Required", "生物学样本名称", "Biological sample identifier", "Text", "Sample Name, 样本, 样本编号"],
-    ["Assay", "Required", "基因或检测项目", "Target gene or assay", "Text", "Target, Gene, 基因, 靶标"],
-    ["Assay Type", "Required", "反应角色；保留原值", "Reaction role; original text is preserved", "Target, Reference, NTC, no-RT, Standard, Unknown", "Type, Role, 类型"],
-    ["Replicate", "Required", "技术复孔序号", "Positive technical-replicate identifier", "Positive integer", "Rep, Technical Replicate, 复孔序号"],
+    ["Well", "Required for Cq start; optional for Delta starts", "Cq 起点必填物理孔位；Δ 起点仅作可选溯源", "Required Physical Well for Cq start; optional provenance for Delta starts", "A1–H12 (96) or A1–P24 (384)", "Well Position, Pos, 孔位"],
+    ["Sample", "Required for all starts", "生物学样本名称", "Biological sample identifier", "Text", "Sample Name, 样本, 样本编号"],
+    ["Assay", "Required for all starts", "基因或检测项目", "Target gene or assay", "Text", "Target, Gene, 基因, 靶标"],
+    ["Assay Type", "Required for Cq start; optional for Delta starts", "Cq 起点必填反应角色；Δ 起点可选并保留原值", "Required reaction role for Cq start; optional provenance for Delta starts", "Target, Reference, NTC, no-RT, Standard, Unknown", "Type, Role, 类型"],
+    ["Replicate", "Required for all starts", "技术复孔序号", "Positive technical-replicate identifier", "Positive integer", "Rep, Technical Replicate, 复孔序号"],
     ["Cycle Type", "Optional", "原始扩增定量术语，仅用于溯源", "Original quantification-cycle term; provenance only", "Ct, Cq, or Cp", "Quantification Type, 定量类型"],
-    ["Cq/Ct/Cp", "Required", "单孔扩增定量值", "Single-well quantification cycle", "0–60 or Undetermined / 未检出", "Cq, Ct, Cp"],
-    ["Delta Cq", "Conditional", "用户计算的复孔级 ΔCq；选择 Delta Cq 起点时必填", "User-supplied replicate-level delta Cq; required for Delta Cq start", "Numeric", "Delta Ct, Delta Cp, ΔCq, ΔCt, ΔCp"],
-    ["Delta Delta Cq", "Conditional", "用户计算的复孔级 ΔΔCq；选择 Delta Delta Cq 起点时必填", "User-supplied replicate-level delta-delta Cq; required for Delta Delta Cq start", "Numeric", "Delta Delta Ct, ΔΔCq, ΔΔCt"],
+    ["Cq/Ct/Cp", "Required for Cq start", "Cq 起点必填的单孔扩增定量值", "Single-well quantification cycle required for Cq start", "0–60 or Undetermined / 未检出", "Cq, Ct, Cp"],
+    ["Delta Cq", "Required for Delta Cq start", "用户计算的复孔级 ΔCq；选择 Delta Cq 起点时必填", "User-supplied replicate-level delta Cq; required for Delta Cq start", "Numeric", "Delta Ct, Delta Cp, ΔCq, ΔCt, ΔCp"],
+    ["Delta Delta Cq", "Required for Delta Delta Cq start", "用户计算的复孔级 ΔΔCq；选择 Delta Delta Cq 起点时必填", "User-supplied replicate-level delta-delta Cq; required for Delta Delta Cq start", "Numeric", "Delta Delta Ct, ΔΔCq, ΔΔCt"],
     ["Tm1", "Optional", "主熔解峰温度", "Primary melt-peak temperature", "Numeric, °C", "Tm, 主峰Tm"],
     ["Tm2", "Optional", "第二熔解峰温度", "Secondary melt-peak temperature", "Numeric, °C", "Second Tm, 第二峰Tm"],
   ];
@@ -190,8 +194,7 @@ function issue(
   };
 }
 
-export function validateQpcrInputTemplate(source: ImportedSource): TemplateValidationSummary | null {
-  if (!source.metadata.qpcrTemplateSchemaVersion) return null;
+function validateAnalysisStartRows(source: ImportedSource): TemplateValidationSummary {
   const table = selectedTable(source);
   if (!table) return { totalRows: 0, detectedCount: 0, nonDetectedCount: 0, warningCount: 0, errorCount: 1, issues: [] };
   const mappings = acceptedMapping(table);
@@ -208,10 +211,12 @@ export function validateQpcrInputTemplate(source: ImportedSource): TemplateValid
     : analysisStart === "delta-delta-cq"
       ? ["deltaDeltaCq", "Delta Delta Cq"]
       : ["cq", "Cq/Ct/Cp"];
-  const required: Array<[CanonicalField, string]> = [
-    ["well", "Well"], ["sampleName", "Sample"], ["targetName", "Assay"],
-    ["taskType", "Assay Type"], ["replicate", "Replicate"], selectedValue,
-  ];
+  const required: Array<[CanonicalField, string]> = analysisStart === "cq"
+    ? [
+        ["well", "Well"], ["sampleName", "Sample"], ["targetName", "Assay"],
+        ["taskType", "Assay Type"], ["replicate", "Replicate"], selectedValue,
+      ]
+    : [["sampleName", "Sample"], ["targetName", "Assay"], ["replicate", "Replicate"], selectedValue];
   if (analysisStart === "invalid") issues.push({
     code: "invalid-analysis-start",
     severity: "error",
@@ -228,7 +233,7 @@ export function validateQpcrInputTemplate(source: ImportedSource): TemplateValid
       `缺少必需列 ${label}。`, `Required column ${label} is missing.`,
     ));
   }
-  if (!mappings.cq && mappings.cqMean) issues.push(issue(
+  if (analysisStart === "cq" && !mappings.cq && mappings.cqMean) issues.push(issue(
     "mean-column-not-allowed", "error", table, null, mappings.cqMean, "",
     "模板工作流不接受 Ct Mean/Cq Mean 代替单孔值。请填写每个物理孔的 Cq/Ct/Cp。",
     "Ct Mean/Cq Mean cannot replace a single-well value in the template workflow. Enter Cq/Ct/Cp for every physical well.",
@@ -250,7 +255,7 @@ export function validateQpcrInputTemplate(source: ImportedSource): TemplateValid
     const replicate = rawText(row, mappings.replicate);
     const cq = rawText(row, mappings.cq);
     const selectedCycleValue = rawText(row, mappings[selectedValue[0]]);
-    if (namedPlateValues.size > 0 && !suppliedPlate) issues.push(issue(
+    if (analysisStart === "cq" && namedPlateValues.size > 0 && !suppliedPlate) issues.push(issue(
       "missing-plate", "error", table, row, "Plate", suppliedPlate,
       `第 ${row.sourceRowNumber} 行的 Plate 为空；同一工作表已出现具名孔板，多板数据必须逐行填写 Plate。`,
       `Plate is blank on row ${row.sourceRowNumber}; this sheet contains a named plate, so Plate is required on every row of multi-plate data.`,
@@ -341,4 +346,20 @@ export function validateQpcrInputTemplate(source: ImportedSource): TemplateValid
     errorCount: issues.filter((item) => item.severity === "error").length,
     issues,
   };
+}
+
+export function validateQpcrInputTemplate(source: ImportedSource): TemplateValidationSummary | null {
+  return source.metadata.qpcrTemplateSchemaVersion ? validateAnalysisStartRows(source) : null;
+}
+
+export function validateAnalysisStartSource(source: ImportedSource): TemplateValidationSummary | null {
+  if (source.metadata.qpcrTemplateSchemaVersion) return validateAnalysisStartRows(source);
+  const analysisStart = source.metadata.qpcrAnalysisStart;
+  if (analysisStart !== "delta-cq" && analysisStart !== "delta-delta-cq") return null;
+  const table = selectedTable(source);
+  if (!table) return null;
+  const mappings = acceptedMapping(table);
+  return mappings[analysisStartPolicy(analysisStart).authoritativeValueField]
+    ? validateAnalysisStartRows(source)
+    : null;
 }

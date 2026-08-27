@@ -11,7 +11,7 @@ import type {
   WellRecord,
   SuppliedCalculationRecord,
 } from "../../schemas/src";
-import { createPhysicalWellId, normalizeWell } from "../../schemas/src";
+import { analysisStartPolicy, createPhysicalWellId, normalizeWell } from "../../schemas/src";
 import { applyInstrumentAdapter, selectedTable } from "./adapters";
 
 const NON_DETECTED = /^(?:undetermined|no\s*ct|no\s*cq|n\/?a|na|nan|failed|无扩增|未检出)$/i;
@@ -240,7 +240,6 @@ export function buildCanonicalDataset(inputSources: ImportedSource[]): Canonical
       const well =
         normalizeWell(value(rawRow, mappings, "well")) ??
         normalizeWell(`${rowLabel}${columnLabel}`);
-      if (!well) continue;
 
       let sampleName = text(value(rawRow, mappings, "sampleName"));
       let targetName = text(value(rawRow, mappings, "targetName"));
@@ -254,7 +253,7 @@ export function buildCanonicalDataset(inputSources: ImportedSource[]): Canonical
       const qcFlags: QcFlag[] = [];
       const cq = cqValue(cqRaw, isRoche);
       if (analysisStart !== "cq") {
-        const selectedField = analysisStart === "delta-cq" ? "deltaCq" : "deltaDeltaCq";
+        const selectedField = analysisStartPolicy(analysisStart).authoritativeValueField;
         const suppliedValue = numberOrNull(value(rawRow, mappings, selectedField));
         if (suppliedValue !== null && sampleName && targetName) {
           suppliedCalculations.push({
@@ -263,15 +262,27 @@ export function buildCanonicalDataset(inputSources: ImportedSource[]): Canonical
             replicate: numberOrNull(value(rawRow, mappings, "replicate")),
             value: suppliedValue,
             analysisStart,
-            plateId: plate.plateId,
-            well,
+            ...(rawPlateName ? { plateId: plateIdentity(rawPlateName).plateId } : {}),
+            ...(rawPlateName ? { plateName: rawPlateName } : {}),
+            ...(well ? { well } : {}),
             cycleType: text(value(rawRow, mappings, "cycleType")),
+            plateFormat: (() => {
+              const header = rawRow.rawHeaders.find((item) => /^(?:plate\s*format|plate\s*size|板型)$/i.test(item.normalize("NFKC").trim()));
+              const parsed = header ? Number(rawRow.rawValues[header]) : NaN;
+              return parsed === 96 || parsed === 384 ? parsed : undefined;
+            })(),
+            assayType: text(value(rawRow, mappings, "taskType")),
+            tm1: numberOrNull(value(rawRow, mappings, "tm1")),
+            tm2: numberOrNull(value(rawRow, mappings, "tm2")),
+            verificationStatus: "unverified",
             sourceSheet: rawRow.sourceSheet,
             sourceRowNumber: rawRow.sourceRowNumber,
             rawRow,
           });
         }
+        continue;
       }
+      if (!well) continue;
       if (cq.cqStatus === "invalid") {
         qcFlags.push({ code: "INVALID_CQ", severity: "error", message: cq.cqReason, source: "import" });
       }
@@ -312,8 +323,10 @@ export function buildCanonicalDataset(inputSources: ImportedSource[]): Canonical
 
   const instrumentTypes = new Set(sources.map((source) => source.instrumentType).filter((type) => type !== "generic"));
   const instrumentType: InstrumentType = instrumentTypes.size === 1 ? [...instrumentTypes][0] : "generic";
-  const plate = detectPlate([...partials.values()].map((partial) => partial.well), instrumentType);
-  if (plate.requiresConfirmation) warnings.push("板规格由部分孔位推断，请在计算前确认 96/384 孔。");
+  const plate = partials.size
+    ? detectPlate([...partials.values()].map((partial) => partial.well), instrumentType)
+    : null;
+  if (plate?.requiresConfirmation) warnings.push("板规格由部分孔位推断，请在计算前确认 96/384 孔。");
   if (sources.some((source) => source.adapterId.endsWith("melt-grouping"))) {
     assumptions.push("导入的 Roche melt 文件是分组摘要；完整曲线需另行导出原始温度-荧光数据。");
   }

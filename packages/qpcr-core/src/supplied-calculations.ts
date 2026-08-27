@@ -40,6 +40,14 @@ export const SUPPLIED_COMPLETE_HEADERS = [
 
 export type SuppliedCompleteRow = Record<(typeof SUPPLIED_COMPLETE_HEADERS)[number], string | number | null>;
 
+export const SUPPLIED_TRACEABILITY_HEADERS = [
+  "analysis_start", "value_provenance", "verification_status", "plate", "plate_format", "well",
+  "sample", "target", "assay_type", "replicate", "supplied_value", "cycle_type", "tm1", "tm2",
+  "source_sheet", "source_row",
+] as const;
+
+export type SuppliedTraceabilityRow = Record<(typeof SUPPLIED_TRACEABILITY_HEADERS)[number], string | number | null>;
+
 export interface SuppliedVisualizationBarRow {
   category: string;
   value: number;
@@ -180,6 +188,29 @@ export function buildSuppliedCompleteRows(
     relative_expression_technical_sem: row.relativeExpressionSem,
     calibrator: row.calibratorValue,
     warnings: row.warningCodes.join("; "),
+  }));
+}
+
+export function buildSuppliedTraceabilityRows(
+  records: SuppliedCalculationRecord[],
+): SuppliedTraceabilityRow[] {
+  return records.map((record) => ({
+    analysis_start: record.analysisStart ?? null,
+    value_provenance: "user-supplied",
+    verification_status: record.verificationStatus,
+    plate: record.plateName ?? null,
+    plate_format: record.plateFormat ?? null,
+    well: record.well ?? null,
+    sample: record.sampleName,
+    target: record.targetName,
+    assay_type: record.assayType || null,
+    replicate: record.replicate,
+    supplied_value: record.value,
+    cycle_type: record.cycleType || null,
+    tm1: record.tm1 ?? null,
+    tm2: record.tm2 ?? null,
+    source_sheet: record.sourceSheet ?? null,
+    source_row: record.sourceRowNumber ?? null,
   }));
 }
 

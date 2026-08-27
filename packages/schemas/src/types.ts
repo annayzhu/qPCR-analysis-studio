@@ -193,8 +193,14 @@ export interface SuppliedCalculationRecord {
   value: number;
   analysisStart?: Exclude<AnalysisStart, "cq">;
   plateId?: string;
+  plateName?: string;
   well?: string;
   cycleType?: string;
+  plateFormat?: 96 | 384;
+  assayType?: string;
+  tm1?: number | null;
+  tm2?: number | null;
+  verificationStatus: "unverified" | "user-confirmed";
   sourceSheet?: string;
   sourceRowNumber?: number;
   rawRow?: RawImportedRow;
@@ -205,7 +211,7 @@ export interface CanonicalDataset {
   createdAt: string;
   sources: ImportedSource[];
   analysisStart: AnalysisStart;
-  plate: PlateDefinition;
+  plate: PlateDefinition | null;
   wells: WellRecord[];
   suppliedCalculations: SuppliedCalculationRecord[];
   mappings: FieldMapping[];

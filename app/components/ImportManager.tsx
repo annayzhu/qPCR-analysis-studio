@@ -5,7 +5,7 @@ import type { AnalysisStart, CanonicalField, ImportedSource } from "@/packages/s
 import {
   CANONICAL_FIELD_LABELS,
   getSourceCapabilities,
-  validateQpcrInputTemplate,
+  validateAnalysisStartSource,
   writeQpcrInputTemplate,
   type ImportReadiness,
   type ImportSourceRole,
@@ -132,7 +132,7 @@ function SourceCard({
   const { language, l } = useLanguage();
   const table = source.tables.find((item) => item.id === source.selectedTableId) ?? source.tables[0];
   const capabilities = getSourceCapabilities(source);
-  const templateValidation = validateQpcrInputTemplate(source);
+  const templateValidation = validateAnalysisStartSource(source);
   const sourceRole = roleLabel(capabilities.role, l);
   return (
     <article className="source-row">
@@ -223,6 +223,7 @@ export default function ImportManager({
   onContinue,
 }: ImportManagerProps) {
   const { language, l } = useLanguage();
+  const calculationOnly = analysisStart !== "cq";
   const resultSources = sources.filter((source) => getSourceCapabilities(source).role !== "plate-layout");
   const layoutSources = sources.filter((source) => getSourceCapabilities(source).role === "plate-layout");
 
@@ -231,7 +232,7 @@ export default function ImportManager({
     const url = URL.createObjectURL(new Blob([bytes], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }));
     const anchor = document.createElement("a");
     anchor.href = url;
-    anchor.download = "qpcr-analysis-input-template-v2.0.0.xlsx";
+    anchor.download = "qpcr-analysis-input-template-v2.1.0.xlsx";
     anchor.click();
     URL.revokeObjectURL(url);
   }
@@ -293,7 +294,9 @@ export default function ImportManager({
             <div className="stage-number">01</div>
             <div className="stage-copy">
               <div className="stage-title-line"><h3>{l("仪器结果", "Instrument results")}</h3><span className="stage-kicker">{l("必需", "Required")}</span></div>
-              <p>{l("可连续添加 Cq/Ct/Cp、Tm 或熔解分组文件；任一分析类型具备板信息后即可进入对应结果页。", "Add multiple Cq/Ct/Cp, Tm, or melt-group files. Each analysis becomes available when its data include plate information.")}</p>
+              <p>{calculationOnly
+                ? l("导入包含 Sample、Assay、Replicate 及所选 Δ 值的表格；无需板布局。", "Import a table containing Sample, Assay, Replicate, and the selected delta value; no plate layout is required.")
+                : l("可连续添加 Cq/Ct/Cp、Tm 或熔解分组文件；具备板信息后即可进入对应结果页。", "Add multiple Cq/Ct/Cp, Tm, or melt-group files. Analysis becomes available when plate information is present.")}</p>
             </div>
             <div className="stage-header-actions">
               <button className="quiet-button bordered template-download-button" type="button" onClick={downloadInputTemplate}>↓ {l("下载数据导入模板", "Download input template")}</button>
@@ -314,19 +317,19 @@ export default function ImportManager({
           </div>
         </article>
 
-        <article className={`import-stage ${readiness.layoutRequired ? "required-stage" : "optional-stage"}`}>
+        <article className={`import-stage ${calculationOnly ? "not-applicable-stage" : readiness.layoutRequired ? "required-stage" : "optional-stage"}`}>
           <div className="stage-header">
             <div className="stage-number">02</div>
             <div className="stage-copy">
-              <div className="stage-title-line"><h3>{l("板布局", "Plate layout")}</h3><span className="stage-kicker">{readiness.layoutRequired ? l("当前需要", "Required now") : l("按需", "If needed")}</span></div>
-              <p>{readiness.resultIncludesPlateLayout ? l("结果已带 Sample/Target，可跳过；如需纠正错位，仍可追加修正版。", "Sample/Target information is already present. Skip this step or add a corrected layout to fix offsets.") : l("结果缺少完整样本和基因信息时，导入修正后的布局表。", "Import the corrected layout when result files lack complete sample and target information.")}</p>
+              <div className="stage-title-line"><h3>{l("板布局", "Plate layout")}</h3><span className="stage-kicker">{calculationOnly ? l("不适用", "Not applicable") : readiness.layoutRequired ? l("当前需要", "Required now") : l("按需", "If needed")}</span></div>
+              <p>{calculationOnly ? l("当前从用户提供的 ΔCq/ΔΔCq 开始，不导入或推断物理孔板。", "This analysis starts from user-supplied Delta Cq/Delta-delta Cq; no physical plate is imported or inferred.") : readiness.resultIncludesPlateLayout ? l("结果已带 Sample/Target，可跳过；如需纠正错位，仍可追加修正版。", "Sample/Target information is already present. Skip this step or add a corrected layout to fix offsets.") : l("结果缺少完整样本和基因信息时，导入修正后的布局表。", "Import the corrected layout when result files lack complete sample and target information.")}</p>
             </div>
-            <button className="secondary-button" type="button" disabled={loading} onClick={onPickLayout}>+ {l("添加布局", "Add layout")}</button>
+            <button className="secondary-button" type="button" disabled={loading || calculationOnly} onClick={onPickLayout}>+ {l("添加布局", "Add layout")}</button>
           </div>
           <div className="stage-files">
-            <FileDropzone kind="layout" loading={loading} onPick={onPickLayout} onFiles={onImportFiles} />
+            {!calculationOnly && <FileDropzone kind="layout" loading={loading} onPick={onPickLayout} onFiles={onImportFiles} />}
             {layoutSources.length === 0 ? (
-              <div className="stage-empty">{readiness.resultIncludesPlateLayout ? l("无需单独导入", "No separate layout required") : l("尚未添加板布局", "No plate layout added")}</div>
+              <div className="stage-empty">{calculationOnly ? l("计算结果分析无需板布局", "No plate layout for calculation-only analysis") : readiness.resultIncludesPlateLayout ? l("无需单独导入", "No separate layout required") : l("尚未添加板布局", "No plate layout added")}</div>
             ) : layoutSources.map((source) => (
               <SourceCard
                 key={source.id}

@@ -33,7 +33,7 @@ assert.equal(sources[2].tables[0].rawRows.length, 384);
 const layoutTable = sources[3].tables.find((table) => table.id === sources[3].selectedTableId);
 assert.equal(layoutTable?.sourceSheet, "Well_Detail");
 const dataset = buildCanonicalDataset(sources);
-assert.equal(dataset.plate.plateFormat, 384);
+assert.equal(dataset.plate?.plateFormat, 384);
 assert.equal(dataset.wells.length, 384);
 assert.equal(dataset.wells.filter((well) => well.sampleName || well.targetName).length, 240);
 assert.equal(dataset.wells.filter((well) => well.tm2 !== null).length, 7);
@@ -82,7 +82,7 @@ for (const values of referenceDeltaGroups.values()) {
 console.log(JSON.stringify({
   adapters: sources.slice(0, 3).map((source) => source.adapterId),
   selectedLayoutSheet: layoutTable?.sourceSheet,
-  plateFormat: dataset.plate.plateFormat,
+  plateFormat: dataset.plate?.plateFormat,
   wells: dataset.wells.length,
   definedReactions: dataset.wells.filter((well) => well.sampleName || well.targetName).length,
   secondaryTmPeaks: dataset.wells.filter((well) => well.tm2 !== null).length,

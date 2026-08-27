@@ -71,6 +71,7 @@ const ENGLISH_RUNTIME_MESSAGES: Record<string, string> = {
   "Tm/熔解结果与板布局已就绪，可进入熔解分析；相对定量仍需 Cq/Ct/Cp。": "Tm/melt results and the plate layout are ready. Melt analysis is available; relative quantification still requires Cq/Ct/Cp data.",
   "结果文件已包含板布局信息，无需另传布局；相对定量已就绪。": "The result file already contains the plate layout. Relative quantification is ready.",
   "仪器结果与板布局均已就绪；相对定量已自动计算。": "Instrument results and the plate layout are ready. Relative quantification has been calculated.",
+  "当前分析从用户提供的 ΔCq/ΔΔCq 开始，无需板布局；计算结果已就绪。": "This analysis starts from user-supplied Delta Cq/Delta-delta Cq. No plate layout is required; calculation results are ready.",
   "该文件是熔解分组摘要，不是温度-荧光原始曲线。": "This file is a melt-group summary, not a raw temperature-fluorescence curve.",
   "板规格由部分孔位推断，请在计算前确认 96/384 孔。": "The plate format was inferred from a subset of wells. Confirm 96/384 wells before calculation.",
   "导入的 Roche melt 文件是分组摘要；完整曲线需另行导出原始温度-荧光数据。": "The imported Roche melt file is a grouping summary. Export raw temperature-fluorescence data separately for complete curves.",

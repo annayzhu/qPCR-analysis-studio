@@ -7,6 +7,7 @@ import {
   buildQpcrInputTemplateWorkbook,
   parseWorkbookBytes,
   QPCR_INPUT_TEMPLATE_HEADERS,
+  validateAnalysisStartSource,
   validateQpcrInputTemplate,
 } from "./index";
 import {
@@ -45,7 +46,28 @@ describe("qPCR user input template", () => {
     expect(QPCR_INPUT_TEMPLATE_HEADERS).toEqual(expect.arrayContaining([
       "Cycle Type", "Delta Cq", "Delta Delta Cq",
     ]));
-    expect(workbook.Sheets["Field Dictionary"].B2?.v).toBe("2.0.0");
+    expect(workbook.Sheets["Field Dictionary"].B2?.v).toBe("2.1.0");
+  });
+
+  it("documents required fields separately for every analysis start", () => {
+    const workbook = buildQpcrInputTemplateWorkbook();
+    const settings = XLSX.utils.sheet_to_json<Array<string | number>>(
+      workbook.Sheets["Analysis Settings"],
+      { header: 1 },
+    );
+    const dictionary = XLSX.utils.sheet_to_json<Record<string, string>>(
+      workbook.Sheets["Field Dictionary"],
+      { range: 6 },
+    );
+
+    expect(settings).toEqual(expect.arrayContaining([
+      ["Cq/Ct/Cp required / 必填", "Well, Sample, Assay, Assay Type, Replicate, Cq/Ct/Cp"],
+      ["Delta Cq required / 必填", "Sample, Assay, Replicate, Delta Cq"],
+      ["Delta Delta Cq required / 必填", "Sample, Assay, Replicate, Delta Delta Cq"],
+    ]));
+    expect(dictionary.find((row) => row.Field === "Well")?.Requirement).toBe("Required for Cq start; optional for Delta starts");
+    expect(dictionary.find((row) => row.Field === "Assay Type")?.Requirement).toBe("Required for Cq start; optional for Delta starts");
+    expect(dictionary.find((row) => row.Field === "Sample")?.Requirement).toBe("Required for all starts");
   });
 
   it("validates a template from the selected Delta Cq start without requiring Cq values", () => {
@@ -85,6 +107,80 @@ describe("qPCR user input template", () => {
     });
   });
 
+  it("does not block a Delta start when optional Well synonyms conflict", () => {
+    const workbook = buildQpcrInputTemplateWorkbook();
+    workbook.Sheets["Analysis Settings"].B1.v = "Delta Cq";
+    workbook.Sheets.Data = XLSX.utils.aoa_to_sheet([
+      ["Well", "Position", "Sample", "Assay", "Replicate", "Delta Cq"],
+      ["A1", "A1", "Control", "GENE", 1, 3.0],
+      ["A2", "A2", "Control", "GENE", 2, 3.2],
+    ]);
+    const bytes = XLSX.write(workbook, { bookType: "xlsx", type: "array" }) as ArrayBuffer;
+    const source = parseWorkbookBytes(bytes, "delta-cq-optional-well-conflict.xlsx");
+
+    expect(getSourceCapabilities(source).blockingConflicts).toEqual([]);
+    expect(validateQpcrInputTemplate(source)).toMatchObject({ errorCount: 0 });
+    expect(assessImportReadiness([source])).toMatchObject({ status: "ready", canAnalyze: true, layoutRequired: false });
+  });
+
+  it("does not silently use Cq when a generic source is switched to a Delta start", () => {
+    const source = parseDelimitedText(
+      "Well\tSample\tAssay\tReplicate\tCq\nA1\tControl\tGENE\t1\t23.0\n",
+      "cq-only.tsv",
+    );
+    source.metadata.qpcrAnalysisStart = "delta-cq";
+
+    expect(getSourceCapabilities(source).role).not.toBe("primary-result");
+    expect(assessImportReadiness([source])).toMatchObject({ canAnalyze: false, status: "waiting-results" });
+  });
+
+  it("blocks a generic Delta source with missing required columns or row values", () => {
+    const missingColumns = parseDelimitedText(
+      "Delta Cq\n3.0\n",
+      "delta-missing-columns.tsv",
+    );
+    missingColumns.metadata.qpcrAnalysisStart = "delta-cq";
+    const blankValue = parseDelimitedText(
+      "Sample\tAssay\tReplicate\tDelta Cq\nControl\tGENE\t1\t\n",
+      "delta-blank-value.tsv",
+    );
+    blankValue.metadata.qpcrAnalysisStart = "delta-cq";
+
+    expect(validateAnalysisStartSource(missingColumns)?.issues).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: "missing-column", column: "Sample" }),
+      expect.objectContaining({ code: "missing-column", column: "Assay" }),
+      expect.objectContaining({ code: "missing-column", column: "Replicate" }),
+    ]));
+    expect(validateAnalysisStartSource(blankValue)?.issues).toContainEqual(expect.objectContaining({
+      code: "missing-value",
+      sourceSheet: "Sheet1",
+      sourceRowNumber: 2,
+      column: "Delta Cq",
+    }));
+    expect(assessImportReadiness([missingColumns])).toMatchObject({ canAnalyze: false, status: "review-mapping" });
+    expect(assessImportReadiness([blankValue])).toMatchObject({ canAnalyze: false, status: "review-mapping" });
+  });
+
+  it("does not validate an independent layout source as a Delta result after switching starts", () => {
+    const result = parseDelimitedText(
+      "Sample\tAssay\tReplicate\tDelta Cq\nControl\tGENE\t1\t3.0\n",
+      "delta-result.tsv",
+    );
+    const layout = parseDelimitedText(
+      "Well\tSample\tAssay\tAssay Type\nA1\tControl\tGENE\tTarget\n",
+      "old-layout.tsv",
+    );
+    result.metadata.qpcrAnalysisStart = "delta-cq";
+    layout.metadata.qpcrAnalysisStart = "delta-cq";
+
+    expect(validateAnalysisStartSource(layout)).toBeNull();
+    expect(assessImportReadiness([result, layout])).toMatchObject({
+      canAnalyze: true,
+      status: "ready",
+      layoutRequired: false,
+    });
+  });
+
   it("blocks an unsupported analysis start instead of silently falling back to Cq", () => {
     const workbook = buildQpcrInputTemplateWorkbook();
     workbook.Sheets["Analysis Settings"].B1.v = "Start wherever data exists";
@@ -108,7 +204,7 @@ describe("qPCR user input template", () => {
     const headers = XLSX.utils.sheet_to_json<unknown[]>(workbook.Sheets.Data, { header: 1 })[0];
     expect(headers).toEqual(QPCR_INPUT_TEMPLATE_HEADERS);
     expect(workbook.Sheets["Field Dictionary"].A2?.v).toContain("Template Schema Version");
-    expect(workbook.Sheets["Field Dictionary"].B2?.v).toBe("2.0.0");
+    expect(workbook.Sheets["Field Dictionary"].B2?.v).toBe("2.1.0");
   });
 
   it("blocks malformed rows with row-specific template diagnostics", () => {
@@ -177,15 +273,15 @@ describe("Roche LightCycler 480 adapter", () => {
     expect(dataset.wells[0].cq).toBe(22.5);
     expect(dataset.wells[1].cq).toBeNull();
     expect(dataset.wells[1].cqStatus).toBe("not-detected");
-    expect(dataset.plate.plateFormat).toBe(96);
-    expect(dataset.plate.requiresConfirmation).toBe(true);
+    expect(dataset.plate!.plateFormat).toBe(96);
+    expect(dataset.plate!.requiresConfirmation).toBe(true);
   });
 
   it("detects complete 384-well boundaries", () => {
     const source = parseDelimitedText("Well\tSample\tTarget\tCq\nA1\tS1\tG1\t20\nP24\tS2\tG1\t21\n", "plate.tsv");
     const dataset = buildCanonicalDataset([source]);
-    expect(dataset.plate.plateFormat).toBe(384);
-    expect(dataset.plate.requiresConfirmation).toBe(false);
+    expect(dataset.plate!.plateFormat).toBe(384);
+    expect(dataset.plate!.requiresConfirmation).toBe(false);
   });
 
   it("keeps the same well position separate when a Plate column is present", () => {

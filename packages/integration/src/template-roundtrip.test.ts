@@ -9,6 +9,8 @@ import {
   validateQpcrInputTemplate,
 } from "../../importers/src";
 import {
+  buildSuppliedCompleteRows,
+  buildSuppliedTraceabilityRows,
   buildCompleteResultRows,
   buildCalculationExportBundle,
   buildCalculationWorkbookBytes,
@@ -18,6 +20,7 @@ import {
   COMPLETE_RESULTS_HEADERS,
   VISUALIZATION_BAR_HEADERS,
 } from "../../qpcr-core/src";
+import { createAnalysisSession, projectAnalysisSession } from "../../analysis-session/src";
 
 function filledTemplateBytes(): ArrayBuffer {
   const workbook = buildQpcrInputTemplateWorkbook();
@@ -37,6 +40,104 @@ function filledTemplateBytes(): ArrayBuffer {
 }
 
 describe("downloadable template to complete-results export", () => {
+  it("runs a Delta Cq template without plate context through the calculation-only seam", () => {
+    const workbook = buildQpcrInputTemplateWorkbook();
+    workbook.Sheets["Analysis Settings"].B1.v = "Delta Cq";
+    workbook.Sheets.Data = XLSX.utils.aoa_to_sheet([
+      ["Sample", "Assay", "Replicate", "Delta Cq"],
+      ["Control", "GENE", 1, 3.0],
+      ["Control", "GENE", 2, 3.2],
+    ]);
+    const bytes = XLSX.write(workbook, { bookType: "xlsx", type: "array" }) as ArrayBuffer;
+    const source = parseWorkbookBytes(bytes, "delta-cq-calculation-only.xlsx");
+
+    expect(validateQpcrInputTemplate(source)).toMatchObject({ errorCount: 0 });
+    expect(assessImportReadiness([source])).toMatchObject({
+      status: "ready",
+      canAnalyze: true,
+      layoutRequired: false,
+      resultIncludesPlateLayout: false,
+    });
+
+    const dataset = buildCanonicalDataset([source]);
+    expect(dataset.plate).toBeNull();
+    expect(dataset.wells).toEqual([]);
+    expect(dataset.suppliedCalculations).toHaveLength(2);
+    expect(dataset.suppliedCalculations.every((row) => row.plateId === undefined && row.well === undefined)).toBe(true);
+
+    const state = createAnalysisSession(dataset, "quantification", {
+      referenceTargets: [], calibratorType: "sample", calibratorValue: "",
+      replicateWarningThreshold: 0.5, tmWarningThreshold: 0.5,
+      efficiencyByTarget: {}, calculationMode: "delta-cq",
+    });
+    const projected = projectAnalysisSession(state);
+    expect(projected.alignmentReviewPending).toBe(false);
+    expect(projected.suppliedResults[0]).toMatchObject({
+      sampleName: "Control",
+      targetName: "GENE",
+      deltaCq: 3.1,
+      normalizedQuantity: 0.11662912394210093,
+    });
+    expect(buildSuppliedCompleteRows(projected.suppliedResults, ["Control"], ["GENE"])[0]).toMatchObject({
+      analysis_start: "delta-cq",
+      value_provenance: "user-supplied",
+      sample: "Control",
+      target: "GENE",
+    });
+  });
+
+  it("keeps optional plate provenance traceable without creating a plate for Delta Delta Cq", () => {
+    const workbook = buildQpcrInputTemplateWorkbook();
+    workbook.Sheets["Analysis Settings"].B1.v = "Delta Delta Cq";
+    workbook.Sheets.Data = XLSX.utils.aoa_to_sheet([
+      ["Plate", "Plate Format", "Well", "Sample", "Assay", "Assay Type", "Replicate", "Delta Delta Cq", "Tm1", "Tm2"],
+      ["Source Plate", 96, "A1", "Treat", "GENE", "Target", 1, -1.0, 84.2, 86.1],
+      ["Source Plate", 96, "A2", "Treat", "GENE", "Target", 2, -0.8, 84.3, ""],
+    ]);
+    const bytes = XLSX.write(workbook, { bookType: "xlsx", type: "array" }) as ArrayBuffer;
+    const source = parseWorkbookBytes(bytes, "delta-delta-cq-with-provenance.xlsx");
+
+    expect(validateQpcrInputTemplate(source)).toMatchObject({ errorCount: 0 });
+    expect(assessImportReadiness([source])).toMatchObject({
+      status: "ready",
+      layoutRequired: false,
+      resultIncludesPlateLayout: false,
+    });
+    const dataset = buildCanonicalDataset([source]);
+    expect(dataset.plate).toBeNull();
+    expect(dataset.wells).toEqual([]);
+
+    const state = createAnalysisSession(dataset, "quantification", {
+      referenceTargets: [], calibratorType: "sample", calibratorValue: "",
+      replicateWarningThreshold: 0.5, tmWarningThreshold: 0.5,
+      efficiencyByTarget: {}, calculationMode: "delta-delta-cq",
+    });
+    const [result] = projectAnalysisSession(state).suppliedResults;
+    expect(result.deltaDeltaCq).toBeCloseTo(-0.9);
+    expect(result.relativeExpression).toBeCloseTo(1.8660659830736148);
+
+    expect(buildSuppliedTraceabilityRows(dataset.suppliedCalculations)).toEqual([
+      expect.objectContaining({
+        analysis_start: "delta-delta-cq",
+        value_provenance: "user-supplied",
+        plate: "Source Plate",
+        well: "A1",
+        plate_format: 96,
+        assay_type: "Target",
+        tm1: 84.2,
+        tm2: 86.1,
+        verification_status: "unverified",
+        sample: "Treat",
+        target: "GENE",
+        replicate: 1,
+        supplied_value: -1,
+        source_sheet: "Data",
+        source_row: 2,
+      }),
+      expect.objectContaining({ well: "A2", replicate: 2, supplied_value: -0.8 }),
+    ]);
+  });
+
   it("keeps version 1.0 workbooks on the Cq start", () => {
     const workbook = XLSX.utils.book_new();
     const oldHeaders = ["Plate", "Plate Format", "Well", "Sample", "Assay", "Assay Type", "Replicate", "Cq/Ct/Cp", "Tm1", "Tm2"];
@@ -86,7 +187,7 @@ describe("downloadable template to complete-results export", () => {
   it("round-trips the template through the canonical calculation workflow", () => {
     const source = parseWorkbookBytes(filledTemplateBytes(), "qpcr-input-template.xlsx");
     const validation = validateQpcrInputTemplate(source);
-    expect(source.metadata.qpcrTemplateSchemaVersion).toBe("2.0.0");
+    expect(source.metadata.qpcrTemplateSchemaVersion).toBe("2.1.0");
     expect(source.tables.find((table) => table.id === source.selectedTableId)?.sourceSheet).toBe("Data");
     expect(validation).toMatchObject({ totalRows: 8, detectedCount: 8, nonDetectedCount: 0, errorCount: 0 });
 

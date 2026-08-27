@@ -2,13 +2,15 @@
 
 import { useMemo, useRef, useState } from "react";
 import XLSX from "xlsx-js-style";
-import type { AnalysisStart } from "@/packages/schemas/src";
+import type { AnalysisStart, SuppliedCalculationRecord } from "@/packages/schemas/src";
 import {
   buildLogRatioAxis,
   buildSuppliedCompleteRows,
+  buildSuppliedTraceabilityRows,
   buildSuppliedVisualizationBarRows,
   mapRatioToY,
   SUPPLIED_COMPLETE_HEADERS,
+  SUPPLIED_TRACEABILITY_HEADERS,
   type SuppliedCalculationResult,
   VISUALIZATION_BAR_HEADERS,
 } from "@/packages/qpcr-core/src";
@@ -89,8 +91,9 @@ function SuppliedChart({ rows, target, sampleOrder, showSd }: {
   </div>;
 }
 
-export default function SuppliedResultExplorer({ results, analysisStart, sampleOrder, targetOrder }: {
+export default function SuppliedResultExplorer({ results, records, analysisStart, sampleOrder, targetOrder }: {
   results: SuppliedCalculationResult[];
+  records: SuppliedCalculationRecord[];
   analysisStart: Exclude<AnalysisStart, "cq">;
   sampleOrder: string[];
   targetOrder: string[];
@@ -99,6 +102,7 @@ export default function SuppliedResultExplorer({ results, analysisStart, sampleO
   const [showSd, setShowSd] = useState(false);
   const filtered = useMemo(() => results.filter((row) => sampleOrder.includes(row.sampleName) && targetOrder.includes(row.targetName)), [results, sampleOrder, targetOrder]);
   const completeRows = useMemo(() => buildSuppliedCompleteRows(results, sampleOrder, targetOrder), [results, sampleOrder, targetOrder]);
+  const traceabilityRows = useMemo(() => buildSuppliedTraceabilityRows(records), [records]);
   const barRows = useMemo(() => buildSuppliedVisualizationBarRows(results, sampleOrder, targetOrder), [results, sampleOrder, targetOrder]);
   const chartTargets = targetOrder.filter((target) => filtered.some((row) => row.targetName === target));
   const exportTable = (headers: readonly string[], rows: Array<Record<string, string | number | null>>, fileName: string) => {
@@ -114,13 +118,24 @@ export default function SuppliedResultExplorer({ results, analysisStart, sampleO
     const lines = [headers.join("\t"), ...rows.map((row) => headers.map((header) => clean(row[header])).join("\t"))];
     downloadBlob(new Blob(["\uFEFF", lines.join("\r\n")], { type: "text/tab-separated-values;charset=utf-8" }), fileName);
   };
+  const exportCompleteWorkbook = () => {
+    const workbook = XLSX.utils.book_new();
+    const resultSheet = XLSX.utils.json_to_sheet(completeRows, { header: [...SUPPLIED_COMPLETE_HEADERS] });
+    resultSheet["!autofilter"] = { ref: resultSheet["!ref"] ?? "A1:A1" };
+    const traceabilitySheet = XLSX.utils.json_to_sheet(traceabilityRows, { header: [...SUPPLIED_TRACEABILITY_HEADERS] });
+    traceabilitySheet["!autofilter"] = { ref: traceabilitySheet["!ref"] ?? "A1:A1" };
+    XLSX.utils.book_append_sheet(workbook, resultSheet, "Complete Results");
+    XLSX.utils.book_append_sheet(workbook, traceabilitySheet, "Supplied Values");
+    const bytes = XLSX.write(workbook, { bookType: "xlsx", type: "array", cellStyles: true });
+    downloadBlob(new Blob([bytes], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }), "qpcr-supplied-calculation-results.xlsx");
+  };
   const barRecords = barRows as unknown as Array<Record<string, string | number | null>>;
   return <div className="result-explorer supplied-result-explorer">
     <div className="supplied-provenance-notice"><b>{analysisStart === "delta-cq" ? l("从用户提供的 ΔCq 开始", "Starting from user-supplied ΔCq") : l("从用户提供的 ΔΔCq 开始", "Starting from user-supplied ΔΔCq")}</b><span>{l("系统不会重建上游 Cq 或孔级扩增 QC；所有输出均标注计算起点与数值来源。", "Upstream Cq and well-level amplification QC are not reconstructed; every output identifies its start and provenance.")}</span></div>
     <section className="result-commandbar"><div className="result-commandbar-summary"><div><h3>{l("结果预览", "Result preview")}</h3><p>{l(`${filtered.length} 条用户计算结果`, `${filtered.length} user-supplied result(s)`)}</p></div></div>
       <div className="result-commandbar-grid supplied-commandbar-grid">
         <div className="result-command-group"><span className="command-group-label">{l("显示", "Display")}</span><button type="button" className={showSd ? "filter-chip active" : "filter-chip"} onClick={() => setShowSd((value) => !value)}>{l("技术复孔 SD", "Technical-replicate SD")}</button></div>
-        <div className="result-command-group result-export-group"><span className="command-group-label">{l("完整计算结果", "Complete results")}</span><div className="visualization-export-actions"><button type="button" onClick={() => exportTable(SUPPLIED_COMPLETE_HEADERS, completeRows, "qpcr-supplied-calculation-results.xlsx")}>Excel</button><button type="button" onClick={() => exportTsv(SUPPLIED_COMPLETE_HEADERS, completeRows, "qpcr-supplied-calculation-results.tsv")}>TSV</button></div></div>
+        <div className="result-command-group result-export-group"><span className="command-group-label">{l("完整计算结果", "Complete results")}</span><div className="visualization-export-actions"><button type="button" onClick={exportCompleteWorkbook}>Excel</button><button type="button" onClick={() => exportTsv(SUPPLIED_COMPLETE_HEADERS, completeRows, "qpcr-supplied-calculation-results.tsv")}>TSV</button></div><small className="export-format-hint">{l("Excel 含 Supplied Values 原始行溯源表", "Excel includes a Supplied Values traceability sheet")}</small></div>
         <div className="result-command-group result-export-group visualization-studio-export-group"><span className="command-group-label">Visualization Studio · {l("柱状图格式", "Bar-chart format")}</span><div className="visualization-export-actions"><button type="button" onClick={() => exportTable(VISUALIZATION_BAR_HEADERS, barRecords, "qpcr-visualization-bar.xlsx")}>{l("柱状图 Excel", "Bar Excel")}</button><button type="button" onClick={() => exportTsv(VISUALIZATION_BAR_HEADERS, barRecords, "qpcr-visualization-bar.tsv")}>{l("柱状图 TSV", "Bar TSV")}</button></div><small className="export-format-hint">category · value · sd · sem · group</small></div>
       </div>
     </section>
