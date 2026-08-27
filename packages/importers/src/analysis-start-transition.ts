@@ -8,6 +8,20 @@ export interface AnalysisStartImportState<TSession> {
   error: string;
 }
 
+export interface AnalysisStartImportChoice {
+  selectedStart: AnalysisStart;
+  selectedByUser: boolean;
+  declaredStart?: AnalysisStart;
+}
+
+export function resolveAnalysisStartForImport({
+  selectedStart,
+  selectedByUser,
+  declaredStart,
+}: AnalysisStartImportChoice): AnalysisStart {
+  return selectedByUser ? selectedStart : declaredStart ?? selectedStart;
+}
+
 export function transitionAnalysisStart<TSession>(
   current: AnalysisStartImportState<TSession>,
   next: AnalysisStart,

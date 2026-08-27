@@ -318,7 +318,10 @@ export default function ResultExplorer({ results, wells, sampleOrder, targetOrde
     [provenanceWarnings, results, sampleOrder, settings, targetOrder, wells],
   );
   const completeRows = calculationExport.completeRows;
-  const visualizationStudioUrl = process.env.NEXT_PUBLIC_VISUALIZATION_STUDIO_URL?.trim() || "http://localhost:3400/?plot=bar";
+  const visualizationStudioUrl = (typeof process === "undefined"
+    ? ""
+    : process.env.NEXT_PUBLIC_VISUALIZATION_STUDIO_URL?.trim())
+    || "http://127.0.0.1:3400/visualization-studio/?plot=bar";
 
   function exportCompleteExcel() {
     const bytes = buildCalculationWorkbookBytes(calculationExport);
