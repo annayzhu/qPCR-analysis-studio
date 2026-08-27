@@ -429,18 +429,16 @@ export default function QpcrAnalysisStudio() {
       : built.suppliedCalculations.map((row) => row.targetName)).filter(Boolean))].sort();
     const probableReference = builtTargets.find((target) => /^(?:gapdh|actb|18s|rplp0|b2m|hprt1)$/i.test(target))
       ?? builtTargets.find((target) => /gapdh|actb|18s|rplp0|b2m|hprt/i.test(target));
-    const importedCalibrator = built.suppliedCalculationProvenance?.calibratorValue ?? "";
-    const usableImportedCalibrator = builtSamples.includes(importedCalibrator) ? importedCalibrator : "";
     const initialSettings: AnalysisSettings = {
       referenceTargets: built.analysisStart === "cq"
         ? probableReference ? [probableReference] : []
         : built.suppliedCalculationProvenance?.referenceTargets ?? [],
       calibratorType: "sample",
-      calibratorValue: built.analysisStart === "delta-cq" ? usableImportedCalibrator : "",
+      calibratorValue: "",
       replicateWarningThreshold: 0.5,
       tmWarningThreshold: 0.5,
       efficiencyByTarget: {},
-      calculationMode: built.analysisStart === "delta-delta-cq" || usableImportedCalibrator ? "delta-delta-cq" : "delta-cq",
+      calculationMode: built.analysisStart === "delta-delta-cq" ? "delta-delta-cq" : "delta-cq",
     };
     const nextSession = createAnalysisSession(built, nextReadiness.analysisMode, initialSettings);
     const nextView = projectAnalysisSession(nextSession);

@@ -120,6 +120,27 @@ describe("downloadable template to complete-results export", () => {
     expect(dataset.warnings.join("\n")).not.toMatch(/内参基因集合|内参处理方法|校准样本/);
   });
 
+  it("blocks supplied-calculation workbooks with conflicting source provenance", () => {
+    const makeSource = (referenceTarget: string, calibrator: string, suffix: string) => {
+      const workbook = buildQpcrInputTemplateWorkbook();
+      workbook.Sheets["Analysis Settings"].B1.v = "Delta Cq";
+      workbook.Sheets["Analysis Settings"].B2.v = referenceTarget;
+      workbook.Sheets["Analysis Settings"].B3.v = "Arithmetic mean";
+      workbook.Sheets["Analysis Settings"].B4.v = calibrator;
+      workbook.Sheets.Data = XLSX.utils.aoa_to_sheet([
+        ["Sample", "Assay", "Replicate", "Delta Cq"],
+        [`Sample ${suffix}`, "GENE", 1, 2.5],
+      ]);
+      const bytes = XLSX.write(workbook, { bookType: "xlsx", type: "array" }) as ArrayBuffer;
+      return parseWorkbookBytes(bytes, `delta-${suffix}.xlsx`);
+    };
+
+    expect(() => buildCanonicalDataset([
+      makeSource("GAPDH", "Control A", "A"),
+      makeSource("ACTB", "Control B", "B"),
+    ])).toThrow(/不能合并分析/);
+  });
+
   it("runs a Delta Cq template without plate context through the calculation-only seam", () => {
     const workbook = buildQpcrInputTemplateWorkbook();
     workbook.Sheets["Analysis Settings"].B1.v = "Delta Cq";

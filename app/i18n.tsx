@@ -73,6 +73,7 @@ const ENGLISH_RUNTIME_MESSAGES: Record<string, string> = {
   "仪器结果与板布局均已就绪；相对定量已自动计算。": "Instrument results and the plate layout are ready. Relative quantification has been calculated.",
   "当前分析从用户提供的 ΔCq/ΔΔCq 开始，无需板布局；计算结果已就绪。": "This analysis starts from user-supplied Delta Cq/Delta-delta Cq. No plate layout is required; calculation results are ready.",
   "用户计算结果未提供内参基因；数值仍可分析，但计算依据不完整。": "Reference Target(s) were not provided for the user-supplied calculations. Values remain analyzable, but the calculation basis is incomplete.",
+  "多个用户计算结果文件声明了不同的内参基因、内参处理方法或来源校准样本，不能合并分析。请统一计算依据后重新导入。": "The supplied-calculation files declare conflicting reference targets, reference methods, or source calibrators and cannot be combined. Harmonize the calculation basis and import them again.",
   "多个来源文件提供了不同的内参基因集合；当前保留第一个集合，请复核来源文件。": "Source files provide conflicting Reference Target sets. The first set is retained; review the source files.",
   "多个来源文件提供了不同的内参处理方法；当前保留第一个方法，请复核来源文件。": "Source files provide conflicting reference methods. The first method is retained; review the source files.",
   "多个来源文件提供了不同的校准样本；当前保留第一个校准样本，请复核来源文件。": "Source files provide conflicting calibrators. The first calibrator is retained; review the source files.",

@@ -200,9 +200,9 @@ export function buildCanonicalDataset(inputSources: ImportedSource[]): Canonical
   if (analysisStart !== "cq" && !referenceTargets.length) {
     warnings.push("用户计算结果未提供内参基因；数值仍可分析，但计算依据不完整。");
   }
-  if (referenceTargetSignatures.size > 1) warnings.push("多个来源文件提供了不同的内参基因集合；当前保留第一个集合，请复核来源文件。");
-  if (referenceMethods.length > 1) warnings.push("多个来源文件提供了不同的内参处理方法；当前保留第一个方法，请复核来源文件。");
-  if (calibratorValues.length > 1) warnings.push("多个来源文件提供了不同的校准样本；当前保留第一个校准样本，请复核来源文件。");
+  if (referenceTargetSignatures.size > 1 || referenceMethods.length > 1 || calibratorValues.length > 1) {
+    throw new Error("多个用户计算结果文件声明了不同的内参基因、内参处理方法或来源校准样本，不能合并分析。请统一计算依据后重新导入。");
+  }
 
   for (const source of sources) {
     const table = selectedTable(source);
