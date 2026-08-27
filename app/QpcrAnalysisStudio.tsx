@@ -3,6 +3,7 @@
 import { useMemo, useRef, useState } from "react";
 import type {
   AnalysisSettings,
+  AnalysisStart,
   AlignmentDispositionLog,
   CanonicalField,
   EditLog,
@@ -29,6 +30,7 @@ import type { AnalysisSessionCommand, AnalysisSessionState } from "@/packages/an
 import ImportManager from "./components/ImportManager";
 import MeltAnalysis from "./components/MeltAnalysis";
 import ResultExplorer from "./components/ResultExplorer";
+import SuppliedResultExplorer from "./components/SuppliedResultExplorer";
 import { localizeRuntimeMessage, useLanguage } from "./i18n";
 
 type WorkspaceView = "overview" | "plate" | "results";
@@ -213,6 +215,7 @@ export default function QpcrAnalysisStudio() {
   const layoutInput = useRef<HTMLInputElement>(null);
   const [sources, setSources] = useState<ImportedSource[]>([]);
   const [analysisSession, setAnalysisSession] = useState<AnalysisSessionState | null>(null);
+  const [analysisStart, setAnalysisStart] = useState<AnalysisStart>("cq");
   const [selected, setSelected] = useState<string[]>([]);
   const [selectionAnchor, setSelectionAnchor] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
@@ -288,8 +291,14 @@ export default function QpcrAnalysisStudio() {
     () => new Set(sessionView?.unresolvedAlignmentIssues.map((issue) => issue.wellId) ?? []),
     [sessionView?.unresolvedAlignmentIssues],
   );
-  const qc = appliedQcState.replicateQc;
-  const draftQc = draftQcState.replicateQc;
+  const qc = useMemo(
+    () => dataset?.analysisStart === "cq" ? appliedQcState.replicateQc : [],
+    [appliedQcState.replicateQc, dataset?.analysisStart],
+  );
+  const draftQc = useMemo(
+    () => dataset?.analysisStart === "cq" ? draftQcState.replicateQc : [],
+    [dataset?.analysisStart, draftQcState.replicateQc],
+  );
   const targets = useMemo(
     () => [...new Set(appliedWells.map((well) => well.targetName).filter(Boolean))].sort(),
     [appliedWells],
@@ -299,6 +308,7 @@ export default function QpcrAnalysisStudio() {
     [appliedWells],
   );
   const relativeResults = sessionView?.relativeResults ?? [];
+  const suppliedResults = sessionView?.suppliedResults ?? [];
   const resultExportWarnings = useMemo(() => [...new Set([
     ...(dataset?.warnings ?? []),
     ...sources.flatMap((source) => source.warnings),
@@ -406,7 +416,7 @@ export default function QpcrAnalysisStudio() {
     const probableReference = builtTargets.find((target) => /^(?:gapdh|actb|18s|rplp0|b2m|hprt1)$/i.test(target))
       ?? builtTargets.find((target) => /gapdh|actb|18s|rplp0|b2m|hprt/i.test(target));
     const initialSettings: AnalysisSettings = {
-      referenceTargets: probableReference ? [probableReference] : [],
+      referenceTargets: built.analysisStart === "cq" && probableReference ? [probableReference] : [],
       calibratorType: "sample",
       calibratorValue: "",
       replicateWarningThreshold: 0.5,
@@ -428,7 +438,7 @@ export default function QpcrAnalysisStudio() {
     setView(nextView.alignmentReviewPending ? "plate" : "overview");
     const hasCq = built.wells.some((well) => well.cq !== null);
     const hasMelt = built.wells.some((well) => well.tm1 !== null || well.tm2 !== null || Boolean(well.meltGroup));
-    setResultSection(hasCq || !hasMelt ? "quantification" : "melt");
+    setResultSection(built.analysisStart !== "cq" || hasCq || !hasMelt ? "quantification" : "melt");
     setDisplaySamples([...new Set(built.wells.map((well) => well.sampleName).filter(Boolean))].sort());
     setDisplayTargets([...new Set(built.wells.map((well) => well.targetName).filter(Boolean))].sort());
   }
@@ -444,7 +454,22 @@ export default function QpcrAnalysisStudio() {
     setError("");
     try {
       const parsed = await Promise.all([...files].map(parseBrowserFile));
-      const nextSources = [...sources, ...parsed];
+      const declaredStart = parsed
+        .map((source) => source.metadata.qpcrAnalysisStart)
+        .find((value): value is AnalysisStart => value === "cq" || value === "delta-cq" || value === "delta-delta-cq");
+      const effectiveStart = declaredStart ?? analysisStart;
+      const nextSources = [...sources, ...parsed].map((source) => ({
+        ...source,
+        metadata: {
+          ...source.metadata,
+          qpcrAnalysisStart: source.metadata.qpcrAnalysisStart === "invalid"
+            ? "invalid"
+            : effectiveStart,
+        },
+      }));
+      if (!parsed.some((source) => source.metadata.qpcrAnalysisStart === "invalid")) {
+        setAnalysisStart(effectiveStart);
+      }
       setSources(nextSources);
       const nextReadiness = assessImportReadiness(nextSources);
       if (nextReadiness.canAnalyze) buildAndApply(nextSources);
@@ -485,6 +510,17 @@ export default function QpcrAnalysisStudio() {
     setNeedsRebuild(true);
   }
 
+  function changeAnalysisStart(next: AnalysisStart) {
+    setAnalysisStart(next);
+    setSources((current) => current.map((source) => ({
+      ...source,
+      metadata: { ...source.metadata, qpcrAnalysisStart: next },
+    })));
+    setAnalysisSession(null);
+    setNeedsRebuild(sources.length > 0);
+    setError("");
+  }
+
   function removeSource(sourceId: string) {
     const nextSources = sources.filter((source) => source.id !== sourceId);
     setSources(nextSources);
@@ -500,6 +536,7 @@ export default function QpcrAnalysisStudio() {
 
   function clearProject() {
     setSources([]);
+    setAnalysisStart("cq");
     setAnalysisSession(null);
     setSelected([]);
     setSelectionAnchor(null);
@@ -819,6 +856,7 @@ export default function QpcrAnalysisStudio() {
   }
 
   function switchWorkspaceView(nextView: WorkspaceView) {
+    if (dataset?.analysisStart !== "cq" && nextView === "plate") return;
     if (analysisLocked && nextView !== "plate") return;
     setView(nextView);
   }
@@ -832,7 +870,11 @@ export default function QpcrAnalysisStudio() {
   const detectedCount = appliedWells.filter((well) => well.cqStatus === "detected" && !well.userExcluded).length;
   const meltWellCount = appliedWells.filter((well) => well.tm1 !== null || well.tm2 !== null || Boolean(well.meltGroup) || well.meltScore !== null || well.meltResolution !== null).length;
   const secondaryPeakCount = appliedWells.filter((well) => well.tm2 !== null && !well.userExcluded).length;
-  const hasQuantification = appliedWells.some((well) => well.cq !== null || well.cqStatus === "not-detected");
+  const hasQuantification = dataset?.analysisStart !== "cq"
+    ? suppliedResults.length > 0
+    : appliedWells.some((well) => well.cq !== null || well.cqStatus === "not-detected");
+  const hasRawQuantification = dataset?.analysisStart === "cq"
+    && appliedWells.some((well) => well.cq !== null || well.cqStatus === "not-detected");
   const hasMeltAnalysis = meltWellCount > 0;
   const namedReactionCount = draftWells.filter((well) => well.sampleName || well.targetName).length;
   const activeNamedReactionCount = activePlateWells.filter((well) => well.sampleName || well.targetName).length;
@@ -862,7 +904,9 @@ export default function QpcrAnalysisStudio() {
     const issue = alignmentIssueById.get(well.id);
     return issue ? [{ well, issue, reviewed: Boolean(alignmentDispositions[well.id]) }] : [];
   });
-  const selectedDisplayTargets = displayTargets.filter((target) => !referenceTargets.includes(target));
+  const selectedDisplayTargets = dataset?.analysisStart === "cq"
+    ? displayTargets.filter((target) => !referenceTargets.includes(target))
+    : displayTargets;
   const viewLabels: Record<WorkspaceView, [string, string]> = {
     overview: [l("概览与 QC", "Overview & QC"), "Overview + QC"],
     plate: [l("板工作区", "Plate workspace"), "Plate"],
@@ -908,12 +952,14 @@ export default function QpcrAnalysisStudio() {
             alignmentReviewRequired={alignmentReviewPending}
             resultWithoutAnnotationCount={draftAlignment?.resultWithoutAnnotation.length ?? 0}
             annotationWithoutResultCount={draftAlignment?.annotationWithoutResult.length ?? 0}
+            analysisStart={analysisStart}
             onPickResults={() => resultInput.current?.click()}
             onPickLayout={() => layoutInput.current?.click()}
             onImportFiles={importFiles}
             onRemoveSource={removeSource}
             onUpdateSelectedTable={updateSelectedTable}
             onUpdateMapping={updateMapping}
+            onAnalysisStartChange={changeAnalysisStart}
             onRebuild={rebuildCurrentSources}
             onContinue={() => { setDataManagerOpen(false); setView(alignmentReviewPending ? "plate" : "overview"); }}
           />
@@ -925,8 +971,8 @@ export default function QpcrAnalysisStudio() {
               <p className="eyebrow">ACTIVE ANALYSIS</p>
               <h1>{l(`${dataset.plate.plateFormat} 孔 qPCR 分析`, `${dataset.plate.plateFormat}-well qPCR analysis`)}</h1>
               <p>{l(
-                `${sources.length} 个来源文件 · ${samples.length} 个样本 · ${targets.length} 个靶标${hasQuantification ? ` · ${detectedCount} 个有效 Cq` : ""}${hasMeltAnalysis ? ` · ${meltWellCount} 个熔解记录` : ""}`,
-                `${sources.length} source file(s) · ${samples.length} sample(s) · ${targets.length} target(s)${hasQuantification ? ` · ${detectedCount} valid Cq` : ""}${hasMeltAnalysis ? ` · ${meltWellCount} melt record(s)` : ""}`,
+                `${sources.length} 个来源文件 · ${samples.length} 个样本 · ${targets.length} 个靶标${hasRawQuantification ? ` · ${detectedCount} 个有效 Cq` : dataset.analysisStart !== "cq" ? ` · ${suppliedResults.length} 个用户计算结果` : ""}${hasMeltAnalysis ? ` · ${meltWellCount} 个熔解记录` : ""}`,
+                `${sources.length} source file(s) · ${samples.length} sample(s) · ${targets.length} target(s)${hasRawQuantification ? ` · ${detectedCount} valid Cq` : dataset.analysisStart !== "cq" ? ` · ${suppliedResults.length} user-supplied result(s)` : ""}${hasMeltAnalysis ? ` · ${meltWellCount} melt record(s)` : ""}`,
               )}</p>
             </div>
             <div className={analysisLocked ? "analysis-state pending" : "analysis-state"}><span />{alignmentReviewPending ? l("板布局待复核，结果已锁定", "Plate layout review required; results locked") : pendingCount > 0 ? l(`${pendingCount} 项修改待重算`, `${pendingCount} change(s) awaiting recalculation`) : l("概览、板布局与结果已同步", "Overview, plate, and results synchronized")}</div>
@@ -940,8 +986,8 @@ export default function QpcrAnalysisStudio() {
                 key={value}
                 type="button"
                 className={view === value ? "active" : ""}
-                disabled={analysisLocked && value !== "plate"}
-                title={analysisLocked && value !== "plate" ? l("请先复核板布局、应用修改并重算", "Review the plate layout, apply changes, and recalculate first") : undefined}
+                disabled={(analysisLocked && value !== "plate") || (dataset.analysisStart !== "cq" && value === "plate")}
+                title={dataset.analysisStart !== "cq" && value === "plate" ? l("从 ΔCq/ΔΔCq 开始时不提供孔级扩增 QC 与板修改", "Well-level amplification QC and plate editing are unavailable for Delta-start analyses") : analysisLocked && value !== "plate" ? l("请先复核板布局、应用修改并重算", "Review the plate layout, apply changes, and recalculate first") : undefined}
                 onClick={() => switchWorkspaceView(value)}
               >
                 <span>{label}</span><small>{english}</small>
@@ -960,6 +1006,7 @@ export default function QpcrAnalysisStudio() {
                   )}</p></div>
                   <button className="quiet-button bordered" type="button" onClick={() => setDataManagerOpen(true)}>{l("管理导入文件", "Manage imported files")}</button>
                 </div>
+                {dataset.analysisStart !== "cq" && <div className="notice supplied-qc-boundary"><strong>{l("当前分析从用户提供的计算值开始", "This analysis starts from user-supplied calculations")}</strong><span>{l("系统只对导入的 ΔCq/ΔΔCq 复孔值计算均值、SD、SEM和下游转换；不显示或推断原始孔级扩增 QC。", "The system summarizes supplied ΔCq/ΔΔCq replicates and downstream transforms only; original well-level amplification QC is neither shown nor inferred.")}</span></div>}
                 <div className="overview-qc-grid">
                   <article className="qc-workbench">
                     <div className="card-heading compact-card-heading">
@@ -973,9 +1020,9 @@ export default function QpcrAnalysisStudio() {
                     </div>
                     <div className="table-wrap compact-qc-table">
                       <table>
-                        <thead><tr><th>{l("样本", "Sample")}</th><th>{l("靶标", "Target")}</th><th>{l("孔位", "Wells")}</th>{hasQuantification && <><th>{l("有效 Cq/总数", "Valid/total Cq")}</th><th>Mean Cq</th><th>SD</th><th>Cq range</th><th>{l("线性量 CV%", "Linear quantity CV%")}</th></>}{hasMeltAnalysis && <><th>Mean Tm1</th><th>Tm1 range</th><th>{l("第二峰", "Second peak")}</th><th>{l("熔解分组", "Melt groups")}</th></>}<th>{l("判定", "Status")}</th></tr></thead>
+                        <thead><tr><th>{l("样本", "Sample")}</th><th>{l("靶标", "Target")}</th><th>{l("孔位", "Wells")}</th>{hasRawQuantification && <><th>{l("有效 Cq/总数", "Valid/total Cq")}</th><th>Mean Cq</th><th>SD</th><th>Cq range</th><th>{l("线性量 CV%", "Linear quantity CV%")}</th></>}{hasMeltAnalysis && <><th>Mean Tm1</th><th>Tm1 range</th><th>{l("第二峰", "Second peak")}</th><th>{l("熔解分组", "Melt groups")}</th></>}<th>{l("判定", "Status")}</th></tr></thead>
                         <tbody>{filteredQc.map((row) => <tr key={row.id} className={row.warningCodes.length ? "flagged-row" : ""}>
-                          <td><b>{row.sampleName}</b></td><td>{row.targetName}</td><td>{row.wells.join(", ")}</td>{hasQuantification && <><td>{row.validReplicates}/{row.totalReplicates}</td><td>{formatNumber(row.meanCq, 3)}</td><td>{formatNumber(row.sdCq, 3)}</td><td>{formatNumber(row.cqRange, 3)}</td><td>{formatNumber(row.linearQuantityCvPercent, 1)}</td></>}{hasMeltAnalysis && <><td>{formatNumber(row.meanTm1, 2)}</td><td>{formatNumber(row.tm1Range, 2)}</td><td>{row.secondaryPeakCount || "—"}</td><td>{row.meltGroups.join(", ") || "—"}</td></>}<td>{row.warningCodes.length ? <span className="status warning-status">{l("复核", "Review")} {row.suspectWell ? `· ${row.suspectWell}` : ""}</span> : <span className="status pass-status">{l("通过", "Pass")}</span>}</td>
+                          <td><b>{row.sampleName}</b></td><td>{row.targetName}</td><td>{row.wells.join(", ")}</td>{hasRawQuantification && <><td>{row.validReplicates}/{row.totalReplicates}</td><td>{formatNumber(row.meanCq, 3)}</td><td>{formatNumber(row.sdCq, 3)}</td><td>{formatNumber(row.cqRange, 3)}</td><td>{formatNumber(row.linearQuantityCvPercent, 1)}</td></>}{hasMeltAnalysis && <><td>{formatNumber(row.meanTm1, 2)}</td><td>{formatNumber(row.tm1Range, 2)}</td><td>{row.secondaryPeakCount || "—"}</td><td>{row.meltGroups.join(", ") || "—"}</td></>}<td>{row.warningCodes.length ? <span className="status warning-status">{l("复核", "Review")} {row.suspectWell ? `· ${row.suspectWell}` : ""}</span> : <span className="status pass-status">{l("通过", "Pass")}</span>}</td>
                         </tr>)}</tbody>
                       </table>
                     </div>
@@ -1173,7 +1220,7 @@ export default function QpcrAnalysisStudio() {
                     <button type="button" disabled={!hasMeltAnalysis} className={resultSection === "melt" ? "active" : ""} onClick={() => setResultSection("melt")}>{l("Tm 与熔解", "Tm & melt")}</button>
                   </div>
                 </div>
-                {resultSection === "quantification" && hasQuantification && <>
+                {resultSection === "quantification" && hasQuantification && <>{dataset.analysisStart === "cq" ? <>
                   <div className="result-settings-grid">
                     <section className="result-setting-step reference-step">
                       <div className="setting-step-heading"><span>1</span><div><h3>{l("选择内参基因", "Select reference targets")}</h3><p>{l("归一化", "Normalization")}</p></div><small>{l("可多选", "Multiple")}</small></div>
@@ -1207,7 +1254,21 @@ export default function QpcrAnalysisStudio() {
                     </section>
                   </div>
                   {!referenceTargets.length ? <div className="empty-table">{l("请先在第 1 区选择至少一个内参基因。", "Select at least one reference target in section 1.")}</div> : <ResultExplorer results={relativeResults} wells={appliedWells} sampleOrder={displaySamples} targetOrder={selectedDisplayTargets} settings={sessionView!.settings} provenanceWarnings={resultExportWarnings} />}
-                </>}
+                </> : <>
+                  <div className={`result-settings-grid supplied-result-settings ${dataset.analysisStart === "delta-delta-cq" ? "single-setting" : ""}`}>
+                    <section className="result-setting-step display-step">
+                      <div className="setting-step-heading"><span>1</span><div><h3>{l("选择展示的基因和样本", "Choose displayed targets & samples")}</h3><p>{l("点选顺序即图表顺序", "Selection order defines chart order")}</p></div><button className="clear-selection-button" type="button" onClick={() => { setDisplayTargets([]); setDisplaySamples([]); }} disabled={!displayTargets.length && !displaySamples.length}>{l("清空", "Clear")}</button></div>
+                      <div className="display-choice-group"><div className="display-choice-label"><span>{l("基因", "Targets")}</span><small>{selectedDisplayTargets.length} {l("已选", "selected")}</small></div><div className="ordered-choice-row">{targets.map((target) => { const selectionIndex = selectedDisplayTargets.indexOf(target); return <button type="button" key={target} aria-pressed={selectionIndex >= 0} className={selectionIndex >= 0 ? "ordered-choice active" : "ordered-choice"} onClick={() => toggleOrderedSelection(target, displayTargets, setDisplayTargets)}><span>{target}</span>{selectionIndex >= 0 && <i>{selectionIndex + 1}</i>}</button>; })}</div></div>
+                      <div className="display-choice-group sample-display-group"><div className="display-choice-label"><span>{l("样本", "Samples")}</span><small>{l(`${displaySamples.length} 已选 · 编号即图中从左到右顺序`, `${displaySamples.length} selected · numbers define left-to-right order`)}</small></div><div className="ordered-choice-row">{samples.map((sample) => { const selectionIndex = displaySamples.indexOf(sample); return <button type="button" key={sample} aria-pressed={selectionIndex >= 0} className={selectionIndex >= 0 ? "ordered-choice active" : "ordered-choice"} onClick={() => toggleOrderedSelection(sample, displaySamples, setDisplaySamples)}><span>{sample}</span>{selectionIndex >= 0 && <i>{selectionIndex + 1}</i>}</button>; })}</div></div>
+                    </section>
+                    {dataset.analysisStart === "delta-cq" && <section className="result-setting-step calibrator-step">
+                      <div className="setting-step-heading"><span>2</span><div><h3>{l("选择校准样本", "Select calibrator sample")}</h3><p>{l("可继续计算 ΔΔCq", "Continue to ΔΔCq")}</p></div></div>
+                      <label className="compact-field">{l("校准样本", "Calibrator")}<select value={calibrator} onChange={(event) => setCalibrator(event.target.value)}><option value="">{l("不设置，仅展示 ΔCq", "None - show ΔCq only")}</option>{samples.map((sample) => <option key={sample} value={sample}>{sample}</option>)}</select></label>
+                      <p>{l("ΔCq 已由用户提供；校准样本仅用于后续 ΔΔCq 与相对表达量。", "ΔCq is user supplied; the calibrator is used only for downstream ΔΔCq and relative expression.")}</p>
+                    </section>}
+                  </div>
+                  <SuppliedResultExplorer results={suppliedResults} analysisStart={dataset.analysisStart} sampleOrder={displaySamples} targetOrder={selectedDisplayTargets} />
+                </>}</>}
                 {resultSection === "quantification" && !hasQuantification && <div className="empty-table">{l("当前仅导入了 Tm/熔解结果；添加单孔 Cq/Ct/Cp 后可进行相对定量。", "Only Tm/melt results are currently imported. Add well-level Cq/Ct/Cp data for relative quantification.")}</div>}
                 {resultSection === "melt" && hasMeltAnalysis && <MeltAnalysis wells={appliedWells} />}
                 {resultSection === "melt" && !hasMeltAnalysis && <div className="empty-table">{l("当前没有 Tm 或熔解分组数据；可返回数据文件追加对应结果。", "No Tm or melt-group data are available. Return to Data files to add the corresponding result.")}</div>}

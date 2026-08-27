@@ -13,6 +13,11 @@ import {
   COMPLETE_RESULTS_HEADERS,
 } from "./complete-results-export";
 import { physicalWellIdOf } from "../../schemas/src";
+import {
+  buildSuppliedCompleteRows,
+  buildSuppliedVisualizationBarRows,
+  calculateFromSuppliedCalculations,
+} from "./supplied-calculations";
 
 const raw: RawImportedRow = {
   sourceId: "s", sourceFileName: "demo.tsv", sourceSheet: "Sheet1", sourceRowNumber: 2,
@@ -33,6 +38,93 @@ function well(id: string, position: string, sample: string, target: string, cq: 
 function wellOnPlate(plateId: string, id: string, position: string, sample: string, target: string, cq: number | null): WellRecord {
   return { ...well(id, position, sample, target, cq), plateId };
 }
+
+describe("user-supplied calculation starts", () => {
+  it("summarizes replicate Delta Cq values and propagates their technical error", () => {
+    const [result] = calculateFromSuppliedCalculations([
+      { sampleName: "Control", targetName: "GENE", replicate: 1, value: 3.0 },
+      { sampleName: "Control", targetName: "GENE", replicate: 2, value: 3.2 },
+    ], { analysisStart: "delta-cq", calibratorValue: "" });
+
+    expect(result).toMatchObject({
+      sampleName: "Control",
+      targetName: "GENE",
+      analysisStart: "delta-cq",
+      valueProvenance: "user-supplied",
+      validReplicates: 2,
+      deltaCq: 3.1,
+      deltaDeltaCq: null,
+      relativeExpression: null,
+    });
+    expect(result.deltaCqSd).toBeCloseTo(0.1414213562);
+    expect(result.deltaCqSem).toBeCloseTo(0.1);
+    expect(result.normalizedQuantity).toBeCloseTo(0.1166291239);
+    expect(result.normalizedQuantitySd).toBeCloseTo(0.0114333105);
+    expect(result.normalizedQuantitySem).toBeCloseTo(0.0080835989);
+  });
+
+  it("starts from replicate Delta Delta Cq values without a reference or calibrator", () => {
+    const [result] = calculateFromSuppliedCalculations([
+      { sampleName: "Treat", targetName: "GENE", replicate: 1, value: 0.0 },
+      { sampleName: "Treat", targetName: "GENE", replicate: 2, value: 0.2 },
+    ], { analysisStart: "delta-delta-cq", calibratorValue: "" });
+
+    expect(result).toMatchObject({
+      analysisStart: "delta-delta-cq",
+      valueProvenance: "user-supplied",
+      validReplicates: 2,
+      deltaCq: null,
+      normalizedQuantity: null,
+      deltaDeltaCq: 0.1,
+      calibratorValue: "",
+    });
+    expect(result.deltaDeltaCqSd).toBeCloseTo(0.1414213562);
+    expect(result.deltaDeltaCqSem).toBeCloseTo(0.1);
+    expect(result.relativeExpression).toBeCloseTo(0.9330329915);
+    expect(result.relativeExpressionSd).toBeCloseTo(0.0914658972);
+    expect(result.relativeExpressionSem).toBeCloseTo(0.0646727074);
+  });
+
+  it("continues from Delta Cq through a calibrator while retaining calibrator error", () => {
+    const results = calculateFromSuppliedCalculations([
+      { sampleName: "Control", targetName: "GENE", replicate: 1, value: 3.0 },
+      { sampleName: "Control", targetName: "GENE", replicate: 2, value: 3.2 },
+      { sampleName: "Treat", targetName: "GENE", replicate: 1, value: 2.0 },
+      { sampleName: "Treat", targetName: "GENE", replicate: 2, value: 2.2 },
+    ], { analysisStart: "delta-cq", calibratorValue: "Control" });
+    const control = results.find((row) => row.sampleName === "Control")!;
+    const treat = results.find((row) => row.sampleName === "Treat")!;
+
+    expect(control.deltaDeltaCq).toBeCloseTo(0);
+    expect(control.relativeExpression).toBeCloseTo(1);
+    expect(control.relativeExpressionSd).toBeCloseTo(0.0980258143);
+    expect(treat.deltaDeltaCq).toBeCloseTo(-1);
+    expect(treat.deltaDeltaCqSd).toBeCloseTo(0.2);
+    expect(treat.relativeExpression).toBeCloseTo(2);
+    expect(treat.relativeExpressionSd).toBeCloseTo(0.2772588722);
+  });
+
+  it("exports supplied calculations with explicit provenance and the stable bar contract", () => {
+    const results = calculateFromSuppliedCalculations([
+      { sampleName: "Treat", targetName: "GENE", replicate: 1, value: 0.0 },
+      { sampleName: "Treat", targetName: "GENE", replicate: 2, value: 0.2 },
+    ], { analysisStart: "delta-delta-cq", calibratorValue: "" });
+
+    const [complete] = buildSuppliedCompleteRows(results, ["Treat"], ["GENE"]);
+    expect(complete).toMatchObject({
+      analysis_start: "delta-delta-cq",
+      value_provenance: "user-supplied",
+      sample: "Treat",
+      target: "GENE",
+      valid_replicates: 2,
+      delta_delta_cq: 0.1,
+    });
+    const [bar] = buildSuppliedVisualizationBarRows(results, ["Treat"], ["GENE"]);
+    expect(Object.keys(bar)).toEqual(["category", "value", "sd", "sem", "group"]);
+    expect(bar).toMatchObject({ category: "Treat", group: "GENE" });
+    expect(bar.value).toBeCloseTo(0.9330329915);
+  });
+});
 
 describe("replicate QC", () => {
   it("warns without auto-excluding and leaves singleton SD/CV null", () => {

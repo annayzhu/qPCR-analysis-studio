@@ -4,6 +4,8 @@ export type InstrumentType =
   | "quantstudio-5"
   | "abi-7500";
 
+export type AnalysisStart = "cq" | "delta-cq" | "delta-delta-cq";
+
 export type CanonicalField =
   | "plateName"
   | "well"
@@ -11,8 +13,11 @@ export type CanonicalField =
   | "column"
   | "sampleName"
   | "targetName"
+  | "cycleType"
   | "cq"
   | "cqMean"
+  | "deltaCq"
+  | "deltaDeltaCq"
   | "reporter"
   | "taskType"
   | "replicate"
@@ -181,12 +186,28 @@ export interface AnalysisSettings {
   calculationMode: "delta-cq" | "delta-delta-cq" | "efficiency-corrected";
 }
 
+export interface SuppliedCalculationRecord {
+  sampleName: string;
+  targetName: string;
+  replicate: number | null;
+  value: number;
+  analysisStart?: Exclude<AnalysisStart, "cq">;
+  plateId?: string;
+  well?: string;
+  cycleType?: string;
+  sourceSheet?: string;
+  sourceRowNumber?: number;
+  rawRow?: RawImportedRow;
+}
+
 export interface CanonicalDataset {
   id: string;
   createdAt: string;
   sources: ImportedSource[];
+  analysisStart: AnalysisStart;
   plate: PlateDefinition;
   wells: WellRecord[];
+  suppliedCalculations: SuppliedCalculationRecord[];
   mappings: FieldMapping[];
   warnings: string[];
   assumptions: string[];

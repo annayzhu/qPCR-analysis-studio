@@ -39,6 +39,32 @@ function shiftedDataset() {
 }
 
 describe("analysis session workflow", () => {
+  it("projects supplied Delta Cq results without pretending missing Cq is an alignment issue", () => {
+    const source = parseDelimitedText(
+      "Plate\tWell\tSample\tAssay\tAssay Type\tReplicate\tDelta Cq\nPlate 01\tA1\tControl\tGENE\tTarget\t1\t3.0\nPlate 01\tA2\tControl\tGENE\tTarget\t2\t3.2\n",
+      "delta-cq.tsv",
+    );
+    source.metadata.qpcrAnalysisStart = "delta-cq";
+    const dataset = buildCanonicalDataset([source]);
+    const state = createAnalysisSession(dataset, "quantification", {
+      ...settings,
+      referenceTargets: [],
+      calibratorValue: "",
+      calculationMode: "delta-cq",
+    }, dependencies());
+    const projected = projectAnalysisSession(state);
+
+    expect(projected.alignmentReviewPending).toBe(false);
+    expect(projected.blockingError).toBeNull();
+    expect(projected.relativeResults).toEqual([]);
+    expect(projected.suppliedResults[0]).toMatchObject({
+      sampleName: "Control",
+      targetName: "GENE",
+      analysisStart: "delta-cq",
+      deltaCq: 3.1,
+    });
+  });
+
   it("moves layout annotations without moving physical Cp, then atomically applies and recalculates", () => {
     const deps = dependencies();
     const imported = shiftedDataset();

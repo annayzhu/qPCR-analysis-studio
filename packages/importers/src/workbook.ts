@@ -68,6 +68,14 @@ function metadataFromText(text: string): Record<string, string> {
     : {};
 }
 
+function normalizeAnalysisStart(value: unknown): string {
+  const normalized = String(value ?? "").normalize("NFKC").trim().toLowerCase().replaceAll(/[\s_-]+/g, "");
+  if (["cq/ct/cp", "cqctcp", "cq", "ct", "cp"].includes(normalized)) return "cq";
+  if (["deltacq", "deltact", "deltacp", "δcq", "δct", "δcp"].includes(normalized)) return "delta-cq";
+  if (["deltadeltacq", "deltadeltact", "deltadeltacp", "δδcq", "δδct", "δδcp"].includes(normalized)) return "delta-delta-cq";
+  return "invalid";
+}
+
 export function parseWorkbookBytes(
   bytes: ArrayBuffer,
   fileName: string,
@@ -78,6 +86,11 @@ export function parseWorkbookBytes(
   const dictionaryMatrix = dictionarySheet ? sheetMatrix(dictionarySheet) : [];
   const isQpcrTemplate = String(dictionaryMatrix[0]?.[0] ?? "").includes("qPCR Analysis Studio Input Template");
   const templateVersion = isQpcrTemplate ? String(dictionaryMatrix[1]?.[1] ?? "").trim() : "";
+  const settingsSheet = workbook.Sheets["Analysis Settings"];
+  const settingsMatrix = settingsSheet ? sheetMatrix(settingsSheet) : [];
+  const analysisStart = isQpcrTemplate
+    ? normalizeAnalysisStart(settingsMatrix[0]?.[1] ?? "Cq/Ct/Cp")
+    : "";
   const tables = workbook.SheetNames.map((sheetName) =>
     tableFromMatrix(sourceId, fileName, sheetName, sheetMatrix(workbook.Sheets[sheetName])),
   ).sort((a, b) => b.score - a.score);
@@ -92,7 +105,10 @@ export function parseWorkbookBytes(
     instrumentType: "generic",
     tables,
     selectedTableId,
-    metadata: templateVersion ? { qpcrTemplateSchemaVersion: templateVersion } : {},
+    metadata: templateVersion ? {
+      qpcrTemplateSchemaVersion: templateVersion,
+      qpcrAnalysisStart: analysisStart,
+    } : {},
     warnings: tables.length ? [] : ["工作簿中没有可读取的工作表"],
   });
 }

@@ -3,7 +3,7 @@ import type { CanonicalField, ImportedSource, ImportedTable, RawImportedRow } fr
 import { normalizeWell } from "../../schemas/src";
 import { selectedTable } from "./adapters";
 
-export const QPCR_INPUT_TEMPLATE_SCHEMA_VERSION = "1.0.0";
+export const QPCR_INPUT_TEMPLATE_SCHEMA_VERSION = "2.0.0";
 export const QPCR_INPUT_TEMPLATE_HEADERS = [
   "Plate",
   "Plate Format",
@@ -12,7 +12,10 @@ export const QPCR_INPUT_TEMPLATE_HEADERS = [
   "Assay",
   "Assay Type",
   "Replicate",
+  "Cycle Type",
   "Cq/Ct/Cp",
+  "Delta Cq",
+  "Delta Delta Cq",
   "Tm1",
   "Tm2",
 ] as const;
@@ -22,6 +25,7 @@ const NON_DETECTED = /^(?:undetermined|no\s*ct|no\s*cq|n\/?a|na|nan|failed|无�
 
 export interface TemplateValidationIssue {
   code:
+    | "invalid-analysis-start"
     | "missing-column"
     | "mean-column-not-allowed"
     | "missing-value"
@@ -64,7 +68,7 @@ function headerStyle(required: boolean) {
 function styleDataSheet(sheet: XLSX.WorkSheet, rowCount: number) {
   sheet["!cols"] = [
     { wch: 16 }, { wch: 14 }, { wch: 10 }, { wch: 24 }, { wch: 20 }, { wch: 18 },
-    { wch: 12 }, { wch: 14 }, { wch: 12 }, { wch: 12 },
+    { wch: 12 }, { wch: 14 }, { wch: 14 }, { wch: 14 }, { wch: 18 }, { wch: 12 }, { wch: 12 },
   ];
   sheet["!autofilter"] = { ref: `A1:${XLSX.utils.encode_col(QPCR_INPUT_TEMPLATE_HEADERS.length - 1)}${Math.max(1, rowCount)}` };
   sheet["!freeze"] = { xSplit: 0, ySplit: 1, topLeftCell: "A2", activePane: "bottomLeft", state: "frozen" };
@@ -83,19 +87,30 @@ export function buildQpcrInputTemplateWorkbook(): XLSX.WorkBook {
     Comments: "Generated locally in the browser. Synthetic example data only.",
   };
 
+  const settingsRows = [
+    ["Analysis Start / 分析起点", "Cq/Ct/Cp"],
+    ["Allowed / 可选值", "Cq/Ct/Cp", "Delta Cq", "Delta Delta Cq"],
+    ["Rule / 规则", "Choose one authoritative start for the entire import set / 整个导入数据只能选择一个正式分析起点"],
+  ];
+  const settingsSheet = XLSX.utils.aoa_to_sheet(settingsRows);
+  settingsSheet["!cols"] = [{ wch: 30 }, { wch: 78 }, { wch: 20 }, { wch: 24 }];
+  if (settingsSheet.A1) settingsSheet.A1.s = headerStyle(false);
+  if (settingsSheet.B1) settingsSheet.B1.s = { font: { bold: true, color: { rgb: "315F5B" } } };
+  XLSX.utils.book_append_sheet(workbook, settingsSheet, "Analysis Settings");
+
   const dataSheet = XLSX.utils.aoa_to_sheet([[...QPCR_INPUT_TEMPLATE_HEADERS]]);
   styleDataSheet(dataSheet, 1);
   XLSX.utils.book_append_sheet(workbook, dataSheet, "Data");
 
   const exampleRows: Array<Array<string | number>> = [
     [...QPCR_INPUT_TEMPLATE_HEADERS],
-    ["Plate 01", 96, "A1", "CAL_01", "REF1", "Reference", 1, 20.0, 82.1, ""],
-    ["Plate 01", 96, "A2", "CAL_01", "REF1", "Reference", 2, 20.2, 82.2, ""],
-    ["Plate 01", 96, "A3", "CAL_01", "GENE_A", "Target", 1, 23.0, 84.5, ""],
-    ["Plate 01", 96, "A4", "CAL_01", "GENE_A", "Target", 2, 23.2, 84.4, ""],
-    ["Plate 01", 96, "A5", "SAMPLE_01", "REF1", "Reference", 1, 20.4, 82.1, ""],
-    ["Plate 01", 96, "A6", "SAMPLE_01", "GENE_A", "Target", 1, 22.1, 84.6, ""],
-    ["Plate 01", 96, "A7", "NTC_01", "GENE_A", "NTC", 1, "Undetermined", "", ""],
+    ["Plate 01", 96, "A1", "CAL_01", "REF1", "Reference", 1, "Cq", 20.0, "", "", 82.1, ""],
+    ["Plate 01", 96, "A2", "CAL_01", "REF1", "Reference", 2, "Cq", 20.2, "", "", 82.2, ""],
+    ["Plate 01", 96, "A3", "CAL_01", "GENE_A", "Target", 1, "Cq", 23.0, "", "", 84.5, ""],
+    ["Plate 01", 96, "A4", "CAL_01", "GENE_A", "Target", 2, "Cq", 23.2, "", "", 84.4, ""],
+    ["Plate 01", 96, "A5", "SAMPLE_01", "REF1", "Reference", 1, "Cq", 20.4, "", "", 82.1, ""],
+    ["Plate 01", 96, "A6", "SAMPLE_01", "GENE_A", "Target", 1, "Cq", 22.1, "", "", 84.6, ""],
+    ["Plate 01", 96, "A7", "NTC_01", "GENE_A", "NTC", 1, "Cq", "Undetermined", "", "", "", ""],
   ];
   const exampleSheet = XLSX.utils.aoa_to_sheet(exampleRows);
   styleDataSheet(exampleSheet, exampleRows.length);
@@ -116,7 +131,10 @@ export function buildQpcrInputTemplateWorkbook(): XLSX.WorkBook {
     ["Assay", "Required", "基因或检测项目", "Target gene or assay", "Text", "Target, Gene, 基因, 靶标"],
     ["Assay Type", "Required", "反应角色；保留原值", "Reaction role; original text is preserved", "Target, Reference, NTC, no-RT, Standard, Unknown", "Type, Role, 类型"],
     ["Replicate", "Required", "技术复孔序号", "Positive technical-replicate identifier", "Positive integer", "Rep, Technical Replicate, 复孔序号"],
+    ["Cycle Type", "Optional", "原始扩增定量术语，仅用于溯源", "Original quantification-cycle term; provenance only", "Ct, Cq, or Cp", "Quantification Type, 定量类型"],
     ["Cq/Ct/Cp", "Required", "单孔扩增定量值", "Single-well quantification cycle", "0–60 or Undetermined / 未检出", "Cq, Ct, Cp"],
+    ["Delta Cq", "Conditional", "用户计算的复孔级 ΔCq；选择 Delta Cq 起点时必填", "User-supplied replicate-level delta Cq; required for Delta Cq start", "Numeric", "Delta Ct, Delta Cp, ΔCq, ΔCt, ΔCp"],
+    ["Delta Delta Cq", "Conditional", "用户计算的复孔级 ΔΔCq；选择 Delta Delta Cq 起点时必填", "User-supplied replicate-level delta-delta Cq; required for Delta Delta Cq start", "Numeric", "Delta Delta Ct, ΔΔCq, ΔΔCt"],
     ["Tm1", "Optional", "主熔解峰温度", "Primary melt-peak temperature", "Numeric, °C", "Tm, 主峰Tm"],
     ["Tm2", "Optional", "第二熔解峰温度", "Secondary melt-peak temperature", "Numeric, °C", "Second Tm, 第二峰Tm"],
   ];
@@ -184,10 +202,26 @@ export function validateQpcrInputTemplate(source: ImportedSource): TemplateValid
     "Data 工作表没有数据行。请保留表头并从第 2 行开始填写单孔数据。",
     "The Data sheet has no data rows. Keep the headers and enter single-well records from row 2.",
   ));
+  const analysisStart = source.metadata.qpcrAnalysisStart ?? "cq";
+  const selectedValue: [CanonicalField, string] = analysisStart === "delta-cq"
+    ? ["deltaCq", "Delta Cq"]
+    : analysisStart === "delta-delta-cq"
+      ? ["deltaDeltaCq", "Delta Delta Cq"]
+      : ["cq", "Cq/Ct/Cp"];
   const required: Array<[CanonicalField, string]> = [
     ["well", "Well"], ["sampleName", "Sample"], ["targetName", "Assay"],
-    ["taskType", "Assay Type"], ["replicate", "Replicate"], ["cq", "Cq/Ct/Cp"],
+    ["taskType", "Assay Type"], ["replicate", "Replicate"], selectedValue,
   ];
+  if (analysisStart === "invalid") issues.push({
+    code: "invalid-analysis-start",
+    severity: "error",
+    sourceSheet: "Analysis Settings",
+    sourceRowNumber: 1,
+    column: "Analysis Start",
+    suppliedValue: "",
+    messageZh: "分析起点必须选择 Cq/Ct/Cp、Delta Cq 或 Delta Delta Cq。系统不会自动改用其他起点。",
+    messageEn: "Analysis Start must be Cq/Ct/Cp, Delta Cq, or Delta Delta Cq. The system will not silently switch to another start.",
+  });
   for (const [field, label] of required) {
     if (!mappings[field]) issues.push(issue(
       "missing-column", "error", table, null, label, "",
@@ -215,6 +249,7 @@ export function validateQpcrInputTemplate(source: ImportedSource): TemplateValid
     const assayType = rawText(row, mappings.taskType);
     const replicate = rawText(row, mappings.replicate);
     const cq = rawText(row, mappings.cq);
+    const selectedCycleValue = rawText(row, mappings[selectedValue[0]]);
     if (namedPlateValues.size > 0 && !suppliedPlate) issues.push(issue(
       "missing-plate", "error", table, row, "Plate", suppliedPlate,
       `第 ${row.sourceRowNumber} 行的 Plate 为空；同一工作表已出现具名孔板，多板数据必须逐行填写 Plate。`,
@@ -250,12 +285,20 @@ export function validateQpcrInputTemplate(source: ImportedSource): TemplateValid
       `第 ${row.sourceRowNumber} 行 Replicate 必须是正整数。`,
       `Replicate on row ${row.sourceRowNumber} must be a positive integer.`,
     ));
-    if (cq) {
+    if (analysisStart === "cq" && cq) {
       if (NON_DETECTED.test(cq)) nonDetectedCount += 1;
       else if (!Number.isFinite(Number(cq)) || Number(cq) < 0 || Number(cq) > 60) issues.push(issue(
         "invalid-number", "error", table, row, "Cq/Ct/Cp", cq,
         `第 ${row.sourceRowNumber} 行 Cq/Ct/Cp 必须为 0–60 数值或未检出标记。`,
         `Cq/Ct/Cp on row ${row.sourceRowNumber} must be numeric from 0 to 60 or a non-detected marker.`,
+      ));
+      else detectedCount += 1;
+    }
+    if (analysisStart !== "cq" && selectedCycleValue) {
+      if (!Number.isFinite(Number(selectedCycleValue))) issues.push(issue(
+        "invalid-number", "error", table, row, selectedValue[1], selectedCycleValue,
+        `第 ${row.sourceRowNumber} 行 ${selectedValue[1]} 必须为数值。`,
+        `${selectedValue[1]} on row ${row.sourceRowNumber} must be numeric.`,
       ));
       else detectedCount += 1;
     }
