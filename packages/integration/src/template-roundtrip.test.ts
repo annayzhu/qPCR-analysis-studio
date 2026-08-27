@@ -9,6 +9,8 @@ import {
 } from "../../importers/src";
 import {
   buildCompleteResultRows,
+  buildCalculationExportBundle,
+  buildCalculationWorkbookBytes,
   buildVisualizationBarRows,
   calculateRelativeQuantification,
   COMPLETE_RESULTS_HEADERS,
@@ -67,5 +69,24 @@ describe("downloadable template to complete-results export", () => {
 
     const visualization = buildVisualizationBarRows(results, ["Treat", "Control"], ["GENE"]);
     expect(Object.keys(visualization[0])).toEqual(VISUALIZATION_BAR_HEADERS);
+
+    const settings = {
+      referenceTargets: ["REF"], calibratorType: "sample" as const, calibratorValue: "Control",
+      replicateWarningThreshold: 0.5, tmWarningThreshold: 0.5,
+      efficiencyByTarget: {}, calculationMode: "delta-delta-cq" as const,
+    };
+    const bundle = buildCalculationExportBundle(dataset.wells, results, ["Treat", "Control"], ["GENE"], settings);
+    const workbookBytes = buildCalculationWorkbookBytes(bundle);
+    const workbook = XLSX.read(workbookBytes, { type: "array" });
+    expect(workbook.SheetNames).toEqual([
+      "Complete Results", "Well Calculations", "Plate Summaries", "Calculation Guide", "Data Dictionary",
+    ]);
+    const wellRows = XLSX.utils.sheet_to_json<Record<string, string | number>>(workbook.Sheets["Well Calculations"]);
+    expect(wellRows).toHaveLength(8);
+    expect(wellRows.find((row) => row.well === "A1")).toMatchObject({ cq: 20, assay: "REF" });
+    expect(Number(wellRows.find((row) => row.well === "A1")?.well_delta_cq_cq_minus_reference_center)).toBeCloseTo(-0.1);
+    const dictionaryRows = XLSX.utils.sheet_to_json<Record<string, string>>(workbook.Sheets["Data Dictionary"]);
+    expect(dictionaryRows.find((row) => row.field === "delta_cq_technical_sd")?.["中文定义"]).toContain("平方和开根号");
+    expect(dictionaryRows.find((row) => row.field === "delta_cq_technical_sem")?.["中文定义"]).toContain("SD/√n");
   });
 });

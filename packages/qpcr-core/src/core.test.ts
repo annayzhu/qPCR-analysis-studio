@@ -7,7 +7,11 @@ import { summarizeMeltWells } from "./melt";
 import { restoreWellsToBaseline, setWellExclusion, updateWellFields } from "./audit";
 import { transferLayoutAnnotations } from "./layout-correction";
 import { buildVisualizationBarRows, VISUALIZATION_BAR_HEADERS } from "./visualization-export";
-import { buildCompleteResultRows, COMPLETE_RESULTS_HEADERS } from "./complete-results-export";
+import {
+  buildCalculationExportBundle,
+  buildCompleteResultRows,
+  COMPLETE_RESULTS_HEADERS,
+} from "./complete-results-export";
 import { physicalWellIdOf } from "../../schemas/src";
 
 const raw: RawImportedRow = {
@@ -444,6 +448,67 @@ describe("Visualization Studio bar export", () => {
 });
 
 describe("complete calculation-results export", () => {
+  it("exports every included well with its same-plate reference center and per-well delta Cq", () => {
+    const wells = [
+      { ...well("1", "A1", "S1", "REF", 20), replicate: 1 },
+      { ...well("2", "A2", "S1", "REF", 20.2), replicate: 2 },
+      { ...well("3", "A3", "S1", "GENE", 23), replicate: 1 },
+      { ...well("4", "A4", "S1", "GENE", 23.2), replicate: 2 },
+    ];
+    const settings = {
+      referenceTargets: ["REF"], calibratorType: "sample" as const, calibratorValue: "",
+      replicateWarningThreshold: 0.5, tmWarningThreshold: 0.5,
+      efficiencyByTarget: {}, calculationMode: "delta-cq" as const,
+    };
+    const results = calculateRelativeQuantification(wells, settings);
+    const bundle = buildCalculationExportBundle(wells, results, ["S1"], ["GENE"], settings);
+
+    expect(bundle.wellRows).toHaveLength(4);
+    const referenceWell = bundle.wellRows.find((row) => row.well === "A1");
+    expect(referenceWell).toMatchObject({
+      assay: "REF",
+      included_in_calculation: "yes",
+      reference_center_mean_cq: 20.1,
+    });
+    expect(referenceWell?.well_delta_cq_cq_minus_reference_center).toBeCloseTo(-0.1);
+    const targetWell = bundle.wellRows.find((row) => row.well === "A3");
+    expect(targetWell).toMatchObject({
+      assay: "GENE",
+      reference_center_mean_cq: 20.1,
+      sample_assay_delta_cq: 3,
+    });
+    expect(targetWell?.well_delta_cq_cq_minus_reference_center).toBeCloseTo(2.9);
+    expect(bundle.plateRows.map((row) => row.assay)).toEqual(["REF", "GENE"]);
+  });
+
+  it("defines every exported field and explains propagated SD and SEM explicitly", () => {
+    const wells = [well("1", "A1", "S1", "REF", 20), well("2", "A2", "S1", "GENE", 23)];
+    const settings = {
+      referenceTargets: ["REF"], calibratorType: "sample" as const, calibratorValue: "",
+      replicateWarningThreshold: 0.5, tmWarningThreshold: 0.5,
+      efficiencyByTarget: {}, calculationMode: "delta-cq" as const,
+    };
+    const bundle = buildCalculationExportBundle(
+      wells,
+      calculateRelativeQuantification(wells, settings),
+      ["S1"],
+      ["GENE"],
+      settings,
+    );
+    const exportedFields = new Set([
+      ...Object.keys(bundle.completeRows[0]),
+      ...Object.keys(bundle.plateRows[0]),
+      ...Object.keys(bundle.wellRows[0]),
+    ]);
+    const definedFields = new Set(bundle.dictionary.map((entry) => entry.field));
+    expect([...exportedFields].every((field) => definedFields.has(field))).toBe(true);
+    const propagatedSd = bundle.dictionary.find((entry) => entry.field === "delta_cq_technical_sd");
+    const propagatedSem = bundle.dictionary.find((entry) => entry.field === "delta_cq_technical_sem");
+    expect(propagatedSd?.definitionZh).toContain("平方和开根号");
+    expect(propagatedSem?.definitionZh).toContain("SD/√n");
+    expect(propagatedSd?.cautionZh).toContain("不是生物学重复");
+  });
+
   it("keeps unavailable technical SD/SEM blank when n is one", () => {
     const results = calculateRelativeQuantification([
       well("1", "A1", "S1", "REF", 20),
