@@ -247,6 +247,7 @@ export default function QpcrAnalysisStudio() {
     [analysisSession],
   );
   const dataset = sessionView?.dataset ?? null;
+  const plateDefinition = dataset?.plate ?? null;
   const importedWells = sessionView?.importedWells ?? EMPTY_WELLS;
   const draftWells = sessionView?.draftWells ?? EMPTY_WELLS;
   const appliedWells = sessionView?.appliedWells ?? EMPTY_WELLS;
@@ -300,12 +301,16 @@ export default function QpcrAnalysisStudio() {
     [dataset?.analysisStart, draftQcState.replicateQc],
   );
   const targets = useMemo(
-    () => [...new Set(appliedWells.map((well) => well.targetName).filter(Boolean))].sort(),
-    [appliedWells],
+    () => [...new Set((dataset?.analysisStart === "cq"
+      ? appliedWells.map((well) => well.targetName)
+      : dataset?.suppliedCalculations.map((row) => row.targetName) ?? []).filter(Boolean))].sort(),
+    [appliedWells, dataset?.analysisStart, dataset?.suppliedCalculations],
   );
   const samples = useMemo(
-    () => [...new Set(appliedWells.map((well) => well.sampleName).filter(Boolean))].sort(),
-    [appliedWells],
+    () => [...new Set((dataset?.analysisStart === "cq"
+      ? appliedWells.map((well) => well.sampleName)
+      : dataset?.suppliedCalculations.map((row) => row.sampleName) ?? []).filter(Boolean))].sort(),
+    [appliedWells, dataset?.analysisStart, dataset?.suppliedCalculations],
   );
   const relativeResults = sessionView?.relativeResults ?? [];
   const suppliedResults = sessionView?.suppliedResults ?? [];
@@ -412,7 +417,12 @@ export default function QpcrAnalysisStudio() {
     const built = buildCanonicalDataset(sourceList);
     const nextReadiness = assessImportReadiness(sourceList);
     if (!nextReadiness.analysisMode) return;
-    const builtTargets = [...new Set(built.wells.map((well) => well.targetName).filter(Boolean))];
+    const builtSamples = [...new Set((built.analysisStart === "cq"
+      ? built.wells.map((well) => well.sampleName)
+      : built.suppliedCalculations.map((row) => row.sampleName)).filter(Boolean))].sort();
+    const builtTargets = [...new Set((built.analysisStart === "cq"
+      ? built.wells.map((well) => well.targetName)
+      : built.suppliedCalculations.map((row) => row.targetName)).filter(Boolean))].sort();
     const probableReference = builtTargets.find((target) => /^(?:gapdh|actb|18s|rplp0|b2m|hprt1)$/i.test(target))
       ?? builtTargets.find((target) => /gapdh|actb|18s|rplp0|b2m|hprt/i.test(target));
     const initialSettings: AnalysisSettings = {
@@ -439,8 +449,8 @@ export default function QpcrAnalysisStudio() {
     const hasCq = built.wells.some((well) => well.cq !== null);
     const hasMelt = built.wells.some((well) => well.tm1 !== null || well.tm2 !== null || Boolean(well.meltGroup));
     setResultSection(built.analysisStart !== "cq" || hasCq || !hasMelt ? "quantification" : "melt");
-    setDisplaySamples([...new Set(built.wells.map((well) => well.sampleName).filter(Boolean))].sort());
-    setDisplayTargets([...new Set(built.wells.map((well) => well.targetName).filter(Boolean))].sort());
+    setDisplaySamples(builtSamples);
+    setDisplayTargets(builtTargets);
   }
 
   function resetBuiltAnalysis() {
@@ -856,7 +866,7 @@ export default function QpcrAnalysisStudio() {
   }
 
   function switchWorkspaceView(nextView: WorkspaceView) {
-    if (dataset?.analysisStart !== "cq" && nextView === "plate") return;
+    if (!dataset?.plate && nextView === "plate") return;
     if (analysisLocked && nextView !== "plate") return;
     setView(nextView);
   }
@@ -969,13 +979,17 @@ export default function QpcrAnalysisStudio() {
           <section className="workspace-masthead">
             <div>
               <p className="eyebrow">ACTIVE ANALYSIS</p>
-              <h1>{l(`${dataset.plate.plateFormat} 孔 qPCR 分析`, `${dataset.plate.plateFormat}-well qPCR analysis`)}</h1>
+              <h1>{plateDefinition
+                ? l(`${plateDefinition.plateFormat} 孔 qPCR 分析`, `${plateDefinition.plateFormat}-well qPCR analysis`)
+                : dataset.analysisStart === "delta-cq"
+                  ? l("ΔCq 计算结果分析", "Delta Cq calculation analysis")
+                  : l("ΔΔCq 计算结果分析", "Delta-delta Cq calculation analysis")}</h1>
               <p>{l(
                 `${sources.length} 个来源文件 · ${samples.length} 个样本 · ${targets.length} 个靶标${hasRawQuantification ? ` · ${detectedCount} 个有效 Cq` : dataset.analysisStart !== "cq" ? ` · ${suppliedResults.length} 个用户计算结果` : ""}${hasMeltAnalysis ? ` · ${meltWellCount} 个熔解记录` : ""}`,
                 `${sources.length} source file(s) · ${samples.length} sample(s) · ${targets.length} target(s)${hasRawQuantification ? ` · ${detectedCount} valid Cq` : dataset.analysisStart !== "cq" ? ` · ${suppliedResults.length} user-supplied result(s)` : ""}${hasMeltAnalysis ? ` · ${meltWellCount} melt record(s)` : ""}`,
               )}</p>
             </div>
-            <div className={analysisLocked ? "analysis-state pending" : "analysis-state"}><span />{alignmentReviewPending ? l("板布局待复核，结果已锁定", "Plate layout review required; results locked") : pendingCount > 0 ? l(`${pendingCount} 项修改待重算`, `${pendingCount} change(s) awaiting recalculation`) : l("概览、板布局与结果已同步", "Overview, plate, and results synchronized")}</div>
+            <div className={analysisLocked ? "analysis-state pending" : "analysis-state"}><span />{alignmentReviewPending ? l("板布局待复核，结果已锁定", "Plate layout review required; results locked") : pendingCount > 0 ? l(`${pendingCount} 项修改待重算`, `${pendingCount} change(s) awaiting recalculation`) : plateDefinition ? l("概览、板布局与结果已同步", "Overview, plate, and results synchronized") : l("概览与结果已同步", "Overview and results synchronized")}</div>
           </section>
 
           <nav className="workspace-tabs" aria-label={l("分析工作区", "Analysis workspace")}>
@@ -986,8 +1000,8 @@ export default function QpcrAnalysisStudio() {
                 key={value}
                 type="button"
                 className={view === value ? "active" : ""}
-                disabled={(analysisLocked && value !== "plate") || (dataset.analysisStart !== "cq" && value === "plate")}
-                title={dataset.analysisStart !== "cq" && value === "plate" ? l("从 ΔCq/ΔΔCq 开始时不提供孔级扩增 QC 与板修改", "Well-level amplification QC and plate editing are unavailable for Delta-start analyses") : analysisLocked && value !== "plate" ? l("请先复核板布局、应用修改并重算", "Review the plate layout, apply changes, and recalculate first") : undefined}
+                disabled={(analysisLocked && value !== "plate") || (!plateDefinition && value === "plate")}
+                title={!plateDefinition && value === "plate" ? l("计算结果分析不提供孔级扩增 QC 与板修改", "Calculation-only analyses do not provide well-level amplification QC or plate editing") : analysisLocked && value !== "plate" ? l("请先复核板布局、应用修改并重算", "Review the plate layout, apply changes, and recalculate first") : undefined}
                 onClick={() => switchWorkspaceView(value)}
               >
                 <span>{label}</span><small>{english}</small>
@@ -1000,15 +1014,15 @@ export default function QpcrAnalysisStudio() {
             {view === "overview" && (
               <div className="overview-layout">
                 <div className="section-heading overview-heading">
-                  <div><p className="eyebrow">OVERVIEW + QUALITY CONTROL</p><h2>{l("概览与复孔质控", "Overview & replicate QC")}</h2><p className="section-summary">{l(
-                    `${dataset.plate.plateFormat} 孔板中定义 ${namedReactionCount} 个反应；当前 ${qcIssueCount} 个复孔组需要复核，${qcWellIssueCount} 个孔有孔级提醒${secondaryPeakCount ? `，其中 ${secondaryPeakCount} 个孔检测到第二熔解峰` : ""}。`,
-                    `${namedReactionCount} reactions are defined on the ${dataset.plate.plateFormat}-well plate; ${qcIssueCount} replicate group(s) require review and ${qcWellIssueCount} well(s) have well-level alerts${secondaryPeakCount ? `, including secondary melt peaks in ${secondaryPeakCount} well(s)` : ""}.`,
-                  )}</p></div>
+                  <div><p className="eyebrow">OVERVIEW + QUALITY CONTROL</p><h2>{plateDefinition ? l("概览与复孔质控", "Overview & replicate QC") : l("计算结果概览", "Calculation overview")}</h2><p className="section-summary">{plateDefinition ? l(
+                    `${plateDefinition.plateFormat} 孔板中定义 ${namedReactionCount} 个反应；当前 ${qcIssueCount} 个复孔组需要复核，${qcWellIssueCount} 个孔有孔级提醒${secondaryPeakCount ? `，其中 ${secondaryPeakCount} 个孔检测到第二熔解峰` : ""}。`,
+                    `${namedReactionCount} reactions are defined on the ${plateDefinition.plateFormat}-well plate; ${qcIssueCount} replicate group(s) require review and ${qcWellIssueCount} well(s) have well-level alerts${secondaryPeakCount ? `, including secondary melt peaks in ${secondaryPeakCount} well(s)` : ""}.`,
+                  ) : l(`${samples.length} 个样本 · ${targets.length} 个靶标；没有导入或推断物理孔板。`, `${samples.length} sample(s) · ${targets.length} target(s); no physical plate was imported or inferred.`)}</p></div>
                   <button className="quiet-button bordered" type="button" onClick={() => setDataManagerOpen(true)}>{l("管理导入文件", "Manage imported files")}</button>
                 </div>
                 {dataset.analysisStart !== "cq" && <div className="notice supplied-qc-boundary"><strong>{l("当前分析从用户提供的计算值开始", "This analysis starts from user-supplied calculations")}</strong><span>{l("系统只对导入的 ΔCq/ΔΔCq 复孔值计算均值、SD、SEM和下游转换；不显示或推断原始孔级扩增 QC。", "The system summarizes supplied ΔCq/ΔΔCq replicates and downstream transforms only; original well-level amplification QC is neither shown nor inferred.")}</span></div>}
                 <div className="overview-qc-grid">
-                  <article className="qc-workbench">
+                  {plateDefinition && <article className="qc-workbench">
                     <div className="card-heading compact-card-heading">
                       <div><p className="eyebrow">REPLICATE QC</p><h3>{l("技术复孔", "Technical replicates")}</h3><div className="qc-scope-counts"><span>{l(`复孔组 ${qcIssueCount}`, `${qcIssueCount} replicate group(s)`)}</span><span>{l(`孔级 ${qcWellIssueCount}`, `${qcWellIssueCount} well alert(s)`)}</span></div></div>
                       <details className="inline-rules"><summary>{l("规则：Cq/Tm 极差 > 0.5", "Rule: Cq/Tm range > 0.5")}</summary><p>{l("仅提示，不自动排除；单孔不计算 SD/CV；Tm 偏移需结合曲线和实验设计人工判断。", "Warnings do not automatically exclude wells. SD/CV are not calculated for a single well. Interpret Tm shifts with the curve and experimental design.")}</p></details>
@@ -1026,7 +1040,7 @@ export default function QpcrAnalysisStudio() {
                         </tr>)}</tbody>
                       </table>
                     </div>
-                  </article>
+                  </article>}
 
                   <aside className="overview-side-stack">
                     <article className="provenance-card">
@@ -1050,10 +1064,10 @@ export default function QpcrAnalysisStudio() {
               </div>
             )}
 
-            {view === "plate" && (
+            {view === "plate" && plateDefinition && (
               <div className="plate-workspace">
                 <div className="section-heading plate-heading">
-                  <div><p className="eyebrow">PLATE WORKSPACE</p><h2>{l(`${dataset.plate.plateFormat} 孔板 · ${activeNamedReactionCount} 个已定义反应`, `${dataset.plate.plateFormat}-well plate · ${activeNamedReactionCount} defined reactions`)}</h2>{plateIds.length > 1 && <label className="active-plate-selector">{l("当前板", "Active plate")}<select value={activePlateId || plateIds[0]} onChange={(event) => { setActivePlateId(event.target.value); setTransferDestinationPlateId(event.target.value); setSelected([]); setSelectionAnchor(null); }}>{plateIds.map((plateId) => <option key={plateId} value={plateId}>{plateId}</option>)}</select></label>}</div>
+                  <div><p className="eyebrow">PLATE WORKSPACE</p><h2>{l(`${plateDefinition.plateFormat} 孔板 · ${activeNamedReactionCount} 个已定义反应`, `${plateDefinition.plateFormat}-well plate · ${activeNamedReactionCount} defined reactions`)}</h2>{plateIds.length > 1 && <label className="active-plate-selector">{l("当前板", "Active plate")}<select value={activePlateId || plateIds[0]} onChange={(event) => { setActivePlateId(event.target.value); setTransferDestinationPlateId(event.target.value); setSelected([]); setSelectionAnchor(null); }}>{plateIds.map((plateId) => <option key={plateId} value={plateId}>{plateId}</option>)}</select></label>}</div>
                   <div className="legend"><span><i className="dot selected-dot" />{l("已选", "Selected")}</span><span><i className="dot alignment-warning-dot" />{l("布局对齐提示", "Layout alignment")}</span><span><i className="dot group-warning-dot" />{l("复孔组提示", "Replicate-group warning")}</span><span><i className="dot warning-dot" />{l("孔级提示", "Well-level alert")}</span><span><i className="dot excluded-dot" />{l("已排除", "Excluded")}</span></div>
                 </div>
                 {dataset.warnings.map((warning) => <div className="notice" key={warning}>{localizeRuntimeMessage(warning, language)}</div>)}
@@ -1076,14 +1090,14 @@ export default function QpcrAnalysisStudio() {
                 </div>
                 <div className="plate-and-editor">
                   <div className="plate-scroll" onMouseUp={() => setDragging(false)} onMouseLeave={() => setDragging(false)}>
-                    <div className={`plate-grid plate-${dataset.plate.plateFormat}`} style={{ gridTemplateColumns: `36px repeat(${dataset.plate.columns.length}, minmax(${dataset.plate.plateFormat === 384 ? 44 : 68}px, 1fr))` }}>
+                    <div className={`plate-grid plate-${plateDefinition.plateFormat}`} style={{ gridTemplateColumns: `36px repeat(${plateDefinition.columns.length}, minmax(${plateDefinition.plateFormat === 384 ? 44 : 68}px, 1fr))` }}>
                       <div />
-                      {dataset.plate.columns.map((column) => (
+                      {plateDefinition.columns.map((column) => (
                         <button type="button" className="axis-label column-axis" key={column} onClick={() => setSelected(activePlateWells.filter((well) => well.column === column).map((well) => well.id))}>{column}</button>
                       ))}
-                      {dataset.plate.rows.flatMap((row) => [
+                      {plateDefinition.rows.flatMap((row) => [
                         <button type="button" className="axis-label row-axis" key={`axis-${row}`} onClick={() => setSelected(activePlateWells.filter((well) => well.row === row).map((well) => well.id))}>{row}</button>,
-                        ...dataset.plate.columns.map((column) => {
+                        ...plateDefinition.columns.map((column) => {
                           const wellName = `${row}${column}`;
                           const well = activePlateWells.find((item) => item.well === wellName);
                           const physicalWellId = well ? physicalWellIdOf(well) : null;
@@ -1267,7 +1281,7 @@ export default function QpcrAnalysisStudio() {
                       <p>{l("ΔCq 已由用户提供；校准样本仅用于后续 ΔΔCq 与相对表达量。", "ΔCq is user supplied; the calibrator is used only for downstream ΔΔCq and relative expression.")}</p>
                     </section>}
                   </div>
-                  <SuppliedResultExplorer results={suppliedResults} analysisStart={dataset.analysisStart} sampleOrder={displaySamples} targetOrder={selectedDisplayTargets} />
+                  <SuppliedResultExplorer results={suppliedResults} records={dataset.suppliedCalculations} analysisStart={dataset.analysisStart} sampleOrder={displaySamples} targetOrder={selectedDisplayTargets} />
                 </>}</>}
                 {resultSection === "quantification" && !hasQuantification && <div className="empty-table">{l("当前仅导入了 Tm/熔解结果；添加单孔 Cq/Ct/Cp 后可进行相对定量。", "Only Tm/melt results are currently imported. Add well-level Cq/Ct/Cp data for relative quantification.")}</div>}
                 {resultSection === "melt" && hasMeltAnalysis && <MeltAnalysis wells={appliedWells} />}

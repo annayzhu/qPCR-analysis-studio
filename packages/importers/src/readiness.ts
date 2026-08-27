@@ -51,7 +51,7 @@ export interface DatasetAlignment {
   }>;
 }
 
-const CRITICAL_FIELDS = new Set<CanonicalField>(["well", "sampleName", "targetName", "cq"]);
+const CYCLE_START_CRITICAL_FIELDS = new Set<CanonicalField>(["well", "sampleName", "targetName", "cq"]);
 
 export function assessDatasetAlignment(
   dataset: CanonicalDataset,
@@ -169,8 +169,14 @@ export function getSourceCapabilities(source: ImportedSource): SourceCapabilitie
   );
   const fields = [...new Set(acceptedMappings.map((mapping) => mapping.canonicalField!))];
   const fieldSet = new Set(fields);
+  const analysisStart = source.metadata.qpcrAnalysisStart;
+  const criticalFields = analysisStart === "delta-cq"
+    ? new Set<CanonicalField>(["sampleName", "targetName", "replicate", "deltaCq"])
+    : analysisStart === "delta-delta-cq"
+      ? new Set<CanonicalField>(["sampleName", "targetName", "replicate", "deltaDeltaCq"])
+      : CYCLE_START_CRITICAL_FIELDS;
   const blockingConflicts = table.suggestedMappings
-    .filter((mapping) => mapping.conflict && mapping.canonicalField && CRITICAL_FIELDS.has(mapping.canonicalField))
+    .filter((mapping) => mapping.conflict && mapping.canonicalField && criticalFields.has(mapping.canonicalField))
     .map((mapping) => mapping.sourceColumn);
   const hasWell = fieldSet.has("well") || (fieldSet.has("row") && fieldSet.has("column"));
   const hasCq = fieldSet.has("cq");
@@ -178,14 +184,20 @@ export function getSourceCapabilities(source: ImportedSource): SourceCapabilitie
   const hasMeltSummary = fieldSet.has("meltGroup") || fieldSet.has("meltScore") || fieldSet.has("meltResolution");
   const hasSampleName = fieldSet.has("sampleName");
   const hasTargetName = fieldSet.has("targetName");
-  const includesPlateLayout = hasWell && hasSampleName && hasTargetName;
-  const analysisStart = source.metadata.qpcrAnalysisStart;
+  const includesPlateLayout = analysisStart !== "delta-cq"
+    && analysisStart !== "delta-delta-cq"
+    && hasWell
+    && hasSampleName
+    && hasTargetName;
   const hasSelectedCalculation =
     (analysisStart === "delta-cq" && fieldSet.has("deltaCq"))
     || (analysisStart === "delta-delta-cq" && fieldSet.has("deltaDeltaCq"));
+  const hasAuthoritativeQuantification = analysisStart === "delta-cq" || analysisStart === "delta-delta-cq"
+    ? hasSelectedCalculation
+    : hasCq;
 
   let role: ImportSourceRole = "unknown";
-  if (hasCq || hasSelectedCalculation) role = "primary-result";
+  if (hasAuthoritativeQuantification) role = "primary-result";
   else if (hasTm || hasMeltSummary) role = "supplemental-result";
   else if (includesPlateLayout) role = "plate-layout";
 
@@ -214,7 +226,9 @@ export function assessImportReadiness(sources: ImportedSource[]): ImportReadines
   const analysisResults = [...primaryResults, ...supplementalResults];
   const analysisMode = primaryResults.length ? "quantification" : supplementalResults.length ? "melt-only" : null;
   const resultIncludesPlateLayout = analysisResults.some((item) => item.includesPlateLayout);
-  const layoutRequired = analysisResults.length > 0 && !resultIncludesPlateLayout;
+  const calculationOnly = sources.some((source) => source.metadata.qpcrAnalysisStart === "delta-cq"
+    || source.metadata.qpcrAnalysisStart === "delta-delta-cq");
+  const layoutRequired = !calculationOnly && analysisResults.length > 0 && !resultIncludesPlateLayout;
 
   if (hasTemplateErrors) {
     return {
@@ -281,7 +295,9 @@ export function assessImportReadiness(sources: ImportedSource[]): ImportReadines
     primaryResultCount: primaryResults.length,
     supplementalResultCount: supplementalResults.length,
     layoutCount: layouts.length,
-    message: analysisMode === "melt-only"
+    message: calculationOnly
+      ? "当前分析从用户提供的 ΔCq/ΔΔCq 开始，无需板布局；计算结果已就绪。"
+      : analysisMode === "melt-only"
       ? "Tm/熔解结果与板布局已就绪，可进入熔解分析；相对定量仍需 Cq/Ct/Cp。"
       : resultIncludesPlateLayout
         ? "结果文件已包含板布局信息，无需另传布局；相对定量已就绪。"

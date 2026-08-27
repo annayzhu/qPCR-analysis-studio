@@ -40,6 +40,13 @@ export const SUPPLIED_COMPLETE_HEADERS = [
 
 export type SuppliedCompleteRow = Record<(typeof SUPPLIED_COMPLETE_HEADERS)[number], string | number | null>;
 
+export const SUPPLIED_TRACEABILITY_HEADERS = [
+  "analysis_start", "value_provenance", "plate", "well", "sample", "target",
+  "replicate", "supplied_value", "cycle_type", "source_sheet", "source_row",
+] as const;
+
+export type SuppliedTraceabilityRow = Record<(typeof SUPPLIED_TRACEABILITY_HEADERS)[number], string | number | null>;
+
 export interface SuppliedVisualizationBarRow {
   category: string;
   value: number;
@@ -180,6 +187,24 @@ export function buildSuppliedCompleteRows(
     relative_expression_technical_sem: row.relativeExpressionSem,
     calibrator: row.calibratorValue,
     warnings: row.warningCodes.join("; "),
+  }));
+}
+
+export function buildSuppliedTraceabilityRows(
+  records: SuppliedCalculationRecord[],
+): SuppliedTraceabilityRow[] {
+  return records.map((record) => ({
+    analysis_start: record.analysisStart ?? null,
+    value_provenance: "user-supplied",
+    plate: record.plateName ?? null,
+    well: record.well ?? null,
+    sample: record.sampleName,
+    target: record.targetName,
+    replicate: record.replicate,
+    supplied_value: record.value,
+    cycle_type: record.cycleType || null,
+    source_sheet: record.sourceSheet ?? null,
+    source_row: record.sourceRowNumber ?? null,
   }));
 }
 

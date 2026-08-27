@@ -126,6 +126,10 @@ input:focus, select:focus, textarea:focus {
 .primary-button:hover { background: #5048bc; transform: translateY(-1px); box-shadow: 0 11px 28px rgba(98,91,211,.24); }
 .secondary-button { color: #4e47b6; border: 1px solid #cbc7f2; background: #f2f0ff; }
 .secondary-button:hover { border-color: #a9a2e8; background: #ebe8ff; }
+.not-applicable-stage { border-color: #d8dddc; background: #f7f9f8; }
+.not-applicable-stage .stage-number { color: #6f7c79; background: #e7ecea; }
+.not-applicable-stage .stage-kicker { color: #596864; border-color: #d2dcda; background: #edf2f0; }
+.not-applicable-stage .secondary-button:disabled { color: #8c9694; border-color: #d8dddc; background: #eef1f0; opacity: 1; }
 .quiet-button { color: var(--ink); border: 0; background: transparent; }
 .quiet-button:hover { background: rgba(57, 52, 107, .06); }
 .quiet-button.bordered { border: 1px solid var(--line); background: white; }

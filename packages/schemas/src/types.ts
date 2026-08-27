@@ -193,6 +193,7 @@ export interface SuppliedCalculationRecord {
   value: number;
   analysisStart?: Exclude<AnalysisStart, "cq">;
   plateId?: string;
+  plateName?: string;
   well?: string;
   cycleType?: string;
   sourceSheet?: string;
@@ -205,7 +206,7 @@ export interface CanonicalDataset {
   createdAt: string;
   sources: ImportedSource[];
   analysisStart: AnalysisStart;
-  plate: PlateDefinition;
+  plate: PlateDefinition | null;
   wells: WellRecord[];
   suppliedCalculations: SuppliedCalculationRecord[];
   mappings: FieldMapping[];
