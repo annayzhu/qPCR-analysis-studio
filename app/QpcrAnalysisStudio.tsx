@@ -30,6 +30,7 @@ import {
 } from "@/packages/analysis-session/src";
 import type { AnalysisSessionCommand, AnalysisSessionState } from "@/packages/analysis-session/src";
 import ImportManager from "./components/ImportManager";
+import CalculationOverview from "./components/CalculationOverview";
 import MeltAnalysis from "./components/MeltAnalysis";
 import ResultExplorer from "./components/ResultExplorer";
 import SuppliedResultExplorer from "./components/SuppliedResultExplorer";
@@ -1030,14 +1031,23 @@ export default function QpcrAnalysisStudio() {
             {view === "overview" && (
               <div className="overview-layout">
                 <div className="section-heading overview-heading">
-                  <div><p className="eyebrow">OVERVIEW + QUALITY CONTROL</p><h2>{plateDefinition ? l("概览与复孔质控", "Overview & replicate QC") : l("计算结果概览", "Calculation overview")}</h2><p className="section-summary">{plateDefinition ? l(
+                  <div><p className="eyebrow">{plateDefinition ? "OVERVIEW + QUALITY CONTROL" : "CALCULATION OVERVIEW"}</p><h2>{plateDefinition ? l("概览与复孔质控", "Overview & replicate QC") : l("计算结果概览", "Calculation overview")}</h2><p className="section-summary">{plateDefinition ? l(
                     `${plateDefinition.plateFormat} 孔板中定义 ${namedReactionCount} 个反应；当前 ${qcIssueCount} 个复孔组需要复核，${qcWellIssueCount} 个孔有孔级提醒${secondaryPeakCount ? `，其中 ${secondaryPeakCount} 个孔检测到第二熔解峰` : ""}。`,
                     `${namedReactionCount} reactions are defined on the ${plateDefinition.plateFormat}-well plate; ${qcIssueCount} replicate group(s) require review and ${qcWellIssueCount} well(s) have well-level alerts${secondaryPeakCount ? `, including secondary melt peaks in ${secondaryPeakCount} well(s)` : ""}.`,
                   ) : l(`${samples.length} 个样本 · ${targets.length} 个靶标；没有导入或推断物理孔板。`, `${samples.length} sample(s) · ${targets.length} target(s); no physical plate was imported or inferred.`)}</p></div>
                   <button className="quiet-button bordered" type="button" onClick={() => setDataManagerOpen(true)}>{l("管理导入文件", "Manage imported files")}</button>
                 </div>
-                {dataset.analysisStart !== "cq" && <div className="notice supplied-qc-boundary"><strong>{l("当前分析从用户提供的计算值开始", "This analysis starts from user-supplied calculations")}</strong><span>{l("系统只对导入的 ΔCq/ΔΔCq 复孔值计算均值、SD、SEM和下游转换；不显示或推断原始孔级扩增 QC。", "The system summarizes supplied ΔCq/ΔΔCq replicates and downstream transforms only; original well-level amplification QC is neither shown nor inferred.")}</span></div>}
-                <div className="overview-qc-grid">
+                {dataset.analysisStart !== "cq" ? <CalculationOverview
+                  results={suppliedResults}
+                  analysisStart={dataset.analysisStart}
+                  sampleOrder={samples}
+                  targetOrder={targets}
+                  calibrator={calibrator}
+                  sources={sources}
+                  dataNotes={[...dataset.warnings, ...dataset.assumptions].map((item) => localizeRuntimeMessage(item, language))}
+                  auditCount={auditLogs.length}
+                  onOpenResults={() => switchWorkspaceView("results")}
+                /> : <div className="overview-qc-grid">
                   {plateDefinition && <article className="qc-workbench">
                     <div className="card-heading compact-card-heading">
                       <div><p className="eyebrow">REPLICATE QC</p><h3>{l("技术复孔", "Technical replicates")}</h3><div className="qc-scope-counts"><span>{l(`复孔组 ${qcIssueCount}`, `${qcIssueCount} replicate group(s)`)}</span><span>{l(`孔级 ${qcWellIssueCount}`, `${qcWellIssueCount} well alert(s)`)}</span></div></div>
@@ -1076,7 +1086,7 @@ export default function QpcrAnalysisStudio() {
                       </div>
                     </article>
                   </aside>
-                </div>
+                </div>}
               </div>
             )}
 
