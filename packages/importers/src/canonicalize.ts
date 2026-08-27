@@ -185,13 +185,16 @@ export function buildCanonicalDataset(inputSources: ImportedSource[]): Canonical
     .split(/[;,，；\n]+/)
     .map((item) => item.trim())
     .filter(Boolean);
-  const referenceTargetSets = analysisStart === "cq" ? [] : sources
-    .map((source) => [...new Set(splitReferenceTargets(source.metadata.qpcrReferenceTargets ?? ""))])
-    .filter((targets) => targets.length);
+  const suppliedValueField = analysisStartPolicy(analysisStart).authoritativeValueField;
+  const provenanceSources = analysisStart === "cq" ? [] : sources.filter((source) => selectedTable(source)?.suggestedMappings.some((mapping) => (
+    mapping.canonicalField === suppliedValueField && mapping.confidence >= 0.7 && !mapping.conflict
+  )));
+  const referenceTargetSets = provenanceSources
+    .map((source) => [...new Set(splitReferenceTargets(source.metadata.qpcrReferenceTargets ?? ""))]);
   const referenceTargets = [...new Set(referenceTargetSets[0] ?? [])];
   const referenceTargetSignatures = new Set(referenceTargetSets.map((targets) => [...targets].sort().join("\u241f")));
-  const referenceMethods = analysisStart === "cq" ? [] : [...new Set(sources.map((source) => source.metadata.qpcrReferenceMethod).filter(Boolean))];
-  const calibratorValues = analysisStart === "cq" ? [] : [...new Set(sources.map((source) => source.metadata.qpcrCalibratorValue).filter(Boolean))];
+  const referenceMethods = [...new Set(provenanceSources.map((source) => source.metadata.qpcrReferenceMethod ?? ""))];
+  const calibratorValues = [...new Set(provenanceSources.map((source) => source.metadata.qpcrCalibratorValue ?? ""))];
   const suppliedCalculationProvenance = analysisStart === "cq" ? null : {
     referenceTargets,
     referenceMethod: referenceMethods[0] ?? "",

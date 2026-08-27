@@ -139,6 +139,10 @@ describe("downloadable template to complete-results export", () => {
       makeSource("GAPDH", "Control A", "A"),
       makeSource("ACTB", "Control B", "B"),
     ])).toThrow(/不能合并分析/);
+    expect(() => buildCanonicalDataset([
+      makeSource("GAPDH", "Control A", "A"),
+      makeSource("", "", "Legacy"),
+    ])).toThrow(/不能合并分析/);
   });
 
   it("runs a Delta Cq template without plate context through the calculation-only seam", () => {
