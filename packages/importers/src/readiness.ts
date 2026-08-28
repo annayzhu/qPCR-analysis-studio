@@ -218,7 +218,7 @@ export function assessImportReadiness(sources: ImportedSource[]): ImportReadines
   const layouts = capabilities.filter((item) => item.role === "plate-layout");
   const hasBlockingConflict = capabilities.some((item) => item.blockingConflicts.length > 0);
   const templateValidation = sources.map(validateAnalysisStartSource).filter((item) => item !== null);
-  const hasTemplateErrors = templateValidation.some((item) => item.errorCount > 0);
+  const hasTemplateErrors = templateValidation.some((item) => item.unresolvedCount > 0);
   const analysisResults = [...primaryResults, ...supplementalResults];
   const analysisMode = primaryResults.length ? "quantification" : supplementalResults.length ? "melt-only" : null;
   const resultIncludesPlateLayout = analysisResults.some((item) => item.includesPlateLayout);
@@ -236,7 +236,7 @@ export function assessImportReadiness(sources: ImportedSource[]): ImportReadines
       primaryResultCount: primaryResults.length,
       supplementalResultCount: supplementalResults.length,
       layoutCount: layouts.length,
-      message: "数据模板存在阻断错误。请按工作表、行号和列提示修正后重新导入。",
+      message: "数据模板仍有待处理问题。请在导入页修正、排除或确认后继续。",
     };
   }
 

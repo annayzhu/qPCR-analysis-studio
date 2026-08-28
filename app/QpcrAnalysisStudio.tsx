@@ -18,9 +18,11 @@ import {
   assessImportReadiness,
   buildCanonicalDataset,
   parseBrowserFile,
+  recordImportDecision,
   resolveAnalysisStartForImport,
   transitionAnalysisStart,
   validateAnalysisStartSource,
+  type RecordImportDecisionInput,
 } from "@/packages/importers/src";
 import {
   createAnalysisSession,
@@ -261,6 +263,7 @@ export default function QpcrAnalysisStudio() {
   const pendingDispositionLogs = analysisSession?.pendingDispositionLogs ?? [];
   const alignmentDispositions = sessionView?.alignmentDispositions ?? {};
   const auditLogs = sessionView?.auditLogs ?? [];
+  const importDecisions = dataset?.importDecisions ?? [];
   const pendingCount = sessionView?.pendingCount ?? 0;
   const alignmentReviewPending = sessionView?.alignmentReviewPending ?? false;
   const analysisLocked = sessionView?.analysisLocked ?? false;
@@ -530,6 +533,15 @@ export default function QpcrAnalysisStudio() {
     setNeedsRebuild(true);
   }
 
+  function recordImportDecisions(sourceId: string, decisions: RecordImportDecisionInput[]) {
+    setSources((current) => current.map((source) => {
+      if (source.id !== sourceId) return source;
+      return decisions.reduce((reviewed, decision) => recordImportDecision(reviewed, decision), source);
+    }));
+    setNeedsRebuild(true);
+    setError("");
+  }
+
   function changeAnalysisStart(next: AnalysisStart) {
     analysisStartSelectedByUser.current = true;
     const transitioned = transitionAnalysisStart({
@@ -557,9 +569,11 @@ export default function QpcrAnalysisStudio() {
     else resetBuiltAnalysis();
   }
 
-  function rebuildCurrentSources() {
+  function applyImportCorrections() {
     const currentReadiness = assessImportReadiness(sources);
-    if (currentReadiness.canAnalyze) buildAndApply(sources);
+    if (!currentReadiness.canAnalyze) return;
+    buildAndApply(sources);
+    setDataManagerOpen(false);
   }
 
   function clearProject() {
@@ -805,7 +819,7 @@ export default function QpcrAnalysisStudio() {
       ["Raw measurement policy", "Cp/Cq/Ct, Tm and instrument flags remain on their original physical wells"],
     ];
     const pendingAuditLogs = [...pendingEditLogs, ...pendingExclusionLogs, ...pendingOperationLogs, ...pendingDispositionLogs];
-    const auditRows = [
+    const analysisAuditRows = [
       ...auditLogs.map((log) => ({ log, status: l("已应用", "Applied") })),
       ...pendingAuditLogs.map((log) => ({ log, status: l("待应用", "Pending") })),
     ].map(({ log, status }) => ({
@@ -820,6 +834,21 @@ export default function QpcrAnalysisStudio() {
       "New value": "field" in log ? log.newValue : "newState" in log ? String(log.newState) : "operation" in log ? log.changes.map((change) => `${change.wellRecordId}.${change.field}=${change.newValue ?? ""}`).join("; ") || log.newSnapshot : "",
       Reason: auditLogDescription(log, l),
     }));
+    const auditRows = [
+      ...importDecisions.map((decision) => ({
+        Timestamp: decision.timestamp,
+        Status: l("导入时已应用", "Applied at import"),
+        Action: decision.action === "exclude" ? l("排除导入行", "Exclude import row") : decision.action === "confirm" ? l("确认导入提醒", "Confirm import warning") : decision.action === "restore" ? l("恢复导入值", "Restore import value") : l("修正导入值", "Correct import value"),
+        Wells: `${decision.sourceSheet}${decision.sourceRowNumber ? ` row ${decision.sourceRowNumber}` : ""}`,
+        "Source wells": "",
+        "Destination wells": "",
+        Field: decision.field,
+        "Previous value": decision.originalValue,
+        "New value": decision.newValue,
+        Reason: decision.reason,
+      })),
+      ...analysisAuditRows,
+    ];
     const workbook = XLSX.utils.book_new();
     const layoutSheet = XLSX.utils.json_to_sheet(layoutRows);
     layoutSheet["!cols"] = [{ wch: 18 }, { wch: 8 }, { wch: 6 }, { wch: 8 }, { wch: 28 }, { wch: 20 }, { wch: 16 }, { wch: 10 }, { wch: 14 }, { wch: 28 }];
@@ -988,8 +1017,9 @@ export default function QpcrAnalysisStudio() {
             onRemoveSource={removeSource}
             onUpdateSelectedTable={updateSelectedTable}
             onUpdateMapping={updateMapping}
+            onRecordImportDecisions={recordImportDecisions}
             onAnalysisStartChange={changeAnalysisStart}
-            onRebuild={rebuildCurrentSources}
+            onApply={applyImportCorrections}
             onContinue={() => { setDataManagerOpen(false); setView(alignmentReviewPending ? "plate" : "overview"); }}
           />
         </div>
@@ -1047,7 +1077,7 @@ export default function QpcrAnalysisStudio() {
                   calibrator={calibrator}
                   sources={sources}
                   dataNotes={[...dataset.warnings, ...dataset.assumptions].map((item) => localizeRuntimeMessage(item, language))}
-                  auditCount={auditLogs.length}
+                  auditCount={auditLogs.length + importDecisions.length}
                   onOpenResults={() => switchWorkspaceView("results")}
                 /> : <div className="overview-qc-grid">
                   {plateDefinition && <article className="qc-workbench">
@@ -1079,9 +1109,12 @@ export default function QpcrAnalysisStudio() {
                       {(dataset.warnings.length > 0 || dataset.assumptions.length > 0) && <details className="assumption-details"><summary>{dataset.warnings.length + dataset.assumptions.length} {l("条数据说明", "data note(s)")}</summary>{[...dataset.warnings, ...dataset.assumptions].map((item) => <p key={item}>{localizeRuntimeMessage(item, language)}</p>)}</details>}
                     </article>
                     <article className="audit-card">
-                      <div className="card-heading"><div><p className="eyebrow">AUDIT TRAIL</p><h3>{l("审计记录", "Audit trail")}</h3></div><span>{auditLogs.length} {l("已应用", "applied")} · {pendingCount} {l("待应用", "pending")}</span></div>
+                      <div className="card-heading"><div><p className="eyebrow">AUDIT TRAIL</p><h3>{l("审计记录", "Audit trail")}</h3></div><span>{auditLogs.length + importDecisions.length} {l("已应用", "applied")} · {pendingCount} {l("待应用", "pending")}</span></div>
                       <div className="timeline compact-timeline">
-                        {auditLogs.length === 0 && <div className="empty-table embedded">{l("尚无已应用的人工改动。", "No applied manual changes yet.")}</div>}
+                        {auditLogs.length === 0 && importDecisions.length === 0 && <div className="empty-table embedded">{l("尚无已应用的人工改动。", "No applied manual changes yet.")}</div>}
+                        {[...importDecisions].reverse().slice(0, 4).map((decision) => (
+                          <article key={decision.id}><span className="timeline-dot" /><div><b>{decision.action === "exclude" ? l("排除导入行", "Exclude import row") : decision.action === "confirm" ? l("确认导入提醒", "Confirm import warning") : decision.action === "restore" ? l("恢复导入值", "Restore import value") : l("修正导入值", "Correct import value")}</b><p>{decision.reason}</p><small>{decision.sourceSheet}{decision.sourceRowNumber ? ` · row ${decision.sourceRowNumber}` : ""} · {new Date(decision.timestamp).toLocaleString(language === "zh" ? "zh-CN" : "en-US")}</small></div></article>
+                        ))}
                         {[...auditLogs].reverse().slice(0, 8).map((log) => (
                           <article key={log.id}><span className="timeline-dot" /><div><b>{auditLogTitle(log, l)}</b><p>{auditLogDescription(log, l)}</p><small>{auditLogReference(log, draftWells)} · {new Date(log.timestamp).toLocaleString(language === "zh" ? "zh-CN" : "en-US")}</small></div></article>
                         ))}
@@ -1309,7 +1342,7 @@ export default function QpcrAnalysisStudio() {
                       <p>{l("ΔCq 已由用户提供；校准样本仅用于后续 ΔΔCq 与相对表达量。", "ΔCq is user supplied; the calibrator is used only for downstream ΔΔCq and relative expression.")}</p>
                     </section>}
                   </div>
-                  <SuppliedResultExplorer results={suppliedResults} records={dataset.suppliedCalculations} analysisStart={dataset.analysisStart} sampleOrder={displaySamples} targetOrder={selectedDisplayTargets} provenance={dataset.suppliedCalculationProvenance} />
+                  <SuppliedResultExplorer results={suppliedResults} records={dataset.suppliedCalculations} analysisStart={dataset.analysisStart} sampleOrder={displaySamples} targetOrder={selectedDisplayTargets} provenance={dataset.suppliedCalculationProvenance} importDecisions={importDecisions} />
                 </>}</>}
                 {resultSection === "quantification" && !hasQuantification && <div className="empty-table">{l("当前仅导入了 Tm/熔解结果；添加单孔 Cq/Ct/Cp 后可进行相对定量。", "Only Tm/melt results are currently imported. Add well-level Cq/Ct/Cp data for relative quantification.")}</div>}
                 {resultSection === "melt" && hasMeltAnalysis && <MeltAnalysis wells={appliedWells} />}

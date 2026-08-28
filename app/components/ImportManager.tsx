@@ -1,15 +1,18 @@
 "use client";
 
 import { useRef, useState, type DragEvent } from "react";
-import type { AnalysisStart, CanonicalField, ImportedSource } from "@/packages/schemas/src";
+import type { AnalysisStart, CanonicalField, ImportDecision, ImportedSource } from "@/packages/schemas/src";
 import {
   CANONICAL_FIELD_LABELS,
   getSourceCapabilities,
+  importDecisionFieldLabel,
   QPCR_INPUT_TEMPLATE_SCHEMA_VERSION,
   validateAnalysisStartSource,
   writeQpcrInputTemplate,
   type ImportReadiness,
   type ImportSourceRole,
+  type RecordImportDecisionInput,
+  type TemplateValidationIssue,
 } from "@/packages/importers/src";
 import { localizeRuntimeMessage, useLanguage } from "../i18n";
 
@@ -114,9 +117,63 @@ interface ImportManagerProps {
   onRemoveSource: (sourceId: string) => void;
   onUpdateSelectedTable: (sourceId: string, tableId: string) => void;
   onUpdateMapping: (sourceId: string, sourceColumn: string, canonicalField: CanonicalField | null) => void;
+  onRecordImportDecisions: (sourceId: string, decisions: RecordImportDecisionInput[]) => void;
   onAnalysisStartChange: (analysisStart: AnalysisStart) => void;
-  onRebuild: () => void;
+  onApply: () => void;
   onContinue: () => void;
+}
+
+function decisionKey(decision: ImportDecision): string {
+  return [decision.scope, decision.sourceSheet, decision.sourceRowNumber ?? "", decision.field, decision.issueCode].join("\u241f");
+}
+
+function ImportIssueRow({
+  issue,
+  onResolve,
+}: {
+  issue: TemplateValidationIssue;
+  onResolve: (input: RecordImportDecisionInput) => void;
+}) {
+  const { language, l } = useLanguage();
+  const [nextValue, setNextValue] = useState(issue.suppliedValue);
+  const rowReference = issue.sourceRowNumber
+    ? l(`${issue.sourceSheet} · 第 ${issue.sourceRowNumber} 行`, `${issue.sourceSheet} · row ${issue.sourceRowNumber}`)
+    : issue.sourceSheet;
+  const base = {
+    scope: issue.scope,
+    sourceSheet: issue.sourceSheet,
+    sourceRowNumber: issue.sourceRowNumber ?? undefined,
+    field: issue.field,
+    issueCode: issue.code,
+  } satisfies Omit<RecordImportDecisionInput, "action" | "reason">;
+
+  return (
+    <div className={`import-issue-row ${issue.severity}`}>
+      <div className="import-issue-locator">
+        <span>{issue.severity === "error" ? l("错误", "Error") : l("提醒", "Warning")}</span>
+        <b>{rowReference}</b>
+        <code>{issue.column}</code>
+      </div>
+      <p>{language === "zh" ? issue.messageZh : issue.messageEn}</p>
+      <div className="import-issue-actions">
+        {issue.canEdit && (
+          <label>
+            <span className="sr-only">{l(`修正 ${issue.column}`, `Correct ${issue.column}`)}</span>
+            <input
+              value={nextValue}
+              inputMode={["replicate", "cq", "deltaCq", "deltaDeltaCq", "tm1", "tm2", "plateFormat"].includes(issue.field) ? "decimal" : "text"}
+              placeholder={issue.field === "referenceTargets" ? "GAPDH; ACTB" : l("输入修正值", "Corrected value")}
+              onChange={(event) => setNextValue(event.target.value)}
+            />
+          </label>
+        )}
+        {issue.canEdit && <button type="button" disabled={!nextValue.trim()} onClick={() => onResolve({ ...base, action: "edit", newValue: nextValue, reason: `Correct ${issue.column} during import review` })}>{l("保存", "Save")}</button>}
+        {issue.canConfirm && <button type="button" onClick={() => onResolve({ ...base, action: "confirm", reason: issue.code === "missing-reference-target" ? "Proceed with incomplete reference-target provenance" : "Confirm duplicate replicate identifier" })}>{issue.code === "missing-reference-target" ? l("确认信息不完整", "Confirm incomplete") : l("确认保留", "Keep & confirm")}</button>}
+        {issue.canExclude && <button className="danger-text" type="button" onClick={() => onResolve({ ...base, field: "row", action: "exclude", reason: `Exclude row during import review: ${issue.code}` })}>{l("排除此行", "Exclude row")}</button>}
+        {!issue.canEdit && !issue.canConfirm && !issue.canExclude && <span className="structural-fix-note">{l("请修正字段映射或重新导入", "Fix field mapping or re-import")}</span>}
+      </div>
+    </div>
+  );
 }
 
 function SourceCard({
@@ -124,17 +181,29 @@ function SourceCard({
   onRemove,
   onUpdateSelectedTable,
   onUpdateMapping,
+  onRecordImportDecisions,
 }: {
   source: ImportedSource;
   onRemove: () => void;
   onUpdateSelectedTable: (tableId: string) => void;
   onUpdateMapping: (sourceColumn: string, canonicalField: CanonicalField | null) => void;
+  onRecordImportDecisions: (decisions: RecordImportDecisionInput[]) => void;
 }) {
   const { language, l } = useLanguage();
   const table = source.tables.find((item) => item.id === source.selectedTableId) ?? source.tables[0];
   const capabilities = getSourceCapabilities(source);
   const templateValidation = validateAnalysisStartSource(source);
   const sourceRole = roleLabel(capabilities.role, l);
+  const [reviewView, setReviewView] = useState<"open" | "handled">("open");
+  const [severityFilter, setSeverityFilter] = useState<"all" | "error" | "warning">("all");
+  const [typeFilter, setTypeFilter] = useState("all");
+  const issues = templateValidation?.issues ?? [];
+  const issueTypes = [...new Set(issues.map((item) => item.code))];
+  const filteredIssues = issues.filter((item) => (severityFilter === "all" || item.severity === severityFilter) && (typeFilter === "all" || item.code === typeFilter));
+  const activeDecisionMap = new Map<string, ImportDecision>();
+  for (const decision of source.importDecisions ?? []) activeDecisionMap.set(decisionKey(decision), decision);
+  const activeDecisions = [...activeDecisionMap.values()].filter((decision) => decision.action !== "restore").reverse();
+  const authoritativeMissing = issues.filter((item) => item.code === "missing-value" && (item.field === "deltaCq" || item.field === "deltaDeltaCq"));
   return (
     <article className="source-row">
       <div className={`source-type source-type-${capabilities.role}`} aria-hidden="true">
@@ -165,13 +234,47 @@ function SourceCard({
         {source.warnings.map((warning) => <p className="inline-warning" key={warning}>△ {localizeRuntimeMessage(warning, language)}</p>)}
 
         {templateValidation && (
-          <div className={`template-validation-summary ${templateValidation.errorCount ? "has-errors" : "is-valid"}`}>
-            <div><strong>{templateValidation.errorCount ? l("模板需要修正", "Template requires correction") : l("模板校验通过", "Template validation passed")}</strong><span>{l(
-              `${templateValidation.totalRows} 行 · ${templateValidation.detectedCount} 个有效数值 · ${templateValidation.nonDetectedCount} 个未检出 · ${templateValidation.warningCount} 条提醒 · ${templateValidation.errorCount} 个错误`,
-              `${templateValidation.totalRows} rows · ${templateValidation.detectedCount} detected · ${templateValidation.nonDetectedCount} non-detected · ${templateValidation.warningCount} warning(s) · ${templateValidation.errorCount} error(s)`,
-            )}</span></div>
-            {templateValidation.issues.length > 0 && <details><summary>{l("查看逐行校验", "Review row-level validation")}</summary><ul>{templateValidation.issues.slice(0, 20).map((item, index) => <li key={`${item.code}-${item.sourceRowNumber}-${index}`} className={item.severity}><b>{item.sourceSheet}{item.sourceRowNumber ? ` · ${l("第", "row ")}${item.sourceRowNumber}${language === "zh" ? " 行" : ""}` : ""} · {item.column}</b><span>{language === "zh" ? item.messageZh : item.messageEn}</span></li>)}</ul>{templateValidation.issues.length > 20 && <p>{l(`另有 ${templateValidation.issues.length - 20} 条，请修正前述问题后重新导入。`, `${templateValidation.issues.length - 20} more issue(s); correct the listed problems and re-import.`)}</p>}</details>}
-          </div>
+          <section className={`import-review ${templateValidation.unresolvedCount ? "has-unresolved" : "is-valid"}`} aria-label={l("导入修正", "Import corrections")}>
+            <div className="import-review-summary">
+              <div><strong>{templateValidation.unresolvedCount ? l("处理后即可分析", "Resolve before analysis") : l("导入检查完成", "Import review complete")}</strong><span>{l("原始文件保持不变", "Original file unchanged")}</span></div>
+              <dl>
+                <div><dt>{l("总行数", "Rows")}</dt><dd>{templateValidation.totalRows}</dd></div>
+                <div><dt>{l("当前纳入", "Included")}</dt><dd>{templateValidation.includedCount}</dd></div>
+                <div><dt>{l("待处理", "Open")}</dt><dd>{templateValidation.unresolvedCount}</dd></div>
+                <div><dt>{l("已排除", "Excluded")}</dt><dd>{templateValidation.excludedCount}</dd></div>
+              </dl>
+            </div>
+            {(issues.length > 0 || activeDecisions.length > 0) && (
+              <div className="import-review-workbench">
+                <div className="import-review-toolbar">
+                  <div className="review-view-switch" role="group" aria-label={l("导入问题状态", "Import issue status")}>
+                    <button type="button" className={reviewView === "open" ? "active" : ""} onClick={() => setReviewView("open")}>{l("待处理", "Open")} <span>{issues.length}</span></button>
+                    <button type="button" className={reviewView === "handled" ? "active" : ""} onClick={() => setReviewView("handled")}>{l("已处理", "Handled")} <span>{activeDecisions.length}</span></button>
+                  </div>
+                  {reviewView === "open" && issues.length > 0 && <div className="import-review-filters">
+                    <select aria-label={l("按严重程度筛选", "Filter by severity")} value={severityFilter} onChange={(event) => setSeverityFilter(event.target.value as typeof severityFilter)}>
+                      <option value="all">{l("全部级别", "All severities")}</option><option value="error">{l("错误", "Errors")}</option><option value="warning">{l("提醒", "Warnings")}</option>
+                    </select>
+                    <select aria-label={l("按问题类型筛选", "Filter by issue type")} value={typeFilter} onChange={(event) => setTypeFilter(event.target.value)}>
+                      <option value="all">{l("全部类型", "All types")}</option>{issueTypes.map((code) => <option key={code} value={code}>{code}</option>)}
+                    </select>
+                  </div>}
+                  {reviewView === "open" && authoritativeMissing.length > 0 && <button className="batch-exclude-button" type="button" onClick={() => onRecordImportDecisions(authoritativeMissing.map((item) => ({ scope: "row", sourceSheet: item.sourceSheet, sourceRowNumber: item.sourceRowNumber ?? undefined, field: "row", action: "exclude", issueCode: item.code, reason: `Missing authoritative ${item.column}` })))}>{l(`排除 ${authoritativeMissing.length} 行空白 Δ 值`, `Exclude ${authoritativeMissing.length} blank Delta row(s)`)}</button>}
+                </div>
+                {reviewView === "open" ? (
+                  <div className="import-issue-list">
+                    {filteredIssues.map((item, index) => <ImportIssueRow key={`${item.code}-${item.sourceSheet}-${item.sourceRowNumber}-${index}`} issue={item} onResolve={(decision) => onRecordImportDecisions([decision])} />)}
+                    {!filteredIssues.length && <p className="import-review-empty">{l("当前筛选下没有待处理问题。", "No open issues match these filters.")}</p>}
+                  </div>
+                ) : (
+                  <div className="import-decision-list">
+                    {activeDecisions.map((decision) => <div key={decision.id}><span>{decision.action === "exclude" ? l("已排除", "Excluded") : decision.action === "confirm" ? l("已确认", "Confirmed") : l("已修正", "Corrected")}</span><b>{decision.sourceSheet}{decision.sourceRowNumber ? ` · ${l("第", "row ")}${decision.sourceRowNumber}${language === "zh" ? " 行" : ""}` : ""} · {importDecisionFieldLabel(decision.field)}</b><code>{decision.action === "edit" ? `${decision.originalValue || "—"} → ${decision.newValue}` : decision.reason}</code><button type="button" onClick={() => onRecordImportDecisions([{ scope: decision.scope, sourceSheet: decision.sourceSheet, sourceRowNumber: decision.sourceRowNumber ?? undefined, field: decision.field, action: "restore", issueCode: decision.issueCode, reason: "Restore original import value or status" }])}>{l("恢复", "Restore")}</button></div>)}
+                    {!activeDecisions.length && <p className="import-review-empty">{l("尚无已处理项目。", "No handled items yet.")}</p>}
+                  </div>
+                )}
+              </div>
+            )}
+          </section>
         )}
 
         {table && (
@@ -219,8 +322,9 @@ export default function ImportManager({
   onRemoveSource,
   onUpdateSelectedTable,
   onUpdateMapping,
+  onRecordImportDecisions,
   onAnalysisStartChange,
-  onRebuild,
+  onApply,
   onContinue,
 }: ImportManagerProps) {
   const { language, l } = useLanguage();
@@ -313,6 +417,7 @@ export default function ImportManager({
                 onRemove={() => onRemoveSource(source.id)}
                 onUpdateSelectedTable={(tableId) => onUpdateSelectedTable(source.id, tableId)}
                 onUpdateMapping={(sourceColumn, canonicalField) => onUpdateMapping(source.id, sourceColumn, canonicalField)}
+                onRecordImportDecisions={(decisions) => onRecordImportDecisions(source.id, decisions)}
               />
             ))}
           </div>
@@ -338,6 +443,7 @@ export default function ImportManager({
                 onRemove={() => onRemoveSource(source.id)}
                 onUpdateSelectedTable={(tableId) => onUpdateSelectedTable(source.id, tableId)}
                 onUpdateMapping={(sourceColumn, canonicalField) => onUpdateMapping(source.id, sourceColumn, canonicalField)}
+                onRecordImportDecisions={(decisions) => onRecordImportDecisions(source.id, decisions)}
               />
             ))}
           </div>
@@ -351,8 +457,9 @@ export default function ImportManager({
           <p>{l(`已读取 ${readiness.primaryResultCount} 个 Cq 结果、${readiness.supplementalResultCount} 个 Tm/熔解结果、${readiness.layoutCount} 个布局文件。进入分析后仍可返回追加或替换。`, `${readiness.primaryResultCount} Cq result(s), ${readiness.supplementalResultCount} Tm/melt result(s), and ${readiness.layoutCount} layout file(s) loaded. You can return later to add or replace files.`)}</p>
         </div>
         <div className="readiness-actions">
-          {readiness.canAnalyze && <button className="quiet-button bordered" type="button" onClick={onRebuild}>{l("重新合并并计算", "Re-merge & calculate")}</button>}
-          <button className="primary-button" type="button" disabled={!hasDataset} onClick={onContinue}>{alignmentReviewRequired ? l("检查并修正板布局", "Review & correct layout") : readiness.analysisMode === "melt-only" ? l("进入熔解分析", "Open melt analysis") : l("进入分析", "Open analysis")} →</button>
+          <button className="primary-button" type="button" disabled={!readiness.canAnalyze && !hasDataset} onClick={hasDataset ? onContinue : onApply}>{hasDataset
+            ? alignmentReviewRequired ? l("检查并修正板布局", "Review & correct layout") : readiness.analysisMode === "melt-only" ? l("进入熔解分析", "Open melt analysis") : l("进入分析", "Open analysis")
+            : l("应用导入修正并进入分析", "Apply corrections & analyze")} →</button>
         </div>
       </div>
     </section>

@@ -13,7 +13,8 @@
     "typecheck": "tsc --noEmit",
     "test:unit": "vitest run --config vitest.config.ts",
     "test:real": "node --import tsx scripts/validate-roche-real-files.ts",
-    "test": "npm run test:unit && npm run typecheck && npm run build && node --test tests/rendered-html.test.mjs",
+    "test:offline": "npm run build:offline && node --test tests/offline-package.test.mjs",
+    "test": "npm run test:unit && npm run typecheck && npm run build && node --test tests/rendered-html.test.mjs && npm run test:offline",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
     "db:generate": "drizzle-kit generate"
   },

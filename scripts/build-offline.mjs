@@ -54,11 +54,16 @@ try {
     nodePaths: [path.join(projectRoot, "node_modules")],
   });
 
-  const [javascript, rawCss] = await Promise.all([
+  const [javascript, rawCss, monoRegular, monoSemibold] = await Promise.all([
     readFile(bundlePath, "utf8"),
     readFile(path.join(projectRoot, "app", "globals.css"), "utf8"),
+    readFile(path.join(projectRoot, "public", "fonts", "ibm-plex-mono", "IBMPlexMono-Regular.ttf")),
+    readFile(path.join(projectRoot, "public", "fonts", "ibm-plex-mono", "IBMPlexMono-SemiBold.ttf")),
   ]);
-  const css = rawCss.replace(/^@import\s+["']tailwindcss["'];\s*/mu, "");
+  const css = rawCss
+    .replace(/^@import\s+["']tailwindcss["'];\s*/mu, "")
+    .replace('/fonts/ibm-plex-mono/IBMPlexMono-Regular.ttf', `data:font/ttf;base64,${monoRegular.toString("base64")}`)
+    .replace('/fonts/ibm-plex-mono/IBMPlexMono-SemiBold.ttf', `data:font/ttf;base64,${monoSemibold.toString("base64")}`);
   const html = `<!doctype html><html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light"><title>qPCR Analysis Studio</title><style>${escapeInline(css, "style")}</style></head><body><noscript>请启用浏览器 JavaScript 后使用本工具。</noscript><div id="qpcr-analysis-root"></div><script>${escapeInline(javascript, "script")}</script></body></html>`;
 
   await rm(outputRoot, { recursive: true, force: true });

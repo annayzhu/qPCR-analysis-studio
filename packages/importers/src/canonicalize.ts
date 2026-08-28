@@ -13,6 +13,14 @@ import type {
 } from "../../schemas/src";
 import { analysisStartPolicy, createPhysicalWellId, normalizeWell } from "../../schemas/src";
 import { applyInstrumentAdapter, selectedTable } from "./adapters";
+import {
+  activeImportDecisions,
+  effectiveImportMetadata,
+  effectiveImportRowValue,
+  importRowDecisionStatus,
+  isImportRowExcluded,
+  sourceColumnForImportField,
+} from "./import-review";
 
 const NON_DETECTED = /^(?:undetermined|no\s*ct|no\s*cq|n\/?a|na|nan|failed|无扩增|未检出)$/i;
 
@@ -32,15 +40,6 @@ function mappingRecord(mappings: FieldMapping[]): Partial<Record<CanonicalField,
     record[mapping.canonicalField] ??= mapping.sourceColumn;
   }
   return record;
-}
-
-function value(
-  row: RawImportedRow,
-  mappings: Partial<Record<CanonicalField, string>>,
-  field: CanonicalField,
-): unknown {
-  const header = mappings[field];
-  return header ? row.rawValues[header] : "";
 }
 
 function text(valueToParse: unknown): string {
@@ -99,6 +98,8 @@ interface PartialWell {
   meltResolution?: number | null;
   instrumentFlag?: string;
   instrumentOmit?: boolean;
+  importExcluded?: boolean;
+  importExclusionReason?: string;
   rawRow: RawImportedRow;
   qcFlags: QcFlag[];
   sourcePriority: number;
@@ -141,6 +142,8 @@ function mergePartial(current: PartialWell | undefined, incoming: PartialWell): 
     meltResolution: incoming.meltResolution ?? current.meltResolution,
     instrumentFlag: incoming.instrumentFlag || current.instrumentFlag,
     instrumentOmit: Boolean(current.instrumentOmit || incoming.instrumentOmit),
+    importExcluded: Boolean(current.importExcluded || incoming.importExcluded),
+    importExclusionReason: current.importExclusionReason || incoming.importExclusionReason,
     rawRow: preferIncoming ? incoming.rawRow : current.rawRow,
     qcFlags: [...current.qcFlags, ...incoming.qcFlags],
     sourcePriority: Math.max(current.sourcePriority, incoming.sourcePriority),
@@ -190,7 +193,7 @@ export function buildCanonicalDataset(inputSources: ImportedSource[]): Canonical
     mapping.canonicalField === suppliedValueField && mapping.confidence >= 0.7 && !mapping.conflict
   )));
   const referenceTargetSets = provenanceSources
-    .map((source) => [...new Set(splitReferenceTargets(source.metadata.qpcrReferenceTargets ?? ""))]);
+    .map((source) => [...new Set(splitReferenceTargets(effectiveImportMetadata(source, "referenceTargets")))]);
   const referenceTargets = [...new Set(referenceTargetSets[0] ?? [])];
   const referenceTargetSignatures = new Set(referenceTargetSets.map((targets) => [...targets].sort().join("\u241f")));
   const referenceMethods = [...new Set(provenanceSources.map((source) => source.metadata.qpcrReferenceMethod ?? ""))];
@@ -210,13 +213,13 @@ export function buildCanonicalDataset(inputSources: ImportedSource[]): Canonical
   for (const source of sources) {
     const table = selectedTable(source);
     if (!table) continue;
-    const mappings = mappingRecord(table.suggestedMappings);
     if (table.suggestedMappings.some((mapping) => mapping.canonicalField === "cq" && mapping.confidence >= 0.7 && !mapping.conflict)) {
       primaryResultSourceIds.add(source.id);
     }
     let hasExplicitPlate = false;
     for (const rawRow of table.rawRows) {
-      const plateName = text(value(rawRow, mappings, "plateName"));
+      if (isImportRowExcluded(source, rawRow)) continue;
+      const plateName = effectiveImportRowValue(source, table, rawRow, "plateName");
       if (plateName) {
         explicitPlateNames.add(plateName);
         hasExplicitPlate = true;
@@ -252,9 +255,9 @@ export function buildCanonicalDataset(inputSources: ImportedSource[]): Canonical
     const isRoche = source.instrumentType === "roche-lightcycler-480";
 
     for (const rawRow of table.rawRows) {
-      const rowLabel = text(value(rawRow, mappings, "row"));
-      const columnLabel = text(value(rawRow, mappings, "column"));
-      const rawPlateName = text(value(rawRow, mappings, "plateName"));
+      const rowLabel = effectiveImportRowValue(source, table, rawRow, "row");
+      const columnLabel = effectiveImportRowValue(source, table, rawRow, "column");
+      const rawPlateName = effectiveImportRowValue(source, table, rawRow, "plateName");
       const inferredPlateName = primaryResultSourceIds.size <= 1
         ? singleNamedPlate
         : anonymousPrimaryPlateName.get(source.id) ?? (sourceHasExplicitPlate.get(source.id) ? "" : `Unassigned source ${source.id}`);
@@ -263,43 +266,54 @@ export function buildCanonicalDataset(inputSources: ImportedSource[]): Canonical
       // describe the same physical well grid and must join by well position.
       const plate = plateIdentity(rawPlateName || inferredPlateName);
       const well =
-        normalizeWell(value(rawRow, mappings, "well")) ??
+        normalizeWell(effectiveImportRowValue(source, table, rawRow, "well")) ??
         normalizeWell(`${rowLabel}${columnLabel}`);
 
-      let sampleName = text(value(rawRow, mappings, "sampleName"));
-      let targetName = text(value(rawRow, mappings, "targetName"));
+      let sampleName = effectiveImportRowValue(source, table, rawRow, "sampleName");
+      let targetName = effectiveImportRowValue(source, table, rawRow, "targetName");
       const placeholder = sampleName === "1" && targetName === "1";
       if (placeholder) {
         sampleName = "";
         targetName = "";
       }
-      const cqRaw = value(rawRow, mappings, "cq");
+      const cqRaw = effectiveImportRowValue(source, table, rawRow, "cq");
       const omitHeader = mappings.omit ?? "";
       const qcFlags: QcFlag[] = [];
       const cq = cqValue(cqRaw, isRoche);
+      const rowDecision = importRowDecisionStatus(source, rawRow);
       if (analysisStart !== "cq") {
         const selectedField = analysisStartPolicy(analysisStart).authoritativeValueField;
-        const suppliedValue = numberOrNull(value(rawRow, mappings, selectedField));
-        if (suppliedValue !== null && sampleName && targetName) {
+        const originalValueHeader = sourceColumnForImportField(table, selectedField);
+        const originalSuppliedValue = originalValueHeader ? text(rawRow.rawValues[originalValueHeader]) : "";
+        const effectiveSuppliedValue = effectiveImportRowValue(source, table, rawRow, selectedField);
+        const suppliedValue = numberOrNull(effectiveSuppliedValue);
+        if ((suppliedValue !== null && sampleName && targetName) || rowDecision.status === "excluded") {
           suppliedCalculations.push({
             sampleName,
             targetName,
-            replicate: numberOrNull(value(rawRow, mappings, "replicate")),
+            replicate: numberOrNull(effectiveImportRowValue(source, table, rawRow, "replicate")),
             value: suppliedValue,
             analysisStart,
             ...(rawPlateName ? { plateId: plateIdentity(rawPlateName).plateId } : {}),
             ...(rawPlateName ? { plateName: rawPlateName } : {}),
             ...(well ? { well } : {}),
-            cycleType: text(value(rawRow, mappings, "cycleType")),
+            cycleType: effectiveImportRowValue(source, table, rawRow, "cycleType"),
             plateFormat: (() => {
               const header = rawRow.rawHeaders.find((item) => /^(?:plate\s*format|plate\s*size|板型)$/i.test(item.normalize("NFKC").trim()));
               const parsed = header ? Number(rawRow.rawValues[header]) : NaN;
               return parsed === 96 || parsed === 384 ? parsed : undefined;
             })(),
-            assayType: text(value(rawRow, mappings, "taskType")),
-            tm1: numberOrNull(value(rawRow, mappings, "tm1")),
-            tm2: numberOrNull(value(rawRow, mappings, "tm2")),
-            verificationStatus: "unverified",
+            assayType: effectiveImportRowValue(source, table, rawRow, "taskType"),
+            tm1: numberOrNull(effectiveImportRowValue(source, table, rawRow, "tm1")),
+            tm2: numberOrNull(effectiveImportRowValue(source, table, rawRow, "tm2")),
+            verificationStatus: rowDecision.status === "included" ? "unverified" : "user-confirmed",
+            importStatus: rowDecision.status,
+            exclusionReason: rowDecision.exclusion?.reason ?? "",
+            excludedBy: rowDecision.exclusion ? "user" : null,
+            originalSuppliedValue,
+            correctedValue: rowDecision.corrected ? effectiveSuppliedValue : "",
+            decisionTimestamp: rowDecision.latestTimestamp,
+            sourceFileName: source.fileName,
             sourceSheet: rawRow.sourceSheet,
             sourceRowNumber: rawRow.sourceRowNumber,
             rawRow,
@@ -311,7 +325,7 @@ export function buildCanonicalDataset(inputSources: ImportedSource[]): Canonical
       if (cq.cqStatus === "invalid") {
         qcFlags.push({ code: "INVALID_CQ", severity: "error", message: cq.cqReason, source: "import" });
       }
-      const instrumentFlag = text(value(rawRow, mappings, "instrumentFlag"));
+      const instrumentFlag = effectiveImportRowValue(source, table, rawRow, "instrumentFlag");
       if (instrumentFlag && !/^(?:passed|pass|ok|success|valid)$/i.test(instrumentFlag)) {
         qcFlags.push({
           code: "INSTRUMENT_FLAG",
@@ -327,16 +341,18 @@ export function buildCanonicalDataset(inputSources: ImportedSource[]): Canonical
         sampleName,
         targetName,
         cq,
-        reporter: text(value(rawRow, mappings, "reporter")),
-        taskType: text(value(rawRow, mappings, "taskType")),
-        replicate: numberOrNull(value(rawRow, mappings, "replicate")),
-        tm1: numberOrNull(value(rawRow, mappings, "tm1"), isRoche),
-        tm2: numberOrNull(value(rawRow, mappings, "tm2"), isRoche),
-        meltGroup: text(value(rawRow, mappings, "meltGroup")),
-        meltScore: numberOrNull(value(rawRow, mappings, "meltScore")),
-        meltResolution: numberOrNull(value(rawRow, mappings, "meltResolution")),
+        reporter: effectiveImportRowValue(source, table, rawRow, "reporter"),
+        taskType: effectiveImportRowValue(source, table, rawRow, "taskType"),
+        replicate: numberOrNull(effectiveImportRowValue(source, table, rawRow, "replicate")),
+        tm1: numberOrNull(effectiveImportRowValue(source, table, rawRow, "tm1"), isRoche),
+        tm2: numberOrNull(effectiveImportRowValue(source, table, rawRow, "tm2"), isRoche),
+        meltGroup: effectiveImportRowValue(source, table, rawRow, "meltGroup"),
+        meltScore: numberOrNull(effectiveImportRowValue(source, table, rawRow, "meltScore")),
+        meltResolution: numberOrNull(effectiveImportRowValue(source, table, rawRow, "meltResolution")),
         instrumentFlag,
-        instrumentOmit: isInstrumentOmitted(value(rawRow, mappings, "omit"), omitHeader),
+        instrumentOmit: isInstrumentOmitted(effectiveImportRowValue(source, table, rawRow, "omit"), omitHeader),
+        importExcluded: rowDecision.status === "excluded",
+        importExclusionReason: rowDecision.exclusion?.reason,
         rawRow,
         qcFlags,
         sourcePriority: priority,
@@ -385,8 +401,8 @@ export function buildCanonicalDataset(inputSources: ImportedSource[]): Canonical
         meltResolution: partial.meltResolution ?? null,
         instrumentFlag: partial.instrumentFlag ?? "",
         instrumentOmit: Boolean(partial.instrumentOmit),
-        userExcluded: false,
-        exclusionReason: "",
+        userExcluded: Boolean(partial.importExcluded),
+        exclusionReason: partial.importExclusionReason ?? "",
         sourceSheet: partial.rawRow.sourceSheet,
         sourceRowNumber: partial.rawRow.sourceRowNumber,
         rawRow: partial.rawRow,
@@ -406,5 +422,6 @@ export function buildCanonicalDataset(inputSources: ImportedSource[]): Canonical
     mappings: allMappings,
     warnings,
     assumptions,
+    importDecisions: sources.flatMap(activeImportDecisions),
   };
 }

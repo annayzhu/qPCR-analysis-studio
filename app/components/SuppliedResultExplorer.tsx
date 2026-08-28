@@ -2,12 +2,15 @@
 
 import { useMemo, useRef, useState } from "react";
 import XLSX from "xlsx-js-style";
-import type { AnalysisStart, SuppliedCalculationProvenance, SuppliedCalculationRecord } from "@/packages/schemas/src";
+import type { AnalysisStart, ImportDecision, SuppliedCalculationProvenance, SuppliedCalculationRecord } from "@/packages/schemas/src";
 import {
   buildLogRatioAxis,
   buildSuppliedCompleteRows,
   buildSuppliedTraceabilityRows,
   buildSuppliedVisualizationBarRows,
+  buildImportDecisionRows,
+  IMPORT_DECISION_EXPORT_DICTIONARY,
+  IMPORT_DECISION_HEADERS,
   mapRatioToY,
   SUPPLIED_COMPLETE_HEADERS,
   SUPPLIED_EXPORT_DICTIONARY,
@@ -93,19 +96,21 @@ function SuppliedChart({ rows, target, sampleOrder, showSd }: {
   </div>;
 }
 
-export default function SuppliedResultExplorer({ results, records, analysisStart, sampleOrder, targetOrder, provenance }: {
+export default function SuppliedResultExplorer({ results, records, analysisStart, sampleOrder, targetOrder, provenance, importDecisions }: {
   results: SuppliedCalculationResult[];
   records: SuppliedCalculationRecord[];
   analysisStart: Exclude<AnalysisStart, "cq">;
   sampleOrder: string[];
   targetOrder: string[];
   provenance: SuppliedCalculationProvenance | null;
+  importDecisions: ImportDecision[];
 }) {
   const { l } = useLanguage();
   const [showSd, setShowSd] = useState(false);
   const filtered = useMemo(() => results.filter((row) => sampleOrder.includes(row.sampleName) && targetOrder.includes(row.targetName)), [results, sampleOrder, targetOrder]);
   const completeRows = useMemo(() => buildSuppliedCompleteRows(results, sampleOrder, targetOrder, provenance), [provenance, results, sampleOrder, targetOrder]);
   const traceabilityRows = useMemo(() => buildSuppliedTraceabilityRows(records, provenance), [provenance, records]);
+  const importDecisionRows = useMemo(() => buildImportDecisionRows(importDecisions), [importDecisions]);
   const barRows = useMemo(() => buildSuppliedVisualizationBarRows(results, sampleOrder, targetOrder), [results, sampleOrder, targetOrder]);
   const chartTargets = targetOrder.filter((target) => filtered.some((row) => row.targetName === target));
   const referenceTargets = provenance?.referenceTargets ?? [];
@@ -125,7 +130,9 @@ export default function SuppliedResultExplorer({ results, records, analysisStart
   };
   const exportSuppliedTsvBundle = () => {
     exportTsv(SUPPLIED_COMPLETE_HEADERS, completeRows, "qpcr-supplied-calculation-results.tsv");
-    const dictionaryRows = SUPPLIED_EXPORT_DICTIONARY.map((entry) => ({
+    exportTsv(SUPPLIED_TRACEABILITY_HEADERS, traceabilityRows, "qpcr-supplied-values-traceability.tsv");
+    if (importDecisionRows.length) exportTsv(IMPORT_DECISION_HEADERS, importDecisionRows, "qpcr-import-decisions.tsv");
+    const dictionaryRows = [...SUPPLIED_EXPORT_DICTIONARY, ...IMPORT_DECISION_EXPORT_DICTIONARY].map((entry) => ({
       schema_version: SUPPLIED_RESULTS_EXPORT_SCHEMA_VERSION,
       sheet: entry.sheet,
       field: entry.field,
@@ -148,7 +155,7 @@ export default function SuppliedResultExplorer({ results, records, analysisStart
       ["Reference Method", provenance?.referenceMethod ?? ""],
       ["Source Calibrator", displayedCalibrator],
     ]);
-    const dictionarySheet = XLSX.utils.json_to_sheet(SUPPLIED_EXPORT_DICTIONARY.map((entry) => ({
+    const dictionarySheet = XLSX.utils.json_to_sheet([...SUPPLIED_EXPORT_DICTIONARY, ...IMPORT_DECISION_EXPORT_DICTIONARY].map((entry) => ({
       schema_version: SUPPLIED_RESULTS_EXPORT_SCHEMA_VERSION,
       sheet: entry.sheet,
       field: entry.field,
@@ -157,6 +164,7 @@ export default function SuppliedResultExplorer({ results, records, analysisStart
     })));
     XLSX.utils.book_append_sheet(workbook, resultSheet, "Complete Results");
     XLSX.utils.book_append_sheet(workbook, traceabilitySheet, "Supplied Values");
+    if (importDecisionRows.length) XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(importDecisionRows, { header: [...IMPORT_DECISION_HEADERS] }), "Import Decisions");
     XLSX.utils.book_append_sheet(workbook, metadataSheet, "Export Metadata");
     XLSX.utils.book_append_sheet(workbook, dictionarySheet, "Data Dictionary");
     const bytes = XLSX.write(workbook, { bookType: "xlsx", type: "array", cellStyles: true });

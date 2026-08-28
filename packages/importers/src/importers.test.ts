@@ -7,6 +7,7 @@ import {
   buildQpcrInputTemplateWorkbook,
   parseWorkbookBytes,
   QPCR_INPUT_TEMPLATE_HEADERS,
+  recordImportDecision,
   validateAnalysisStartSource,
   validateQpcrInputTemplate,
 } from "./index";
@@ -100,10 +101,11 @@ describe("qPCR user input template", () => {
     ]);
 
     const bytes = XLSX.write(workbook, { bookType: "xlsx", type: "array" }) as ArrayBuffer;
-    const source = parseWorkbookBytes(bytes, "delta-cq-without-cq-column.xlsx");
+    let source = parseWorkbookBytes(bytes, "delta-cq-without-cq-column.xlsx");
 
     expect(validateQpcrInputTemplate(source)).toMatchObject({ errorCount: 0 });
     expect(getSourceCapabilities(source)).toMatchObject({ role: "primary-result", hasCq: false });
+    source = recordImportDecision(source, { scope: "source", field: "referenceTargets", action: "confirm", issueCode: "missing-reference-target", reason: "Proceed with incomplete provenance" });
     expect(assessImportReadiness([source])).toMatchObject({
       analysisMode: "quantification",
       canAnalyze: true,
@@ -119,10 +121,11 @@ describe("qPCR user input template", () => {
       ["A2", "A2", "Control", "GENE", 2, 3.2],
     ]);
     const bytes = XLSX.write(workbook, { bookType: "xlsx", type: "array" }) as ArrayBuffer;
-    const source = parseWorkbookBytes(bytes, "delta-cq-optional-well-conflict.xlsx");
+    let source = parseWorkbookBytes(bytes, "delta-cq-optional-well-conflict.xlsx");
 
     expect(getSourceCapabilities(source).blockingConflicts).toEqual([]);
     expect(validateQpcrInputTemplate(source)).toMatchObject({ errorCount: 0 });
+    source = recordImportDecision(source, { scope: "source", field: "referenceTargets", action: "confirm", issueCode: "missing-reference-target", reason: "Proceed with incomplete provenance" });
     expect(assessImportReadiness([source])).toMatchObject({ status: "ready", canAnalyze: true, layoutRequired: false });
   });
 
@@ -165,7 +168,7 @@ describe("qPCR user input template", () => {
   });
 
   it("does not validate an independent layout source as a Delta result after switching starts", () => {
-    const result = parseDelimitedText(
+    let result = parseDelimitedText(
       "Sample\tAssay\tReplicate\tDelta Cq\nControl\tGENE\t1\t3.0\n",
       "delta-result.tsv",
     );
@@ -175,6 +178,7 @@ describe("qPCR user input template", () => {
     );
     result.metadata.qpcrAnalysisStart = "delta-cq";
     layout.metadata.qpcrAnalysisStart = "delta-cq";
+    result = recordImportDecision(result, { scope: "source", field: "referenceTargets", action: "confirm", issueCode: "missing-reference-target", reason: "Proceed with incomplete provenance" });
 
     expect(validateAnalysisStartSource(layout)).toBeNull();
     expect(assessImportReadiness([result, layout])).toMatchObject({
