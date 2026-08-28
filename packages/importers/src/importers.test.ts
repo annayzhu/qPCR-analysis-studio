@@ -348,6 +348,8 @@ describe("Roche LightCycler 480 adapter", () => {
     const dataset = buildCanonicalDataset([source]);
     expect(dataset.wells).toHaveLength(2);
     expect(new Set(dataset.wells.map((well) => well.plateId)).size).toBe(2);
+    expect(dataset.wells.map((well) => well.plateName)).toEqual(["Plate 01", "Plate 02"]);
+    expect(dataset.wells.every((well) => well.plateName !== well.plateId)).toBe(true);
     expect(dataset.assumptions.join(" ")).toContain("检测到 2 块板");
   });
 

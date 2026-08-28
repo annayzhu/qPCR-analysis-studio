@@ -387,6 +387,7 @@ export function buildCanonicalDataset(inputSources: ImportedSource[]): Canonical
       return {
         id: stableId("well", `${partial.plateId}:${partial.well}`),
         plateId: partial.plateId,
+        plateName: partial.plateName,
         well: partial.well,
         row,
         column,

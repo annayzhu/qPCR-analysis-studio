@@ -118,6 +118,8 @@ export interface QcFlag {
 export interface WellRecord {
   id: string;
   plateId: string;
+  /** Human-readable plate name from the imported data. plateId remains the stable join key. */
+  plateName?: string;
   well: string;
   row: string;
   column: number;

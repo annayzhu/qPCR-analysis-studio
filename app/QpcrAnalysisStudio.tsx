@@ -56,6 +56,20 @@ function singleWellCqDisplay(well: WellRecord, l: Localizer): string {
   return l("未提供", "Not provided");
 }
 
+function plateDisplayName(wells: WellRecord[], plateId: string, index: number, l: Localizer): string {
+  const representative = wells.find((well) => well.plateId === plateId);
+  const importedName = representative?.plateName?.trim();
+  if (importedName) return importedName;
+
+  const sourceSheet = representative?.sourceSheet?.trim();
+  if (sourceSheet && !/^(?:data|sheet\s*\d*|well[_ -]?detail)$/i.test(sourceSheet)) return sourceSheet;
+
+  const sourceFileName = representative?.rawRow.sourceFileName?.trim();
+  if (sourceFileName) return sourceFileName.replace(/\.(?:xlsx?|csv|tsv|txt)$/i, "");
+
+  return l(`第 ${index + 1} 块板`, `Plate ${index + 1}`);
+}
+
 function targetColor(target: string): string {
   const palette = ["#198a80", "#b97235", "#516ca8", "#8b659d", "#b55566", "#397d9a", "#6b8751"];
   let hash = 0;
@@ -271,6 +285,11 @@ export default function QpcrAnalysisStudio() {
   const calibrator = sessionView?.settings.calibratorValue ?? "";
   const selectedWells = useMemo(() => draftWells.filter((well) => selected.includes(well.id)), [draftWells, selected]);
   const plateIds = useMemo(() => [...new Set(draftWells.map((well) => well.plateId))], [draftWells]);
+  const plateOptions = useMemo(
+    () => plateIds.map((plateId, index) => ({ plateId, label: plateDisplayName(draftWells, plateId, index, l) })),
+    [draftWells, l, plateIds],
+  );
+  const plateLabelById = useMemo(() => new Map(plateOptions.map((option) => [option.plateId, option.label])), [plateOptions]);
   const activePlateWells = useMemo(
     () => draftWells.filter((well) => well.plateId === (activePlateId || plateIds[0])),
     [activePlateId, draftWells, plateIds],
@@ -1143,8 +1162,11 @@ export default function QpcrAnalysisStudio() {
             {view === "plate" && plateDefinition && (
               <div className="plate-workspace">
                 <div className="section-heading plate-heading">
-                  <div><p className="eyebrow">PLATE WORKSPACE</p><h2>{l(`${plateDefinition.plateFormat} 孔板 · ${activeNamedReactionCount} 个已定义反应`, `${plateDefinition.plateFormat}-well plate · ${activeNamedReactionCount} defined reactions`)}</h2>{plateIds.length > 1 && <label className="active-plate-selector">{l("当前板", "Active plate")}<select value={activePlateId || plateIds[0]} onChange={(event) => { setActivePlateId(event.target.value); setTransferDestinationPlateId(event.target.value); setSelected([]); setSelectionAnchor(null); }}>{plateIds.map((plateId) => <option key={plateId} value={plateId}>{plateId}</option>)}</select></label>}</div>
-                  <div className="legend"><span><i className="dot selected-dot" />{l("已选", "Selected")}</span><span><i className="dot alignment-warning-dot" />{l("布局对齐提示", "Layout alignment")}</span><span><i className="dot group-warning-dot" />{l("复孔组提示", "Replicate-group warning")}</span><span><i className="dot warning-dot" />{l("孔级提示", "Well-level alert")}</span><span><i className="dot excluded-dot" />{l("已排除", "Excluded")}</span></div>
+                  <div className="plate-heading-copy"><p className="eyebrow">PLATE WORKSPACE</p><h2>{l(`${plateDefinition.plateFormat} 孔板 · ${activeNamedReactionCount} 个已定义反应`, `${plateDefinition.plateFormat}-well plate · ${activeNamedReactionCount} defined reactions`)}</h2></div>
+                  <div className="plate-heading-tools">
+                    {plateIds.length > 1 && <label className="active-plate-selector"><span>{l("当前板", "Active plate")}</span><select aria-label={l("当前板", "Active plate")} value={activePlateId || plateIds[0]} onChange={(event) => { setActivePlateId(event.target.value); setTransferDestinationPlateId(event.target.value); setSelected([]); setSelectionAnchor(null); }}>{plateOptions.map((option) => <option key={option.plateId} value={option.plateId}>{option.label}</option>)}</select></label>}
+                    <div className="legend"><span><i className="dot selected-dot" />{l("已选", "Selected")}</span><span><i className="dot alignment-warning-dot" />{l("布局对齐提示", "Layout alignment")}</span><span><i className="dot group-warning-dot" />{l("复孔组提示", "Replicate-group warning")}</span><span><i className="dot warning-dot" />{l("孔级提示", "Well-level alert")}</span><span><i className="dot excluded-dot" />{l("已排除", "Excluded")}</span></div>
+                  </div>
                 </div>
                 {dataset.warnings.map((warning) => <div className="notice" key={warning}>{localizeRuntimeMessage(warning, language)}</div>)}
                 {error && <div className="notice error">{localizeRuntimeMessage(error, language)}</div>}
@@ -1262,7 +1284,7 @@ export default function QpcrAnalysisStudio() {
                       </div>
                       <div className="layout-transfer-form">
                         <label>{l("操作", "Operation")}<select value={transferMode} onChange={(event) => setTransferMode(event.target.value as "move" | "copy" | "swap")}><option value="move">{l("移动", "Move")}</option><option value="copy">{l("复制", "Copy")}</option><option value="swap">{l("交换", "Swap")}</option></select></label>
-                        {plateIds.length > 1 && <label>{l("目标板", "Destination plate")}<select value={transferDestinationPlateId || selectedWells[0]?.plateId || plateIds[0]} onChange={(event) => setTransferDestinationPlateId(event.target.value)}>{plateIds.map((plateId) => <option key={plateId} value={plateId}>{plateId}</option>)}</select></label>}
+                        {plateIds.length > 1 && <label>{l("目标板", "Destination plate")}<select value={transferDestinationPlateId || selectedWells[0]?.plateId || plateIds[0]} onChange={(event) => setTransferDestinationPlateId(event.target.value)}>{plateOptions.map((option) => <option key={option.plateId} value={option.plateId}>{option.label}</option>)}</select></label>}
                         <label>{l("目标左上角孔", "Destination top-left well")}<input value={transferDestination} placeholder="B4" onChange={(event) => setTransferDestination(event.target.value.toUpperCase())} /></label>
                       </div>
                       {transferDestination && (
@@ -1271,7 +1293,7 @@ export default function QpcrAnalysisStudio() {
                             const source = draftWells.find((well) => well.id === mapping.sourceWellId);
                             const destination = draftWells.find((well) => well.id === mapping.destinationWellId);
                             const sourceLabel = [source?.sampleName, source?.targetName].filter(Boolean).join(" / ") || l("无布局注释", "No layout annotation");
-                            return `${source?.plateId ?? ""} ${mapping.sourceWell} [${sourceLabel}] → ${destination?.plateId ?? ""} ${mapping.destinationWell} [Cp ${destination ? singleWellCqDisplay(destination, l) : "—"}]`;
+                            return `${plateLabelById.get(source?.plateId ?? "") ?? ""} ${mapping.sourceWell} [${sourceLabel}] → ${plateLabelById.get(destination?.plateId ?? "") ?? ""} ${mapping.destinationWell} [Cp ${destination ? singleWellCqDisplay(destination, l) : "—"}]`;
                           }).join(" · ")}{layoutTransferPreview.mappings.length > 4 ? "…" : ""}</span></> : <><b>{l("暂不能应用", "Cannot apply")}</b><span>{layoutTransferPreview?.error === "collision" ? l("目标区域已有布局，系统不会静默覆盖。请先清空、移动或使用交换。", "The destination already contains layout annotations. Nothing will be overwritten silently; clear, move, or use swap first.") : layoutTransferPreview?.error === "out-of-bounds" ? l("目标区域超出孔板范围。", "The destination extends beyond the plate.") : layoutTransferPreview?.error === "mixed-source-plates" ? l("一次操作只能选择同一块板。", "One operation can only use wells from the same plate.") : layoutTransferPreview?.error === "overlapping-copy" ? l("复制目标不能与源区域重叠，否则无法完整保留源布局。", "A copy destination cannot overlap the source region because the full source must be retained.") : layoutTransferPreview?.error === "overlapping-swap" ? l("交换区域不能与源区域重叠。", "Swap regions cannot overlap.") : l("请输入板内有效目标孔。", "Enter a valid destination well.")}</span></>}
                         </div>
                       )}
