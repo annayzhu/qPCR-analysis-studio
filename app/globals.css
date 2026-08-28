@@ -388,6 +388,22 @@ button.axis-label:hover { color: var(--teal); background: var(--teal-soft); bord
 .selection-qc-list strong { color: #67471e; font-size: 8px; }.selection-qc-list span { flex: none; color: #9a7a4d; font-size: 7px; }
 .selection-qc-list p { margin: 4px 0 0; color: #75624a; font-size: 7px; line-height: 1.5; }
 .selection-qc-list small { display: block; margin-top: 3px; color: #9b8567; font-size: 6.5px; }
+
+.plate-workspace .active-plate-selector, .plate-workspace .legend { font-size: 10px; }
+.plate-workspace .active-plate-selector select { font-size: 10px; }
+.plate-workspace .selection-guide { font-size: 10px; }
+.plate-workspace .axis-label { font-size: 9px; }
+.plate-workspace .well-name { font-size: 8px; }
+.plate-workspace .well-cell b { font-size: 9px; }
+.plate-workspace .well-cell small { font-size: 8px; }
+.plate-workspace .plate-96 .well-cell b { font-size: 11px; }
+.plate-workspace .plate-96 .well-cell small { font-size: 10px; }
+.plate-workspace .editor-header > p:last-child, .plate-workspace .selection-actions button { font-size: 9px; }
+.plate-workspace .selection-summary span, .plate-workspace .selection-qc-heading span { font-size: 9px; }
+.plate-workspace .selection-summary b, .plate-workspace .selection-qc-heading b { font-size: 10px; }
+.plate-workspace .selection-qc-alerts > p, .plate-workspace .selection-qc-list strong, .plate-workspace .selection-qc-list p, .plate-workspace .selection-qc-list span, .plate-workspace .selection-qc-list small { font-size: 9px; }
+.plate-workspace .form-stack label, .plate-workspace .form-label, .plate-workspace .layout-transfer-form label { font-size: 10px; }
+.plate-workspace .layout-correction-heading span, .plate-workspace .layout-transfer-preview span, .plate-workspace .paste-details > p, .plate-workspace .paste-format code, .plate-workspace .paste-collision-confirm, .plate-workspace .microcopy { font-size: 9px; }
 .form-stack { display: grid; gap: 10px; }
 .form-stack label, .form-label { display: grid; gap: 5px; color: var(--muted); font-size: 9px; font-weight: 700; }
 .form-stack input { font-size: 10px; }
@@ -719,6 +735,7 @@ footer { display: flex; justify-content: space-between; padding: 19px clamp(20px
 .compact-card-heading h3, .provenance-card h3, .audit-card h3 { font-size: 15px; }
 .qc-scope-counts { display: flex; gap: 5px; margin-top: 6px; }
 .qc-scope-counts span { padding: 3px 6px; border-radius: 99px; color: #637873; background: #edf4f2; font-size: 7px; font-weight: 730; }
+.qc-workflow-hint { margin: 6px 0 0; color: #71807b; font-size: 8px; line-height: 1.45; }
 .inline-rules { max-width: 300px; position: relative; color: #61736f; font-size: 8px; }
 .inline-rules summary { cursor: pointer; white-space: nowrap; }
 .inline-rules p { margin: 7px 0 0; padding: 8px; border: 1px solid #d7e4e0; border-radius: 7px; background: #f5f9f8; line-height: 1.55; }
@@ -726,6 +743,15 @@ footer { display: flex; justify-content: space-between; padding: 19px clamp(20px
 .compact-qc-table { max-height: 560px; box-shadow: none; }
 .compact-qc-table table { min-width: 940px; }
 .compact-qc-table th { position: sticky; top: 0; z-index: 1; }
+.qc-well-links { display: flex; flex-wrap: wrap; gap: 3px; }
+.qc-well-links button { min-height: 28px; padding: 4px 7px; border: 1px solid #d6dfdc; border-radius: 6px; color: #506762; background: #f8faf9; font-size: 8px; font-weight: 720; font-variant-numeric: tabular-nums; }
+.qc-well-links button:hover { color: #126d65; border-color: #91beb7; background: #edf7f5; }
+.qc-review-action { min-width: 124px; display: flex; align-items: center; justify-content: space-between; gap: 9px; padding: 6px 8px; border: 1px solid #dfbf91; border-radius: 7px; color: #7f561f; background: #fff8ec; text-align: left; }
+.qc-review-action span, .qc-review-action b, .qc-review-action small { display: block; }
+.qc-review-action b { font-size: 8px; }
+.qc-review-action small { margin-top: 2px; color: #9a7545; font-size: 7px; }
+.qc-review-action svg { width: 16px; height: 16px; flex: none; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.5; }
+.qc-review-action:hover { border-color: #c88b40; background: #fff1d9; transform: translateX(1px); }
 .overview-side-stack { display: grid; gap: 12px; }
 .provenance-card .card-heading button { border: 0; color: var(--teal); background: transparent; font-size: 8px; font-weight: 750; }
 .source-summary-list { display: grid; gap: 1px; margin-top: 11px; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: var(--line); }

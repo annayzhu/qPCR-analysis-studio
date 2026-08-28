@@ -953,6 +953,16 @@ export default function QpcrAnalysisStudio() {
     setView(nextView);
   }
 
+  function openQcWellsInPlate(row: ReplicateQc, requestedWells: string[] = row.wells) {
+    const matchingWells = draftWells.filter((well) => well.plateId === row.plateId && requestedWells.includes(well.well));
+    if (!matchingWells.length) return;
+    setActivePlateId(row.plateId);
+    setTransferDestinationPlateId(row.plateId);
+    setSelected(matchingWells.map((well) => well.id));
+    setSelectionAnchor(matchingWells[0].id);
+    setView("plate");
+  }
+
   function toggleOrderedSelection(value: string, selectedValues: string[], update: (values: string[]) => void) {
     update(selectedValues.includes(value)
       ? selectedValues.filter((item) => item !== value)
@@ -1116,7 +1126,7 @@ export default function QpcrAnalysisStudio() {
                 /> : <div className="overview-qc-grid">
                   {plateDefinition && <article className="qc-workbench">
                     <div className="card-heading compact-card-heading">
-                      <div><p className="eyebrow">REPLICATE QC</p><h3>{l("技术复孔", "Technical replicates")}</h3><div className="qc-scope-counts"><span>{l(`复孔组 ${qcIssueCount}`, `${qcIssueCount} replicate group(s)`)}</span><span>{l(`孔级 ${qcWellIssueCount}`, `${qcWellIssueCount} well alert(s)`)}</span></div></div>
+                      <div><p className="eyebrow">REPLICATE QC</p><h3>{l("技术复孔", "Technical replicates")}</h3><div className="qc-scope-counts"><span>{l(`复孔组 ${qcIssueCount}`, `${qcIssueCount} replicate group(s)`)}</span><span>{l(`孔级 ${qcWellIssueCount}`, `${qcWellIssueCount} well alert(s)`)}</span></div><p className="qc-workflow-hint">{l("点击孔位定位单孔；“去板上复核”定位整个复孔组。", "Select a well to locate it, or review the complete replicate group on the plate.")}</p></div>
                       <details className="inline-rules"><summary>{l("规则：Cq/Tm 极差 > 0.5", "Rule: Cq/Tm range > 0.5")}</summary><p>{l("仅提示，不自动排除；单孔不计算 SD/CV；Tm 偏移需结合曲线和实验设计人工判断。", "Warnings do not automatically exclude wells. SD/CV are not calculated for a single well. Interpret Tm shifts with the curve and experimental design.")}</p></details>
                     </div>
                     <div className="table-filterbar compact-filterbar">
@@ -1128,7 +1138,7 @@ export default function QpcrAnalysisStudio() {
                       <table>
                         <thead><tr><th>{l("样本", "Sample")}</th><th>{l("靶标", "Target")}</th><th>{l("孔位", "Wells")}</th>{hasRawQuantification && <><th>{l("有效 Cq/总数", "Valid/total Cq")}</th><th>Mean Cq</th><th>SD</th><th>Cq range</th><th>{l("线性量 CV%", "Linear quantity CV%")}</th></>}{hasMeltAnalysis && <><th>Mean Tm1</th><th>Tm1 range</th><th>{l("第二峰", "Second peak")}</th><th>{l("熔解分组", "Melt groups")}</th></>}<th>{l("判定", "Status")}</th></tr></thead>
                         <tbody>{filteredQc.map((row) => <tr key={row.id} className={row.warningCodes.length ? "flagged-row" : ""}>
-                          <td><b>{row.sampleName}</b></td><td>{row.targetName}</td><td>{row.wells.join(", ")}</td>{hasRawQuantification && <><td>{row.validReplicates}/{row.totalReplicates}</td><td>{formatNumber(row.meanCq, 3)}</td><td>{formatNumber(row.sdCq, 3)}</td><td>{formatNumber(row.cqRange, 3)}</td><td>{formatNumber(row.linearQuantityCvPercent, 1)}</td></>}{hasMeltAnalysis && <><td>{formatNumber(row.meanTm1, 2)}</td><td>{formatNumber(row.tm1Range, 2)}</td><td>{row.secondaryPeakCount || "—"}</td><td>{row.meltGroups.join(", ") || "—"}</td></>}<td>{row.warningCodes.length ? <span className="status warning-status">{l("复核", "Review")} {row.suspectWell ? `· ${row.suspectWell}` : ""}</span> : <span className="status pass-status">{l("通过", "Pass")}</span>}</td>
+                          <td><b>{row.sampleName}</b></td><td>{row.targetName}</td><td><div className="qc-well-links">{row.wells.map((wellName) => <button type="button" key={wellName} onClick={() => openQcWellsInPlate(row, [wellName])} aria-label={l(`在板工作区查看 ${wellName}`, `Open ${wellName} in the plate workspace`)}>{wellName}</button>)}</div></td>{hasRawQuantification && <><td>{row.validReplicates}/{row.totalReplicates}</td><td>{formatNumber(row.meanCq, 3)}</td><td>{formatNumber(row.sdCq, 3)}</td><td>{formatNumber(row.cqRange, 3)}</td><td>{formatNumber(row.linearQuantityCvPercent, 1)}</td></>}{hasMeltAnalysis && <><td>{formatNumber(row.meanTm1, 2)}</td><td>{formatNumber(row.tm1Range, 2)}</td><td>{row.secondaryPeakCount || "—"}</td><td>{row.meltGroups.join(", ") || "—"}</td></>}<td>{row.warningCodes.length ? <button type="button" className="qc-review-action" onClick={() => openQcWellsInPlate(row)}><span><b>{l("去板上复核", "Review on plate")}</b><small>{row.suspectWell ? l(`优先检查 ${row.suspectWell}`, `Inspect ${row.suspectWell} first`) : l(`${row.wells.length} 个孔`, `${row.wells.length} wells`)}</small></span><svg aria-hidden="true" viewBox="0 0 16 16"><path d="M3 8h9M9 4.5 12.5 8 9 11.5" /></svg></button> : <span className="status pass-status">{l("通过", "Pass")}</span>}</td>
                         </tr>)}</tbody>
                       </table>
                     </div>
