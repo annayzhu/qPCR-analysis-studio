@@ -20,6 +20,7 @@ import {
   VISUALIZATION_BAR_HEADERS,
 } from "@/packages/qpcr-core/src";
 import { useLanguage } from "../i18n";
+import VisualizationStudioLink from "./VisualizationStudioLink";
 
 function downloadBlob(blob: Blob, fileName: string) {
   const url = URL.createObjectURL(blob);
@@ -38,11 +39,12 @@ function safeFileName(value: string): string {
   return value.trim().replace(/[^\p{L}\p{N}._-]+/gu, "-") || "qpcr-expression";
 }
 
-function SuppliedChart({ rows, target, sampleOrder, showSd }: {
+function SuppliedChart({ rows, target, sampleOrder, showSd, exportFileStem }: {
   rows: SuppliedCalculationResult[];
   target: string;
   sampleOrder: string[];
   showSd: boolean;
+  exportFileStem: string;
 }) {
   const { l } = useLanguage();
   const svgRef = useRef<SVGSVGElement>(null);
@@ -74,11 +76,11 @@ function SuppliedChart({ rows, target, sampleOrder, showSd }: {
   return <div className="chart-card publication-chart-card chart-theme-paper supplied-chart-card">
     <div className="chart-heading publication-chart-heading"><div><h3>{target}</h3><p>{l("用户提供计算值 · 2 的负指数转换", "User-supplied calculation · negative power-of-two transform")}</p></div><button type="button" onClick={() => {
       const svg = markup();
-      if (svg) downloadBlob(new Blob([svg], { type: "image/svg+xml;charset=utf-8" }), `${safeFileName(target)}-supplied-expression.svg`);
+      if (svg) downloadBlob(new Blob([svg], { type: "image/svg+xml;charset=utf-8" }), `${exportFileStem}-${safeFileName(target)}-supplied-expression.svg`);
     }}>SVG</button></div>
-    <div className="chart-scroll"><svg ref={svgRef} viewBox={`0 0 ${width} ${height}`} role="img" aria-label={`${target} expression`} style={{ minWidth: `${width}px`, background: "#fff", fontFamily: "Arial, Helvetica, sans-serif" }}>
+    <div className="chart-scroll"><svg ref={svgRef} className="expression-chart publication-expression-chart" viewBox={`0 0 ${width} ${height}`} role="img" aria-label={`${target} expression`} style={{ minWidth: `${width}px`, background: "#fff", fontFamily: "Arial, Helvetica, sans-serif" }}>
       <rect width={width} height={height} fill="#fff" />
-      {axis.tickValues.map((tick) => <g key={tick}><line x1={left} x2={width - right} y1={y(tick)} y2={y(tick)} stroke="#e7ded4" strokeWidth=".8" /><text x={left - 8} y={y(tick) + 3} textAnchor="end" fill="#687071" fontSize="9">{tick >= 1 ? tick.toFixed(tick % 1 ? 1 : 0) : tick.toPrecision(2)}</text></g>)}
+      {axis.tickValues.map((tick) => <g key={tick}><line x1={left} x2={width - right} y1={y(tick)} y2={y(tick)} stroke="#e7ded4" strokeWidth=".8" /><text x={left - 8} y={y(tick) + 3.5} textAnchor="end" fill="#687071" fontSize="11">{tick >= 1 ? tick.toFixed(tick % 1 ? 1 : 0) : tick.toPrecision(2)}</text></g>)}
       <line x1={left} x2={width - right} y1={y(1)} y2={y(1)} stroke="#a66a3f" strokeDasharray="4 3" />
       {plotted.map((row, index) => {
         const center = left + slot * (index + .5);
@@ -88,15 +90,15 @@ function SuppliedChart({ rows, target, sampleOrder, showSd }: {
         const errorBottom = row.sd === null ? null : y(Math.max(Number.EPSILON, row.value - row.sd));
         return <g key={row.label}><rect x={center - barWidth / 2} y={Math.min(baseY, topY)} width={barWidth} height={Math.max(1, Math.abs(baseY - topY))} rx="1.5" fill="#4f827c" />
           {showSd && errorTop !== null && errorBottom !== null && <g stroke="#343a3b" strokeWidth="1"><line x1={center} x2={center} y1={errorTop} y2={errorBottom} /><line x1={center - 5} x2={center + 5} y1={errorTop} y2={errorTop} /><line x1={center - 5} x2={center + 5} y1={errorBottom} y2={errorBottom} /></g>}
-          <text x={center} y={bottom + 19} textAnchor="middle" fill="#4f5658" fontSize="9">{row.label.length > 14 ? `${row.label.slice(0, 13)}…` : row.label}</text></g>;
+          <text x={center} y={bottom + 19} textAnchor="middle" fill="#4f5658" fontSize="11">{row.label.length > 14 ? `${row.label.slice(0, 13)}…` : row.label}</text></g>;
       })}
-      <text x={(left + width - right) / 2} y={height - 18} textAnchor="middle" fill="#303536" fontSize="10">{l("样本", "Sample")}</text>
-      <text x="17" y={(top + bottom) / 2} textAnchor="middle" transform={`rotate(-90 17 ${(top + bottom) / 2})`} fill="#303536" fontSize="10">Relative expression (log₂ ratio axis)</text>
+      <text x={(left + width - right) / 2} y={height - 18} textAnchor="middle" fill="#303536" fontSize="12">{l("样本", "Sample")}</text>
+      <text x="18" y={(top + bottom) / 2} textAnchor="middle" transform={`rotate(-90 18 ${(top + bottom) / 2})`} fill="#303536" fontSize="12">Relative expression (log₂ ratio axis)</text>
     </svg></div>
   </div>;
 }
 
-export default function SuppliedResultExplorer({ results, records, analysisStart, sampleOrder, targetOrder, provenance, importDecisions }: {
+export default function SuppliedResultExplorer({ results, records, analysisStart, sampleOrder, targetOrder, provenance, importDecisions, exportFileStem }: {
   results: SuppliedCalculationResult[];
   records: SuppliedCalculationRecord[];
   analysisStart: Exclude<AnalysisStart, "cq">;
@@ -104,6 +106,7 @@ export default function SuppliedResultExplorer({ results, records, analysisStart
   targetOrder: string[];
   provenance: SuppliedCalculationProvenance | null;
   importDecisions: ImportDecision[];
+  exportFileStem: string;
 }) {
   const { l } = useLanguage();
   const [showSd, setShowSd] = useState(false);
@@ -129,9 +132,9 @@ export default function SuppliedResultExplorer({ results, records, analysisStart
     downloadBlob(new Blob(["\uFEFF", lines.join("\r\n")], { type: "text/tab-separated-values;charset=utf-8" }), fileName);
   };
   const exportSuppliedTsvBundle = () => {
-    exportTsv(SUPPLIED_COMPLETE_HEADERS, completeRows, "qpcr-supplied-calculation-results.tsv");
-    exportTsv(SUPPLIED_TRACEABILITY_HEADERS, traceabilityRows, "qpcr-supplied-values-traceability.tsv");
-    if (importDecisionRows.length) exportTsv(IMPORT_DECISION_HEADERS, importDecisionRows, "qpcr-import-decisions.tsv");
+    exportTsv(SUPPLIED_COMPLETE_HEADERS, completeRows, `${exportFileStem}-supplied-calculation-results.tsv`);
+    exportTsv(SUPPLIED_TRACEABILITY_HEADERS, traceabilityRows, `${exportFileStem}-supplied-values-traceability.tsv`);
+    if (importDecisionRows.length) exportTsv(IMPORT_DECISION_HEADERS, importDecisionRows, `${exportFileStem}-import-decisions.tsv`);
     const dictionaryRows = [...SUPPLIED_EXPORT_DICTIONARY, ...IMPORT_DECISION_EXPORT_DICTIONARY].map((entry) => ({
       schema_version: SUPPLIED_RESULTS_EXPORT_SCHEMA_VERSION,
       sheet: entry.sheet,
@@ -139,7 +142,7 @@ export default function SuppliedResultExplorer({ results, records, analysisStart
       definition_zh: entry.definitionZh,
       definition_en: entry.definitionEn,
     }));
-    exportTsv(["schema_version", "sheet", "field", "definition_zh", "definition_en"], dictionaryRows, "qpcr-supplied-calculation-data-dictionary.tsv");
+    exportTsv(["schema_version", "sheet", "field", "definition_zh", "definition_en"], dictionaryRows, `${exportFileStem}-supplied-data-dictionary.tsv`);
   };
   const exportCompleteWorkbook = () => {
     const workbook = XLSX.utils.book_new();
@@ -168,7 +171,7 @@ export default function SuppliedResultExplorer({ results, records, analysisStart
     XLSX.utils.book_append_sheet(workbook, metadataSheet, "Export Metadata");
     XLSX.utils.book_append_sheet(workbook, dictionarySheet, "Data Dictionary");
     const bytes = XLSX.write(workbook, { bookType: "xlsx", type: "array", cellStyles: true });
-    downloadBlob(new Blob([bytes], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }), "qpcr-supplied-calculation-results.xlsx");
+    downloadBlob(new Blob([bytes], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }), `${exportFileStem}-supplied-calculation.xlsx`);
   };
   const barRecords = barRows as unknown as Array<Record<string, string | number | null>>;
   return <div className="result-explorer supplied-result-explorer">
@@ -187,10 +190,10 @@ export default function SuppliedResultExplorer({ results, records, analysisStart
       <div className="result-commandbar-grid supplied-commandbar-grid">
         <div className="result-command-group"><span className="command-group-label">{l("显示", "Display")}</span><button type="button" className={showSd ? "filter-chip active" : "filter-chip"} onClick={() => setShowSd((value) => !value)}>{l("技术复孔 SD", "Technical-replicate SD")}</button></div>
         <div className="result-command-group result-export-group"><span className="command-group-label">{l("完整计算结果", "Complete results")}</span><div className="visualization-export-actions"><button type="button" onClick={exportCompleteWorkbook}>Excel</button><button type="button" onClick={exportSuppliedTsvBundle}>TSV</button></div><small className="export-format-hint">{l("Excel 含溯源、版本与数据字典；TSV 同时下载字典", "Excel includes provenance, version, and dictionary sheets; TSV also downloads its dictionary")}</small></div>
-        <div className="result-command-group result-export-group visualization-studio-export-group"><span className="command-group-label">Visualization Studio · {l("柱状图格式", "Bar-chart format")}</span><div className="visualization-export-actions"><button type="button" onClick={() => exportTable(VISUALIZATION_BAR_HEADERS, barRecords, "qpcr-visualization-bar.xlsx")}>{l("柱状图 Excel", "Bar Excel")}</button><button type="button" onClick={() => exportTsv(VISUALIZATION_BAR_HEADERS, barRecords, "qpcr-visualization-bar.tsv")}>{l("柱状图 TSV", "Bar TSV")}</button></div><small className="export-format-hint">category · value · sd · sem · group</small></div>
+        <div className="result-command-group result-export-group visualization-studio-export-group"><div className="command-group-label-row"><span className="command-group-label">Visualization Studio · {l("柱状图格式", "Bar-chart format")}</span><VisualizationStudioLink /></div><div className="visualization-export-actions"><button type="button" onClick={() => exportTable(VISUALIZATION_BAR_HEADERS, barRecords, `${exportFileStem}-visualization-bar.xlsx`)}>{l("柱状图 Excel", "Bar Excel")}</button><button type="button" onClick={() => exportTsv(VISUALIZATION_BAR_HEADERS, barRecords, `${exportFileStem}-visualization-bar.tsv`)}>{l("柱状图 TSV", "Bar TSV")}</button></div><small className="export-format-hint">category · value · sd · sem · group</small></div>
       </div>
     </section>
-    <div className="result-chart-stack">{chartTargets.map((target) => <SuppliedChart key={target} rows={filtered} target={target} sampleOrder={sampleOrder} showSd={showSd} />)}</div>
+    <div className="result-chart-stack">{chartTargets.map((target) => <SuppliedChart key={target} rows={filtered} target={target} sampleOrder={sampleOrder} showSd={showSd} exportFileStem={exportFileStem} />)}</div>
     <div className="table-section-heading"><h3>{l("完整计算结果", "Complete calculation results")}</h3><p>{l("Δ值来自用户；均值、SD、SEM和指数转换由系统计算。", "Delta values are user supplied; means, SD, SEM, and exponential transforms are calculated by the system.")}</p></div>
     <div className="table-wrap result-table-wrap"><table><thead><tr><th>{l("样本", "Sample")}</th><th>{l("目标基因", "Target")}</th><th>{l("有效复孔 n", "Valid n")}</th><th>ΔCq</th><th>{l("ΔCq 技术 SD", "ΔCq technical SD")}</th><th>{l("ΔCq 技术 SEM", "ΔCq technical SEM")}</th><th>2^-ΔCq</th><th>ΔΔCq</th><th>2^-ΔΔCq</th><th>{l("传播 SD", "Propagated SD")}</th><th>{l("传播 SEM", "Propagated SEM")}</th><th>{l("来源", "Provenance")}</th></tr></thead>
       <tbody>{filtered.map((row) => <tr key={`${row.sampleName}-${row.targetName}`}><td><b>{row.sampleName}</b></td><td>{row.targetName}</td><td>{row.validReplicates}</td><td>{formatNumber(row.deltaCq)}</td><td>{formatNumber(row.deltaCqSd)}</td><td>{formatNumber(row.deltaCqSem)}</td><td>{formatNumber(row.normalizedQuantity)}</td><td>{formatNumber(row.deltaDeltaCq)}</td><td><strong className="expression-value">{formatNumber(row.relativeExpression)}</strong></td><td>{formatNumber(row.relativeExpressionSd ?? row.normalizedQuantitySd)}</td><td>{formatNumber(row.relativeExpressionSem ?? row.normalizedQuantitySem)}</td><td>{l("用户提供的计算值", "User-supplied calculation")}</td></tr>)}</tbody></table></div>

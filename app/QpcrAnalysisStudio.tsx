@@ -31,6 +31,7 @@ import {
   transitionAnalysisSession,
 } from "@/packages/analysis-session/src";
 import type { AnalysisSessionCommand, AnalysisSessionState } from "@/packages/analysis-session/src";
+import { buildAnalysisExportStem } from "@/packages/qpcr-core/src";
 import ImportManager from "./components/ImportManager";
 import CalculationOverview from "./components/CalculationOverview";
 import MeltAnalysis from "./components/MeltAnalysis";
@@ -267,6 +268,12 @@ export default function QpcrAnalysisStudio() {
     [analysisSession],
   );
   const dataset = sessionView?.dataset ?? null;
+  const analysisExportStem = useMemo(
+    () => dataset
+      ? buildAnalysisExportStem(dataset.sources.map((source) => source.fileName), dataset.analysisStart, dataset.createdAt)
+      : "qpcr-analysis",
+    [dataset],
+  );
   const plateDefinition = dataset?.plate ?? null;
   const importedWells = sessionView?.importedWells ?? EMPTY_WELLS;
   const draftWells = sessionView?.draftWells ?? EMPTY_WELLS;
@@ -1375,7 +1382,7 @@ export default function QpcrAnalysisStudio() {
                       <p>{l("设置后计算 ΔΔCq 与相对表达量；未提供扩增效率时按 100% 计算并记录假设。", "A calibrator enables ΔΔCq and relative expression. Missing amplification efficiency is recorded and assumed to be 100%.")}</p>
                     </section>
                   </div>
-                  {!referenceTargets.length ? <div className="empty-table">{l("请先在第 1 区选择至少一个内参基因。", "Select at least one reference target in section 1.")}</div> : <ResultExplorer results={relativeResults} wells={appliedWells} sampleOrder={displaySamples} targetOrder={selectedDisplayTargets} settings={sessionView!.settings} provenanceWarnings={resultExportWarnings} importDecisions={importDecisions} />}
+                  {!referenceTargets.length ? <div className="empty-table">{l("请先在第 1 区选择至少一个内参基因。", "Select at least one reference target in section 1.")}</div> : <ResultExplorer results={relativeResults} wells={appliedWells} sampleOrder={displaySamples} targetOrder={selectedDisplayTargets} settings={sessionView!.settings} provenanceWarnings={resultExportWarnings} importDecisions={importDecisions} exportFileStem={analysisExportStem} />}
                 </> : <>
                   <div className={`result-settings-grid supplied-result-settings ${dataset.analysisStart === "delta-delta-cq" ? "single-setting" : ""}`}>
                     <section className="result-setting-step display-step">
@@ -1389,7 +1396,7 @@ export default function QpcrAnalysisStudio() {
                       <p>{l("ΔCq 已由用户提供；校准样本仅用于后续 ΔΔCq 与相对表达量。", "ΔCq is user supplied; the calibrator is used only for downstream ΔΔCq and relative expression.")}</p>
                     </section>}
                   </div>
-                  <SuppliedResultExplorer results={suppliedResults} records={dataset.suppliedCalculations} analysisStart={dataset.analysisStart} sampleOrder={displaySamples} targetOrder={selectedDisplayTargets} provenance={dataset.suppliedCalculationProvenance} importDecisions={importDecisions} />
+                  <SuppliedResultExplorer results={suppliedResults} records={dataset.suppliedCalculations} analysisStart={dataset.analysisStart} sampleOrder={displaySamples} targetOrder={selectedDisplayTargets} provenance={dataset.suppliedCalculationProvenance} importDecisions={importDecisions} exportFileStem={analysisExportStem} />
                 </>}</>}
                 {resultSection === "quantification" && !hasQuantification && <div className="empty-table">{l("当前仅导入了 Tm/熔解结果；添加单孔 Cq/Ct/Cp 后可进行相对定量。", "Only Tm/melt results are currently imported. Add well-level Cq/Ct/Cp data for relative quantification.")}</div>}
                 {resultSection === "melt" && hasMeltAnalysis && <MeltAnalysis wells={appliedWells} />}

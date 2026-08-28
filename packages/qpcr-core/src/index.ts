@@ -10,3 +10,4 @@ export * from "./complete-results-export";
 export * from "./calculation-workbook";
 export * from "./supplied-calculations";
 export * from "./supplied-overview";
+export * from "./export-file-naming";

@@ -40,7 +40,7 @@ npm run dev
 
 默认开发地址由 vinext 输出，通常是 `http://localhost:3000` 或下一个可用端口。
 
-“打开 Bar 图”默认链接到 Visualization Studio 本地独立版 `http://127.0.0.1:3400/visualization-studio/?plot=bar`。部署时可通过 `NEXT_PUBLIC_VISUALIZATION_STUDIO_URL` 指向实际的 Visualization Studio 地址；单文件离线版在没有 Node.js `process` 对象时也会安全使用该默认地址。
+“Visualization Studio · 柱状图格式”标题旁的箭头默认链接到独立 Site `https://visualization-studio.pountneycitlali784.chatgpt.site/?plot=bar`。该 Site 当前使用账户访问控制；部署时仍可通过 `NEXT_PUBLIC_VISUALIZATION_STUDIO_URL` 覆盖目标地址。所有结果、柱状图数据与图像导出文件名均由来源文件名、分析起点和分析日期组成，便于区分不同批次。
 
 ## 验证
 

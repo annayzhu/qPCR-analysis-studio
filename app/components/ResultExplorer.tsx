@@ -20,6 +20,7 @@ import {
   wrapChartLabel,
 } from "@/packages/qpcr-core/src";
 import { useLanguage } from "../i18n";
+import VisualizationStudioLink from "./VisualizationStudioLink";
 
 type SortKey = "sampleName" | "targetName" | "targetMeanCq" | "targetSdCq" | "deltaCq" | "normalizedQuantity" | "relativeExpression";
 
@@ -66,6 +67,7 @@ function ExpressionChart({
   showTechnicalSd,
   theme,
   axisMode,
+  exportFileStem,
 }: {
   rows: RelativeQuantificationResult[];
   target: string;
@@ -73,6 +75,7 @@ function ExpressionChart({
   showTechnicalSd: boolean;
   theme: ChartTheme;
   axisMode: AxisMode;
+  exportFileStem: string;
 }) {
   const { l } = useLanguage();
   const svgRef = useRef<SVGSVGElement>(null);
@@ -108,7 +111,7 @@ function ExpressionChart({
   const wrappedSampleLabels = chartRows.map((row) => wrapChartLabel(row.label, maxLabelUnitsPerLine));
   const longestLabelLine = Math.max(...wrappedSampleLabels.flat().map(chartLabelVisualUnits));
   const maxLabelLines = Math.max(...wrappedSampleLabels.map((lines) => lines.length));
-  const labelLineHeight = 10.5;
+  const labelLineHeight = 11.5;
   const labelTop = bottom + 15;
   const axisTitleY = labelTop + (maxLabelLines - 1) * labelLineHeight + 21;
   const height = Math.max(270, axisTitleY + 17);
@@ -156,7 +159,7 @@ function ExpressionChart({
   function exportSvg() {
     const markup = serializedSvg();
     if (!markup) return;
-    downloadBlob(new Blob([markup], { type: "image/svg+xml;charset=utf-8" }), `${safeFileName(target)}-relative-expression.svg`);
+    downloadBlob(new Blob([markup], { type: "image/svg+xml;charset=utf-8" }), `${exportFileStem}-${safeFileName(target)}-relative-expression.svg`);
   }
 
   async function exportPng() {
@@ -181,7 +184,7 @@ function ExpressionChart({
     context.drawImage(image, 0, 0, width, height);
     URL.revokeObjectURL(sourceUrl);
     const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/png", 1));
-    if (blob) downloadBlob(blob, `${safeFileName(target)}-relative-expression-4x.png`);
+    if (blob) downloadBlob(blob, `${exportFileStem}-${safeFileName(target)}-relative-expression-4x.png`);
   }
 
   return (
@@ -206,13 +209,13 @@ function ExpressionChart({
           {theme === "dark" && <rect x="1" y="1" width={width - 2} height={height - 2} fill="none" stroke={colors.border} strokeWidth="1" />}
           <g transform={`translate(${left}, 22)`}>
             <line x1="0" x2="16" y1="-1" y2="-1" stroke={colors.reference} strokeDasharray="4 3" />
-            <text x="22" y="2" fill={colors.muted} fontSize="9">Reference = 1</text>
-            {usesCalibrator && <g transform="translate(116, 0)"><rect x="0" y="-7" width="10" height="10" fill={colors.calibrator} stroke={colors.calibratorStroke} strokeWidth=".8" /><text x="15" y="2" fill={colors.muted} fontSize="9">{l("校准样本", "Calibrator")}</text></g>}
+            <text x="22" y="2" fill={colors.muted} fontSize="10">Reference = 1</text>
+            {usesCalibrator && <g transform="translate(122, 0)"><rect x="0" y="-7" width="10" height="10" fill={colors.calibrator} stroke={colors.calibratorStroke} strokeWidth=".8" /><text x="15" y="2" fill={colors.muted} fontSize="10">{l("校准样本", "Calibrator")}</text></g>}
             {showTechnicalSd && <g transform={`translate(${usesCalibrator ? 218 : 112}, 0)`}>
               <line x1="5" x2="5" y1="-7" y2="5" stroke={colors.axis} strokeWidth="1" />
               <line x1="1" x2="9" y1="-7" y2="-7" stroke={colors.axis} strokeWidth="1" />
               <line x1="1" x2="9" y1="5" y2="5" stroke={colors.axis} strokeWidth="1" />
-              <text x="15" y="2" fill={colors.muted} fontSize="9">{l("技术 SD", "Technical SD")}</text>
+              <text x="15" y="2" fill={colors.muted} fontSize="10">{l("技术 SD", "Technical SD")}</text>
             </g>}
           </g>
 
@@ -222,7 +225,7 @@ function ExpressionChart({
               <g key={tick}>
                 <line x1={left} x2={width - right} y1={tickY} y2={tickY} stroke={colors.grid} strokeWidth=".8" />
                 <line x1={left - 5} x2={left} y1={tickY} y2={tickY} stroke={colors.axis} strokeWidth="1" />
-                <text x={left - 10} y={tickY + 3} textAnchor="end" fill={colors.muted} fontSize="10">{axisTickLabel(tick)}</text>
+                <text x={left - 10} y={tickY + 3.5} textAnchor="end" fill={colors.muted} fontSize="11">{axisTickLabel(tick)}</text>
               </g>
             );
           })}
@@ -258,14 +261,14 @@ function ExpressionChart({
                   y={labelTop}
                   textAnchor="middle"
                   fill={colors.muted}
-                  fontSize="10"
+                  fontSize="11"
                   aria-label={row.label}
                 >{labelLines.map((line, lineIndex) => <tspan key={`${line}-${lineIndex}`} x={centerX} dy={lineIndex === 0 ? 0 : labelLineHeight}>{line}</tspan>)}</text>
               </g>
             );
           })}
-          <text x={(left + width - right) / 2} y={axisTitleY} textAnchor="middle" fill={colors.text} fontSize="11">{l("生物学样本", "Biological sample")}</text>
-          <text x="21" y={(top + bottom) / 2} textAnchor="middle" transform={`rotate(-90 21 ${(top + bottom) / 2})`} fill={colors.text} fontSize="11">
+          <text x={(left + width - right) / 2} y={axisTitleY} textAnchor="middle" fill={colors.text} fontSize="12">{l("生物学样本", "Biological sample")}</text>
+          <text x="20" y={(top + bottom) / 2} textAnchor="middle" transform={`rotate(-90 20 ${(top + bottom) / 2})`} fill={colors.text} fontSize="12">
             {axisMode === "log-ratio" ? "Relative expression (log₂ ratio axis)" : "Relative expression"}
           </text>
         </svg>
@@ -283,9 +286,10 @@ interface ResultExplorerProps {
   settings: AnalysisSettings;
   provenanceWarnings?: string[];
   importDecisions?: ImportDecision[];
+  exportFileStem: string;
 }
 
-export default function ResultExplorer({ results, wells, sampleOrder, targetOrder, settings, provenanceWarnings = [], importDecisions = [] }: ResultExplorerProps) {
+export default function ResultExplorer({ results, wells, sampleOrder, targetOrder, settings, provenanceWarnings = [], importDecisions = [], exportFileStem }: ResultExplorerProps) {
   const { language, l } = useLanguage();
   const [warningOnly, setWarningOnly] = useState(false);
   const [showTechnicalSd, setShowTechnicalSd] = useState(false);
@@ -323,14 +327,9 @@ export default function ResultExplorer({ results, wells, sampleOrder, targetOrde
   );
   const completeRows = calculationExport.completeRows;
   const importDecisionRows = useMemo(() => buildImportDecisionRows(importDecisions), [importDecisions]);
-  const visualizationStudioUrl = (typeof process === "undefined"
-    ? ""
-    : process.env.NEXT_PUBLIC_VISUALIZATION_STUDIO_URL?.trim())
-    || "http://127.0.0.1:3400/visualization-studio/?plot=bar";
-
   function exportCompleteExcel() {
     const bytes = buildCalculationWorkbookBytes({ ...calculationExport, importDecisions });
-    downloadBlob(new Blob([bytes], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }), "qpcr-complete-calculation-results.xlsx");
+    downloadBlob(new Blob([bytes], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }), `${exportFileStem}-complete-calculation.xlsx`);
   }
 
   function exportCompleteTsv() {
@@ -339,10 +338,10 @@ export default function ResultExplorer({ results, wells, sampleOrder, targetOrde
       const lines = [headers.join("\t"), ...rows.map((row) => headers.map((header) => escapeCell(row[header])).join("\t"))];
       downloadBlob(new Blob(["\uFEFF", lines.join("\r\n")], { type: "text/tab-separated-values;charset=utf-8" }), fileName);
     };
-    downloadRows(COMPLETE_RESULTS_HEADERS, calculationExport.completeRows, "qpcr-complete-results.tsv");
-    downloadRows(WELL_CALCULATION_HEADERS, calculationExport.wellRows, "qpcr-well-calculations.tsv");
-    downloadRows(PLATE_SUMMARY_HEADERS, calculationExport.plateRows, "qpcr-plate-summaries.tsv");
-    if (importDecisionRows.length) downloadRows(IMPORT_DECISION_HEADERS, importDecisionRows, "qpcr-import-decisions.tsv");
+    downloadRows(COMPLETE_RESULTS_HEADERS, calculationExport.completeRows, `${exportFileStem}-complete-results.tsv`);
+    downloadRows(WELL_CALCULATION_HEADERS, calculationExport.wellRows, `${exportFileStem}-well-calculations.tsv`);
+    downloadRows(PLATE_SUMMARY_HEADERS, calculationExport.plateRows, `${exportFileStem}-plate-summaries.tsv`);
+    if (importDecisionRows.length) downloadRows(IMPORT_DECISION_HEADERS, importDecisionRows, `${exportFileStem}-import-decisions.tsv`);
     const dictionaryLines = [
       "sheet\tfield\tlevel_zh\tdefinition_zh\tdefinition_en\tformula_or_source\tunit\tcaution_zh\tcaution_en",
       ...calculationExport.dictionary.map((item) => [item.sheet, item.field, item.levelZh, item.definitionZh, item.definitionEn, item.formula, item.unit, item.cautionZh, item.cautionEn]
@@ -350,7 +349,7 @@ export default function ResultExplorer({ results, wells, sampleOrder, targetOrde
       ...IMPORT_DECISION_EXPORT_DICTIONARY.map((item) => [item.sheet, item.field, "导入审计", item.definitionZh, item.definitionEn, "User import-review decision", "", "原始上传文件与原始行保持不变。", "The uploaded file and source row remain unchanged."]
         .map((value) => value.replace(/[\t\r\n]+/g, " ")).join("\t")),
     ];
-    downloadBlob(new Blob(["\uFEFF", dictionaryLines.join("\r\n")], { type: "text/tab-separated-values;charset=utf-8" }), "qpcr-calculation-data-dictionary.tsv");
+    downloadBlob(new Blob(["\uFEFF", dictionaryLines.join("\r\n")], { type: "text/tab-separated-values;charset=utf-8" }), `${exportFileStem}-data-dictionary.tsv`);
   }
 
   function exportVisualizationExcel() {
@@ -383,7 +382,7 @@ export default function ResultExplorer({ results, wells, sampleOrder, targetOrde
     const bytes = XLSX.write(workbook, { bookType: "xlsx", type: "array", cellStyles: true });
     downloadBlob(
       new Blob([bytes], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }),
-      "qpcr-visualization-bar.xlsx",
+      `${exportFileStem}-visualization-bar.xlsx`,
     );
   }
 
@@ -395,7 +394,7 @@ export default function ResultExplorer({ results, wells, sampleOrder, targetOrde
     ];
     downloadBlob(
       new Blob(["\uFEFF", lines.join("\r\n")], { type: "text/tab-separated-values;charset=utf-8" }),
-      "qpcr-visualization-bar.tsv",
+      `${exportFileStem}-visualization-bar.tsv`,
     );
   }
 
@@ -450,11 +449,10 @@ export default function ResultExplorer({ results, wells, sampleOrder, targetOrde
           </div>
 
           <div className="result-command-group result-export-group visualization-studio-export-group">
-            <span className="command-group-label">Visualization Studio · {l("柱状图格式", "Bar-chart format")}</span>
+            <div className="command-group-label-row"><span className="command-group-label">Visualization Studio · {l("柱状图格式", "Bar-chart format")}</span><VisualizationStudioLink /></div>
             <div className="visualization-export-actions">
               <button type="button" disabled={!visualizationRows.length} onClick={exportVisualizationExcel}>{l("柱状图 Excel", "Bar Excel")}</button>
               <button type="button" disabled={!visualizationRows.length} onClick={exportVisualizationTsv}>{l("柱状图 TSV", "Bar TSV")}</button>
-              <a className="visualization-studio-link" href={visualizationStudioUrl} target="_blank" rel="noreferrer">{l("打开 Bar 图（本地）↗", "Open Bar chart locally ↗")}</a>
             </div>
             <small className="export-format-hint">category · value · sd · sem · group</small>
           </div>
@@ -483,7 +481,7 @@ export default function ResultExplorer({ results, wells, sampleOrder, targetOrde
       </div>
 
       <div className="result-chart-stack">
-        {chartTargets.map((target) => <ExpressionChart key={target} rows={filtered} target={target} sampleOrder={sampleOrder} showTechnicalSd={showTechnicalSd} theme={chartTheme} axisMode={axisMode} />)}
+        {chartTargets.map((target) => <ExpressionChart key={target} rows={filtered} target={target} sampleOrder={sampleOrder} showTechnicalSd={showTechnicalSd} theme={chartTheme} axisMode={axisMode} exportFileStem={exportFileStem} />)}
         {chartTargets.length === 0 && <div className="empty-chart">{l("当前展示选择下没有可绘制的数据。", "No plottable data are available for the current display selection.")}</div>}
       </div>
 
