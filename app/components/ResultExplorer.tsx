@@ -2,14 +2,17 @@
 
 import { useMemo, useRef, useState } from "react";
 import XLSX from "xlsx-js-style";
-import type { AnalysisSettings, RelativeQuantificationResult, WellRecord } from "@/packages/schemas/src";
+import type { AnalysisSettings, ImportDecision, RelativeQuantificationResult, WellRecord } from "@/packages/schemas/src";
 import {
   buildCalculationExportBundle,
   buildCalculationWorkbookBytes,
+  buildImportDecisionRows,
   buildLogRatioAxis,
   buildVisualizationBarRows,
   chartLabelVisualUnits,
   COMPLETE_RESULTS_HEADERS,
+  IMPORT_DECISION_EXPORT_DICTIONARY,
+  IMPORT_DECISION_HEADERS,
   PLATE_SUMMARY_HEADERS,
   mapRatioToY,
   VISUALIZATION_BAR_HEADERS,
@@ -279,9 +282,10 @@ interface ResultExplorerProps {
   targetOrder: string[];
   settings: AnalysisSettings;
   provenanceWarnings?: string[];
+  importDecisions?: ImportDecision[];
 }
 
-export default function ResultExplorer({ results, wells, sampleOrder, targetOrder, settings, provenanceWarnings = [] }: ResultExplorerProps) {
+export default function ResultExplorer({ results, wells, sampleOrder, targetOrder, settings, provenanceWarnings = [], importDecisions = [] }: ResultExplorerProps) {
   const { language, l } = useLanguage();
   const [warningOnly, setWarningOnly] = useState(false);
   const [showTechnicalSd, setShowTechnicalSd] = useState(false);
@@ -318,13 +322,14 @@ export default function ResultExplorer({ results, wells, sampleOrder, targetOrde
     [provenanceWarnings, results, sampleOrder, settings, targetOrder, wells],
   );
   const completeRows = calculationExport.completeRows;
+  const importDecisionRows = useMemo(() => buildImportDecisionRows(importDecisions), [importDecisions]);
   const visualizationStudioUrl = (typeof process === "undefined"
     ? ""
     : process.env.NEXT_PUBLIC_VISUALIZATION_STUDIO_URL?.trim())
     || "http://127.0.0.1:3400/visualization-studio/?plot=bar";
 
   function exportCompleteExcel() {
-    const bytes = buildCalculationWorkbookBytes(calculationExport);
+    const bytes = buildCalculationWorkbookBytes({ ...calculationExport, importDecisions });
     downloadBlob(new Blob([bytes], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }), "qpcr-complete-calculation-results.xlsx");
   }
 
@@ -337,9 +342,12 @@ export default function ResultExplorer({ results, wells, sampleOrder, targetOrde
     downloadRows(COMPLETE_RESULTS_HEADERS, calculationExport.completeRows, "qpcr-complete-results.tsv");
     downloadRows(WELL_CALCULATION_HEADERS, calculationExport.wellRows, "qpcr-well-calculations.tsv");
     downloadRows(PLATE_SUMMARY_HEADERS, calculationExport.plateRows, "qpcr-plate-summaries.tsv");
+    if (importDecisionRows.length) downloadRows(IMPORT_DECISION_HEADERS, importDecisionRows, "qpcr-import-decisions.tsv");
     const dictionaryLines = [
       "sheet\tfield\tlevel_zh\tdefinition_zh\tdefinition_en\tformula_or_source\tunit\tcaution_zh\tcaution_en",
       ...calculationExport.dictionary.map((item) => [item.sheet, item.field, item.levelZh, item.definitionZh, item.definitionEn, item.formula, item.unit, item.cautionZh, item.cautionEn]
+        .map((value) => value.replace(/[\t\r\n]+/g, " ")).join("\t")),
+      ...IMPORT_DECISION_EXPORT_DICTIONARY.map((item) => [item.sheet, item.field, "导入审计", item.definitionZh, item.definitionEn, "User import-review decision", "", "原始上传文件与原始行保持不变。", "The uploaded file and source row remain unchanged."]
         .map((value) => value.replace(/[\t\r\n]+/g, " ")).join("\t")),
     ];
     downloadBlob(new Blob(["\uFEFF", dictionaryLines.join("\r\n")], { type: "text/tab-separated-values;charset=utf-8" }), "qpcr-calculation-data-dictionary.tsv");

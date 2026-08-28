@@ -87,6 +87,8 @@
 
 完整结果使用稳定英文列名。XLSX 附带 `Data Dictionary` 工作表，TSV 下载会同时生成独立的数据字典 TSV。`assay_type_role` 保留参与目标结果行的输入 Assay Type/role；`warnings` 汇总导入、孔级/复孔 QC 与计算警告。`target_technical_sd` 与 `target_technical_sem` 为目标技术复孔统计；`reference_technical_sd` 与 `reference_technical_sem` 为内参传播统计；`relative_expression_technical_sd` 与 `relative_expression_technical_sem` 为相对表达传播统计。它们均不代表生物学重复变异、置信区间或推断统计。当有效技术复孔少于 2 个时，SD/SEM 留空而不是记为 0。
 
+当 Cq/Ct/Cp 导入阶段发生修正、排除、确认或恢复时，XLSX 额外包含 `Import Decisions`，TSV 导出同时生成 `qpcr-import-decisions.tsv`。该日志明确保留原始文件、source ID、工作表、原始行号、字段、原值、新值、原因和时间；原始上传值不被覆盖。
+
 ## 用户计算值结果导出（schema 1.2.0）
 
 - XLSX 包含 `Complete Results`、`Supplied Values`、`Import Decisions`（有导入修正时）、`Export Metadata`、`Data Dictionary`；TSV 结果会分别下载完整结果、行级溯源、导入决定和数据字典。

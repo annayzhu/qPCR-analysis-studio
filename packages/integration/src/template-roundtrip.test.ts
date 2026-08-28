@@ -109,6 +109,12 @@ describe("downloadable template to complete-results export", () => {
     expect(dataset.suppliedCalculations.filter((row) => row.importStatus !== "excluded").map((row) => row.value))
       .toEqual([3, 3.2, 2.1]);
     expect(dataset.suppliedCalculations.filter((row) => row.importStatus === "excluded")).toHaveLength(2);
+    expect(dataset.suppliedCalculations.find((row) => row.sourceRowNumber === 3)).toMatchObject({
+      importStatus: "corrected",
+      verificationStatus: "unverified",
+      originalSuppliedValue: "3.2",
+      correctedValue: "",
+    });
     expect(buildImportDecisionRows(dataset.importDecisions ?? [])).toEqual(expect.arrayContaining([
       expect.objectContaining({ scope: "source", field: "referenceTargets", action: "edit", new_value: "GAPDH" }),
       expect.objectContaining({ source_row: 3, field: "replicate", action: "edit", new_value: "2" }),
@@ -116,7 +122,7 @@ describe("downloadable template to complete-results export", () => {
       expect.objectContaining({ source_row: 6, field: "row", action: "exclude" }),
     ]));
     expect(IMPORT_DECISION_EXPORT_DICTIONARY.map((entry) => entry.field)).toEqual([
-      "timestamp", "actor", "source_file", "source_sheet", "source_row", "scope", "field",
+      "timestamp", "actor", "source_file", "source_id", "source_sheet", "source_row", "scope", "field",
       "action", "issue_code", "original_value", "new_value", "reason",
     ]);
 
@@ -150,6 +156,21 @@ describe("downloadable template to complete-results export", () => {
       importStatus: "included",
       correctedValue: "",
     });
+
+    const unmappedSource = {
+      ...source,
+      tables: source.tables.map((table) => table.id !== source.selectedTableId ? table : {
+        ...table,
+        suggestedMappings: table.suggestedMappings.map((mapping) => mapping.canonicalField !== "replicate" ? mapping : {
+          ...mapping,
+          canonicalField: null,
+          confidence: 0,
+          matchMethod: "unmapped" as const,
+        }),
+      }),
+    };
+    expect(buildCanonicalDataset([unmappedSource]).suppliedCalculations.find((row) => row.sourceRowNumber === 3)?.replicate)
+      .toBeNull();
   });
 
   it("preserves supplied-calculation reference provenance without renormalizing Delta Cq", () => {
@@ -458,10 +479,17 @@ describe("downloadable template to complete-results export", () => {
       efficiencyByTarget: {}, calculationMode: "delta-delta-cq" as const,
     };
     const bundle = buildCalculationExportBundle(dataset.wells, results, ["Treat", "Control"], ["GENE"], settings);
-    const workbookBytes = buildCalculationWorkbookBytes(bundle);
+    const auditedSource = recordImportDecision(source, {
+      scope: "row", sourceSheet: "Data", sourceRowNumber: 2, field: "tm1", action: "edit", newValue: "82.3",
+      reason: "Correct Tm during Cq import review",
+    });
+    const workbookBytes = buildCalculationWorkbookBytes({
+      ...bundle,
+      importDecisions: buildCanonicalDataset([auditedSource]).importDecisions,
+    });
     const workbook = XLSX.read(workbookBytes, { type: "array" });
     expect(workbook.SheetNames).toEqual([
-      "Complete Results", "Well Calculations", "Plate Summaries", "Calculation Guide", "Data Dictionary",
+      "Complete Results", "Well Calculations", "Plate Summaries", "Calculation Guide", "Import Decisions", "Data Dictionary",
     ]);
     const wellRows = XLSX.utils.sheet_to_json<Record<string, string | number>>(workbook.Sheets["Well Calculations"]);
     expect(wellRows).toHaveLength(8);
@@ -470,5 +498,14 @@ describe("downloadable template to complete-results export", () => {
     const dictionaryRows = XLSX.utils.sheet_to_json<Record<string, string>>(workbook.Sheets["Data Dictionary"]);
     expect(dictionaryRows.find((row) => row.field === "delta_cq_technical_sd")?.["中文定义"]).toContain("平方和开根号");
     expect(dictionaryRows.find((row) => row.field === "delta_cq_technical_sem")?.["中文定义"]).toContain("SD/√n");
+    expect(dictionaryRows.find((row) => row["工作表"] === "Import Decisions" && row.field === "source_file")?.["English definition"])
+      .toBe("Original uploaded file name.");
+    expect(XLSX.utils.sheet_to_json<Record<string, string | number>>(workbook.Sheets["Import Decisions"])[0]).toMatchObject({
+      source_file: "qpcr-input-template.xlsx",
+      source_sheet: "Data",
+      source_row: 2,
+      field: "tm1",
+      action: "edit",
+    });
   });
 });

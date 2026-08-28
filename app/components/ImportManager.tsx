@@ -124,7 +124,7 @@ interface ImportManagerProps {
 }
 
 function decisionKey(decision: ImportDecision): string {
-  return [decision.scope, decision.sourceSheet, decision.sourceRowNumber ?? "", decision.field, decision.issueCode].join("\u241f");
+  return [decision.scope, decision.sourceSheet, decision.sourceRowNumber ?? "", decision.field].join("\u241f");
 }
 
 function ImportIssueRow({
@@ -170,7 +170,9 @@ function ImportIssueRow({
         {issue.canEdit && <button type="button" disabled={!nextValue.trim()} onClick={() => onResolve({ ...base, action: "edit", newValue: nextValue, reason: `Correct ${issue.column} during import review` })}>{l("保存", "Save")}</button>}
         {issue.canConfirm && <button type="button" onClick={() => onResolve({ ...base, action: "confirm", reason: issue.code === "missing-reference-target" ? "Proceed with incomplete reference-target provenance" : "Confirm duplicate replicate identifier" })}>{issue.code === "missing-reference-target" ? l("确认信息不完整", "Confirm incomplete") : l("确认保留", "Keep & confirm")}</button>}
         {issue.canExclude && <button className="danger-text" type="button" onClick={() => onResolve({ ...base, field: "row", action: "exclude", reason: `Exclude row during import review: ${issue.code}` })}>{l("排除此行", "Exclude row")}</button>}
-        {!issue.canEdit && !issue.canConfirm && !issue.canExclude && <span className="structural-fix-note">{l("请修正字段映射或重新导入", "Fix field mapping or re-import")}</span>}
+        {!issue.canEdit && !issue.canConfirm && !issue.canExclude && <span className="structural-fix-note">{issue.code === "no-included-row"
+          ? l("请打开“已处理”并恢复至少一行", "Open Handled and restore at least one row")
+          : l("请修正字段映射或重新导入", "Fix field mapping or re-import")}</span>}
       </div>
     </div>
   );

@@ -19,6 +19,7 @@ import {
   effectiveImportRowValue,
   importRowDecisionStatus,
   isImportRowExcluded,
+  latestImportRowDecision,
   sourceColumnForImportField,
 } from "./import-review";
 
@@ -286,6 +287,7 @@ export function buildCanonicalDataset(inputSources: ImportedSource[]): Canonical
         const originalValueHeader = sourceColumnForImportField(table, selectedField);
         const originalSuppliedValue = originalValueHeader ? text(rawRow.rawValues[originalValueHeader]) : "";
         const effectiveSuppliedValue = effectiveImportRowValue(source, table, rawRow, selectedField);
+        const authoritativeValueDecision = latestImportRowDecision(source, rawRow, selectedField, originalValueHeader);
         const suppliedValue = numberOrNull(effectiveSuppliedValue);
         if ((suppliedValue !== null && sampleName && targetName) || rowDecision.status === "excluded") {
           suppliedCalculations.push({
@@ -306,12 +308,12 @@ export function buildCanonicalDataset(inputSources: ImportedSource[]): Canonical
             assayType: effectiveImportRowValue(source, table, rawRow, "taskType"),
             tm1: numberOrNull(effectiveImportRowValue(source, table, rawRow, "tm1")),
             tm2: numberOrNull(effectiveImportRowValue(source, table, rawRow, "tm2")),
-            verificationStatus: rowDecision.status === "included" ? "unverified" : "user-confirmed",
+            verificationStatus: authoritativeValueDecision?.action === "edit" ? "user-confirmed" : "unverified",
             importStatus: rowDecision.status,
             exclusionReason: rowDecision.exclusion?.reason ?? "",
             excludedBy: rowDecision.exclusion ? "user" : null,
             originalSuppliedValue,
-            correctedValue: rowDecision.corrected ? effectiveSuppliedValue : "",
+            correctedValue: authoritativeValueDecision?.action === "edit" ? effectiveSuppliedValue : "",
             decisionTimestamp: rowDecision.latestTimestamp,
             sourceFileName: source.fileName,
             sourceSheet: rawRow.sourceSheet,

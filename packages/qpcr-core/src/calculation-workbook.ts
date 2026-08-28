@@ -1,4 +1,5 @@
 import XLSX from "xlsx-js-style";
+import type { ImportDecision } from "../../schemas/src";
 import {
   COMPLETE_RESULTS_HEADERS,
   PLATE_SUMMARY_HEADERS,
@@ -9,6 +10,11 @@ import {
   type PlateSummaryRow,
   type WellCalculationRow,
 } from "./complete-results-export";
+import {
+  buildImportDecisionRows,
+  IMPORT_DECISION_EXPORT_DICTIONARY,
+  IMPORT_DECISION_HEADERS,
+} from "./import-decision-export";
 
 export interface CalculationWorkbookInput {
   completeRows: CompleteResultRow[];
@@ -16,6 +22,7 @@ export interface CalculationWorkbookInput {
   wellRows: WellCalculationRow[];
   guide: CalculationGuideRow[];
   dictionary: CalculationDictionaryEntry[];
+  importDecisions?: ImportDecision[];
 }
 
 function dataSheet(headers: readonly string[], rows: Array<Record<string, string | number | null>>) {
@@ -38,6 +45,7 @@ function dataSheet(headers: readonly string[], rows: Array<Record<string, string
 
 /** Build the exact multi-sheet workbook downloaded by the browser UI. */
 export function buildCalculationWorkbookBytes(input: CalculationWorkbookInput): ArrayBuffer {
+  const importDecisionRows = buildImportDecisionRows(input.importDecisions ?? []);
   const guideSheet = XLSX.utils.json_to_sheet(input.guide.map((item) => ({
     "步骤": item.step,
     "计算步骤": item.nameZh,
@@ -48,7 +56,8 @@ export function buildCalculationWorkbookBytes(input: CalculationWorkbookInput): 
   })));
   guideSheet["!cols"] = [{ wch: 8 }, { wch: 24 }, { wch: 28 }, { wch: 54 }, { wch: 72 }, { wch: 72 }];
 
-  const dictionarySheet = XLSX.utils.json_to_sheet(input.dictionary.map((item) => ({
+  const dictionarySheet = XLSX.utils.json_to_sheet([
+    ...input.dictionary.map((item) => ({
     "工作表": item.sheet,
     field: item.field,
     "层级": item.levelZh,
@@ -58,7 +67,19 @@ export function buildCalculationWorkbookBytes(input: CalculationWorkbookInput): 
     "单位": item.unit,
     "中文注意事项": item.cautionZh,
     "English caution": item.cautionEn,
-  })));
+    })),
+    ...IMPORT_DECISION_EXPORT_DICTIONARY.map((item) => ({
+      "工作表": item.sheet,
+      field: item.field,
+      "层级": "导入审计",
+      "中文定义": item.definitionZh,
+      "English definition": item.definitionEn,
+      "公式或来源": "User import-review decision",
+      "单位": "",
+      "中文注意事项": "原始上传文件与原始行保持不变。",
+      "English caution": "The uploaded file and source row remain unchanged.",
+    })),
+  ]);
   dictionarySheet["!cols"] = [{ wch: 22 }, { wch: 46 }, { wch: 18 }, { wch: 66 }, { wch: 72 }, { wch: 54 }, { wch: 18 }, { wch: 64 }, { wch: 68 }];
 
   const workbook = XLSX.utils.book_new();
@@ -71,6 +92,7 @@ export function buildCalculationWorkbookBytes(input: CalculationWorkbookInput): 
   XLSX.utils.book_append_sheet(workbook, dataSheet(WELL_CALCULATION_HEADERS, input.wellRows), "Well Calculations");
   XLSX.utils.book_append_sheet(workbook, dataSheet(PLATE_SUMMARY_HEADERS, input.plateRows), "Plate Summaries");
   XLSX.utils.book_append_sheet(workbook, guideSheet, "Calculation Guide");
+  if (importDecisionRows.length) XLSX.utils.book_append_sheet(workbook, dataSheet(IMPORT_DECISION_HEADERS, importDecisionRows), "Import Decisions");
   XLSX.utils.book_append_sheet(workbook, dictionarySheet, "Data Dictionary");
   return XLSX.write(workbook, { bookType: "xlsx", type: "array", cellStyles: true }) as ArrayBuffer;
 }

@@ -101,7 +101,9 @@ export function latestImportRowDecision(
     && decision.sourceSheet === row.sourceSheet
     && decision.sourceRowNumber === row.sourceRowNumber
     && decision.field === field
-    && (!sourceColumn || !decision.sourceColumn || decision.sourceColumn === sourceColumn)
+    && (sourceColumn
+      ? (!decision.sourceColumn || decision.sourceColumn === sourceColumn)
+      : !decision.sourceColumn)
   ));
 }
 

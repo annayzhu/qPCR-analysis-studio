@@ -42,6 +42,7 @@ export interface TemplateValidationIssue {
     | "missing-plate"
     | "duplicate-well"
     | "duplicate-replicate"
+    | "no-included-row"
     | "missing-reference-target";
   severity: "error" | "warning";
   sourceSheet: string;
@@ -304,6 +305,11 @@ function validateAnalysisStartRows(source: ImportedSource): TemplateValidationSu
   const physicalKeys = new Map<string, RawImportedRow>();
   const replicateKeys = new Map<string, RawImportedRow>();
   const activeRows = table.rawRows.filter((row) => !isImportRowExcluded(source, row));
+  if (table.rawRows.length > 0 && activeRows.length === 0) issues.push(issue(
+    "no-included-row", "error", table, null, "Data", "",
+    "所有数据行都已排除。请在“已处理”中至少恢复一行有效正式数值。",
+    "Every data row is excluded. Restore at least one valid authoritative row from Handled items.",
+  ));
   const namedPlateValues = new Set(activeRows.map((row) => effectiveImportRowValue(source, table, row, "plateName")).filter(Boolean));
   for (const row of table.rawRows) {
     if (isImportRowExcluded(source, row)) continue;
@@ -380,7 +386,7 @@ function validateAnalysisStartRows(source: ImportedSource): TemplateValidationSu
     if (well) {
       const physicalKey = `${plate}\u241f${well}`;
       const previous = physicalKeys.get(physicalKey);
-      if (previous && !isImportIssueConfirmed(source, "duplicate-replicate", "replicate", row.sourceSheet, row.sourceRowNumber)) issues.push(issue(
+      if (previous) issues.push(issue(
         "duplicate-well", "error", table, row, "Plate + Well", `${plate} ${well}`,
         `第 ${row.sourceRowNumber} 行与第 ${previous.sourceRowNumber} 行占用同一物理孔 ${plate} ${well}。`,
         `Row ${row.sourceRowNumber} and row ${previous.sourceRowNumber} use the same physical well ${plate} ${well}.`,
@@ -390,7 +396,7 @@ function validateAnalysisStartRows(source: ImportedSource): TemplateValidationSu
     if (sample && assay && replicate && Number.isInteger(Number(replicate)) && Number(replicate) > 0) {
       const replicateKey = `${plate}\u241f${sample}\u241f${assay}\u241f${Number(replicate)}`;
       const previous = replicateKeys.get(replicateKey);
-      if (previous) issues.push(issue(
+      if (previous && !isImportIssueConfirmed(source, "duplicate-replicate", "replicate", row.sourceSheet, row.sourceRowNumber)) issues.push(issue(
         "duplicate-replicate", "warning", table, row, "Replicate", replicate,
         `第 ${row.sourceRowNumber} 行与第 ${previous.sourceRowNumber} 行在同一 Plate + Sample + Assay 中使用了相同复孔序号。`,
         `Row ${row.sourceRowNumber} and row ${previous.sourceRowNumber} reuse the same replicate identifier within Plate + Sample + Assay.`,

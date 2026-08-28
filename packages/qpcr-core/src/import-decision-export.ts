@@ -1,7 +1,7 @@
 import type { ImportDecision } from "../../schemas/src";
 
 export const IMPORT_DECISION_HEADERS = [
-  "timestamp", "actor", "source_file", "source_sheet", "source_row", "scope", "field",
+  "timestamp", "actor", "source_file", "source_id", "source_sheet", "source_row", "scope", "field",
   "action", "issue_code", "original_value", "new_value", "reason",
 ] as const;
 
@@ -18,6 +18,7 @@ const IMPORT_DECISION_DEFINITIONS: Record<(typeof IMPORT_DECISION_HEADERS)[numbe
   timestamp: ["用户作出该导入决定的 ISO 8601 时间。", "ISO 8601 time when the import decision was recorded."],
   actor: ["执行修正、排除、确认或恢复的主体。", "Actor who edited, excluded, confirmed, or restored the import item."],
   source_file: ["原始上传文件名。", "Original uploaded file name."],
+  source_id: ["导入源的稳定内部标识。", "Stable internal identifier of the imported source."],
   source_sheet: ["决定所属的原始工作表。", "Original worksheet associated with the decision."],
   source_row: ["原始工作表中的 1-based 行号；文件级决定为空。", "One-based row number in the source worksheet; blank for source-level decisions."],
   scope: ["决定范围：source 或 row。", "Decision scope: source or row."],
@@ -39,6 +40,7 @@ export function buildImportDecisionRows(decisions: ImportDecision[]): ImportDeci
     timestamp: decision.timestamp,
     actor: decision.actor,
     source_file: decision.sourceFileName,
+    source_id: decision.sourceId,
     source_sheet: decision.sourceSheet,
     source_row: decision.sourceRowNumber,
     scope: decision.scope,

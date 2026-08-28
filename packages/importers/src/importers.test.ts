@@ -235,6 +235,55 @@ describe("qPCR user input template", () => {
     expect(assessImportReadiness([source])).toMatchObject({ status: "review-mapping", canAnalyze: false });
   });
 
+  it("never treats duplicate-replicate confirmation as approval of a physical-well collision", () => {
+    const workbook = buildQpcrInputTemplateWorkbook();
+    workbook.Sheets.Data = XLSX.utils.aoa_to_sheet([
+      [...QPCR_INPUT_TEMPLATE_HEADERS],
+      ["Plate 01", 96, "A1", "S01", "GENE", "Target", 1, "Cq", 22.1, "", "", "", ""],
+      ["Plate 01", 96, "A1", "S01", "GENE", "Target", 1, "Cq", 22.2, "", "", "", ""],
+    ]);
+    const bytes = XLSX.write(workbook, { bookType: "xlsx", type: "array" }) as ArrayBuffer;
+    let source = parseWorkbookBytes(bytes, "duplicate-well-and-replicate.xlsx");
+    source = recordImportDecision(source, {
+      scope: "row",
+      sourceSheet: "Data",
+      sourceRowNumber: 3,
+      field: "replicate",
+      action: "confirm",
+      issueCode: "duplicate-replicate",
+      reason: "Keep the duplicate replicate label",
+    });
+
+    expect(validateQpcrInputTemplate(source)?.issues).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: "duplicate-well", sourceRowNumber: 3 }),
+    ]));
+  });
+
+  it("blocks analysis when every authoritative row has been excluded", () => {
+    const workbook = buildQpcrInputTemplateWorkbook();
+    workbook.Sheets["Analysis Settings"].B1.v = "Delta Cq";
+    workbook.Sheets["Analysis Settings"].B2.v = "GAPDH";
+    workbook.Sheets.Data = XLSX.utils.aoa_to_sheet([
+      ["Sample", "Assay", "Replicate", "Delta Cq"],
+      ["Control", "GENE", 1, 3.0],
+    ]);
+    const bytes = XLSX.write(workbook, { bookType: "xlsx", type: "array" }) as ArrayBuffer;
+    let source = parseWorkbookBytes(bytes, "all-rows-excluded.xlsx");
+    source = recordImportDecision(source, {
+      scope: "row",
+      sourceSheet: "Data",
+      sourceRowNumber: 2,
+      field: "row",
+      action: "exclude",
+      reason: "Exclude the only authoritative row",
+    });
+
+    expect(validateQpcrInputTemplate(source)?.issues).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: "no-included-row", sourceRowNumber: null }),
+    ]));
+    expect(assessImportReadiness([source])).toMatchObject({ canAnalyze: false, status: "review-mapping" });
+  });
+
   it("blocks blank Plate cells when the same template contains a named plate", () => {
     const workbook = buildQpcrInputTemplateWorkbook();
     workbook.Sheets.Data = XLSX.utils.aoa_to_sheet([

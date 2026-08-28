@@ -421,9 +421,16 @@ export default function QpcrAnalysisStudio() {
   }
 
   function buildAndApply(sourceList: ImportedSource[]) {
-    const built = buildCanonicalDataset(sourceList);
+    let built: ReturnType<typeof buildCanonicalDataset>;
+    try {
+      built = buildCanonicalDataset(sourceList);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : l("无法应用导入修正。", "Unable to apply import corrections."));
+      setNeedsRebuild(true);
+      return false;
+    }
     const nextReadiness = assessImportReadiness(sourceList);
-    if (!nextReadiness.analysisMode) return;
+    if (!nextReadiness.analysisMode) return false;
     const builtSamples = [...new Set((built.analysisStart === "cq"
       ? built.wells.map((well) => well.sampleName)
       : built.suppliedCalculations.map((row) => row.sampleName)).filter(Boolean))].sort();
@@ -460,6 +467,7 @@ export default function QpcrAnalysisStudio() {
     setResultSection(built.analysisStart !== "cq" || hasCq || !hasMelt ? "quantification" : "melt");
     setDisplaySamples(builtSamples);
     setDisplayTargets(builtTargets);
+    return true;
   }
 
   function resetBuiltAnalysis() {
@@ -572,8 +580,7 @@ export default function QpcrAnalysisStudio() {
   function applyImportCorrections() {
     const currentReadiness = assessImportReadiness(sources);
     if (!currentReadiness.canAnalyze) return;
-    buildAndApply(sources);
-    setDataManagerOpen(false);
+    if (buildAndApply(sources)) setDataManagerOpen(false);
   }
 
   function clearProject() {
@@ -826,6 +833,10 @@ export default function QpcrAnalysisStudio() {
       Timestamp: log.timestamp,
       Status: status,
       Action: auditLogTitle(log, l),
+      "Source file": "",
+      "Source ID": "",
+      "Source sheet": "",
+      "Source row": "",
       Wells: auditLogReference(log, draftWells),
       "Source wells": "operation" in log ? auditWellReferences(log.sourceWellRecordIds, draftWells) : auditLogReference(log, draftWells),
       "Destination wells": "operation" in log ? auditWellReferences(log.destinationWellRecordIds, draftWells) : auditLogReference(log, draftWells),
@@ -839,6 +850,10 @@ export default function QpcrAnalysisStudio() {
         Timestamp: decision.timestamp,
         Status: l("导入时已应用", "Applied at import"),
         Action: decision.action === "exclude" ? l("排除导入行", "Exclude import row") : decision.action === "confirm" ? l("确认导入提醒", "Confirm import warning") : decision.action === "restore" ? l("恢复导入值", "Restore import value") : l("修正导入值", "Correct import value"),
+        "Source file": decision.sourceFileName,
+        "Source ID": decision.sourceId,
+        "Source sheet": decision.sourceSheet,
+        "Source row": decision.sourceRowNumber ?? "",
         Wells: `${decision.sourceSheet}${decision.sourceRowNumber ? ` row ${decision.sourceRowNumber}` : ""}`,
         "Source wells": "",
         "Destination wells": "",
@@ -1328,7 +1343,7 @@ export default function QpcrAnalysisStudio() {
                       <p>{l("设置后计算 ΔΔCq 与相对表达量；未提供扩增效率时按 100% 计算并记录假设。", "A calibrator enables ΔΔCq and relative expression. Missing amplification efficiency is recorded and assumed to be 100%.")}</p>
                     </section>
                   </div>
-                  {!referenceTargets.length ? <div className="empty-table">{l("请先在第 1 区选择至少一个内参基因。", "Select at least one reference target in section 1.")}</div> : <ResultExplorer results={relativeResults} wells={appliedWells} sampleOrder={displaySamples} targetOrder={selectedDisplayTargets} settings={sessionView!.settings} provenanceWarnings={resultExportWarnings} />}
+                  {!referenceTargets.length ? <div className="empty-table">{l("请先在第 1 区选择至少一个内参基因。", "Select at least one reference target in section 1.")}</div> : <ResultExplorer results={relativeResults} wells={appliedWells} sampleOrder={displaySamples} targetOrder={selectedDisplayTargets} settings={sessionView!.settings} provenanceWarnings={resultExportWarnings} importDecisions={importDecisions} />}
                 </> : <>
                   <div className={`result-settings-grid supplied-result-settings ${dataset.analysisStart === "delta-delta-cq" ? "single-setting" : ""}`}>
                     <section className="result-setting-step display-step">
