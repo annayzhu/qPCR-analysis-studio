@@ -1,3 +1,4 @@
+import { mean, sampleSd, standardError as sem, exponentialUncertainty as exponentialError } from "./statistics";
 import type { AnalysisStart, SuppliedCalculationProvenance, SuppliedCalculationRecord } from "../../schemas/src";
 
 export type { SuppliedCalculationRecord } from "../../schemas/src";
@@ -133,24 +134,6 @@ export interface SuppliedVisualizationBarRow {
   group: string;
 }
 
-function mean(values: number[]): number {
-  return values.reduce((sum, value) => sum + value, 0) / values.length;
-}
-
-function sampleSd(values: number[]): number | null {
-  if (values.length < 2) return null;
-  const center = mean(values);
-  return Math.sqrt(values.reduce((sum, value) => sum + (value - center) ** 2, 0) / (values.length - 1));
-}
-
-function sem(sd: number | null, count: number): number | null {
-  return sd === null ? null : sd / Math.sqrt(count);
-}
-
-function exponentialError(quantity: number, cycleError: number | null): number | null {
-  return cycleError === null ? null : Math.log(2) * quantity * cycleError;
-}
-
 function combineErrors(left: number | null, right: number | null): number | null {
   return left === null || right === null ? null : Math.sqrt(left ** 2 + right ** 2);
 }
@@ -163,12 +146,14 @@ export function calculateFromSuppliedCalculations(
   for (const record of records) {
     if (record.importStatus === "excluded" || !record.sampleName || !record.targetName || record.value === null || !Number.isFinite(record.value)) continue;
     const key = `${record.sampleName}\u241f${record.targetName}`;
-    groups.set(key, [...(groups.get(key) ?? []), record]);
+    const group = groups.get(key);
+    if (group) group.push(record);
+    else groups.set(key, [record]);
   }
 
   const summarized = [...groups.values()].map((group): SuppliedCalculationResult => {
     const values = group.map((record) => record.value).filter((value): value is number => value !== null);
-    const center = mean(values);
+    const center = mean(values)!; // Groups contain at least one validated supplied value.
     const sd = sampleSd(values);
     const standardError = sem(sd, values.length);
     const normalizedQuantity = settings.analysisStart === "delta-cq" ? 2 ** -center : null;

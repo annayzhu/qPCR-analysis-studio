@@ -1,14 +1,5 @@
+import { mean, sampleSd } from "./statistics";
 import { physicalWellIdOf, type PhysicalWellId, type ReplicateQc, type WellRecord } from "../../schemas/src";
-
-function mean(values: number[]): number | null {
-  return values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null;
-}
-
-function sampleSd(values: number[]): number | null {
-  if (values.length < 2) return null;
-  const average = mean(values)!;
-  return Math.sqrt(values.reduce((sum, value) => sum + (value - average) ** 2, 0) / (values.length - 1));
-}
 
 function range(values: number[]): number | null {
   return values.length >= 2 ? Math.max(...values) - Math.min(...values) : null;
@@ -66,13 +57,15 @@ export function calculateReplicateQc(
   for (const well of wells) {
     if (!well.sampleName || !well.targetName) continue;
     const key = [well.plateId, well.sampleName, well.targetName, well.reporter].join("\u241f");
-    groups.set(key, [...(groups.get(key) ?? []), well]);
+    const group = groups.get(key);
+    if (group) group.push(well);
+    else groups.set(key, [well]);
   }
 
   return [...groups.entries()].map(([key, group]) => {
     const active = group.filter((well) => !well.instrumentOmit && !well.userExcluded);
     const valid = active.filter(
-      (well) => !well.instrumentOmit && !well.userExcluded && well.cqStatus === "detected" && well.cq !== null,
+      (well) => well.cqStatus === "detected" && well.cq !== null,
     );
     const cqs = valid.map((well) => well.cq as number);
     const cqRange = range(cqs);
@@ -82,8 +75,7 @@ export function calculateReplicateQc(
     const replicateIds = group.map((well) => well.replicate).filter((value): value is number => value !== null);
     if (replicateIds.length > 0) {
       const uniqueReplicates = [...new Set(replicateIds)].sort((a, b) => a - b);
-      const expectedReplicates = Array.from({ length: uniqueReplicates.at(-1) ?? 0 }, (_, index) => index + 1);
-      if (replicateIds.length !== group.length || replicateIds.length !== uniqueReplicates.length || uniqueReplicates.some((value, index) => value !== expectedReplicates[index])) {
+      if (replicateIds.length !== group.length || replicateIds.length !== uniqueReplicates.length || uniqueReplicates.some((value, index) => value !== index + 1)) {
         warnings.add("REPLICATE_ID_INCOMPLETE");
       }
     }

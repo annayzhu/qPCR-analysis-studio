@@ -82,25 +82,25 @@ function isInstrumentOmitted(raw: unknown, sourceHeader: string): boolean {
   return /include/i.test(sourceHeader) ? falsy : truthy;
 }
 
-interface PartialWell {
+interface ParsedWell {
   plateId: string;
   plateName: string;
   well: string;
-  sampleName?: string;
-  targetName?: string;
-  cq?: Pick<WellRecord, "cq" | "cqStatus" | "cqReason">;
-  reporter?: string;
-  taskType?: string;
-  replicate?: number | null;
-  tm1?: number | null;
-  tm2?: number | null;
-  meltGroup?: string;
-  meltScore?: number | null;
-  meltResolution?: number | null;
-  instrumentFlag?: string;
-  instrumentOmit?: boolean;
-  importExcluded?: boolean;
-  importExclusionReason?: string;
+  sampleName: string;
+  targetName: string;
+  cq: Pick<WellRecord, "cq" | "cqStatus" | "cqReason">;
+  reporter: string;
+  taskType: string;
+  replicate: number | null;
+  tm1: number | null;
+  tm2: number | null;
+  meltGroup: string;
+  meltScore: number | null;
+  meltResolution: number | null;
+  instrumentFlag: string;
+  instrumentOmit: boolean;
+  importExcluded: boolean;
+  importExclusionReason: string;
   rawRow: RawImportedRow;
   qcFlags: QcFlag[];
   sourcePriority: number;
@@ -121,7 +121,7 @@ function sourcePriority(source: ImportedSource): number {
   return (fields.has("sampleName") ? 4 : 0) + (fields.has("targetName") ? 4 : 0) + (fields.has("cq") ? 2 : 0);
 }
 
-function mergePartial(current: PartialWell | undefined, incoming: PartialWell): PartialWell {
+function mergeParsedWell(current: ParsedWell | undefined, incoming: ParsedWell): ParsedWell {
   if (!current) return incoming;
   const preferIncoming = incoming.sourcePriority > current.sourcePriority;
   return {
@@ -132,7 +132,7 @@ function mergePartial(current: PartialWell | undefined, incoming: PartialWell): 
     targetName: preferIncoming
       ? incoming.targetName || current.targetName
       : current.targetName || incoming.targetName,
-    cq: incoming.cq?.cqStatus !== "missing" ? incoming.cq : current.cq,
+    cq: incoming.cq.cqStatus !== "missing" ? incoming.cq : current.cq,
     reporter: current.reporter || incoming.reporter,
     taskType: current.taskType || incoming.taskType,
     replicate: current.replicate ?? incoming.replicate,
@@ -177,7 +177,7 @@ export function buildCanonicalDataset(inputSources: ImportedSource[]): Canonical
     .map((source) => source.metadata.qpcrAnalysisStart as AnalysisStart | undefined)
     .filter((start): start is AnalysisStart => Boolean(start)))];
   const analysisStart: AnalysisStart = declaredStarts.length === 1 ? declaredStarts[0] : "cq";
-  const partials = new Map<string, PartialWell>();
+  const partials = new Map<string, ParsedWell>();
   const suppliedCalculations: SuppliedCalculationRecord[] = [];
   const warnings: string[] = [];
   const assumptions: string[] = [];
@@ -336,7 +336,7 @@ export function buildCanonicalDataset(inputSources: ImportedSource[]): Canonical
           source: "instrument",
         });
       }
-      const incoming: PartialWell = {
+      const incoming: ParsedWell = {
         plateId: plate.plateId,
         plateName: plate.plateName,
         well,
@@ -354,13 +354,13 @@ export function buildCanonicalDataset(inputSources: ImportedSource[]): Canonical
         instrumentFlag,
         instrumentOmit: isInstrumentOmitted(effectiveImportRowValue(source, table, rawRow, "omit"), omitHeader),
         importExcluded: rowDecision.status === "excluded",
-        importExclusionReason: rowDecision.exclusion?.reason,
+        importExclusionReason: rowDecision.exclusion?.reason ?? "",
         rawRow,
         qcFlags,
         sourcePriority: priority,
       };
       const partialKey = createPhysicalWellId(plate.plateId, well);
-      partials.set(partialKey, mergePartial(partials.get(partialKey), incoming));
+      partials.set(partialKey, mergeParsedWell(partials.get(partialKey), incoming));
     }
   }
 
@@ -383,7 +383,7 @@ export function buildCanonicalDataset(inputSources: ImportedSource[]): Canonical
     .map((partial) => {
       const row = partial.well[0];
       const column = Number(partial.well.slice(1));
-      const cq = partial.cq ?? { cq: null, cqStatus: "missing" as const, cqReason: "未提供 Cq 数据" };
+      const cq = partial.cq;
       return {
         id: stableId("well", `${partial.plateId}:${partial.well}`),
         plateId: partial.plateId,
@@ -391,21 +391,21 @@ export function buildCanonicalDataset(inputSources: ImportedSource[]): Canonical
         well: partial.well,
         row,
         column,
-        sampleName: partial.sampleName ?? "",
-        targetName: partial.targetName ?? "",
+        sampleName: partial.sampleName,
+        targetName: partial.targetName,
         ...cq,
-        reporter: partial.reporter ?? "",
-        taskType: partial.taskType ?? "Unknown",
-        replicate: partial.replicate ?? null,
-        tm1: partial.tm1 ?? null,
-        tm2: partial.tm2 ?? null,
-        meltGroup: partial.meltGroup ?? "",
-        meltScore: partial.meltScore ?? null,
-        meltResolution: partial.meltResolution ?? null,
-        instrumentFlag: partial.instrumentFlag ?? "",
-        instrumentOmit: Boolean(partial.instrumentOmit),
-        userExcluded: Boolean(partial.importExcluded),
-        exclusionReason: partial.importExclusionReason ?? "",
+        reporter: partial.reporter,
+        taskType: partial.taskType,
+        replicate: partial.replicate,
+        tm1: partial.tm1,
+        tm2: partial.tm2,
+        meltGroup: partial.meltGroup,
+        meltScore: partial.meltScore,
+        meltResolution: partial.meltResolution,
+        instrumentFlag: partial.instrumentFlag,
+        instrumentOmit: partial.instrumentOmit,
+        userExcluded: partial.importExcluded,
+        exclusionReason: partial.importExclusionReason,
         sourceSheet: partial.rawRow.sourceSheet,
         sourceRowNumber: partial.rawRow.sourceRowNumber,
         rawRow: partial.rawRow,

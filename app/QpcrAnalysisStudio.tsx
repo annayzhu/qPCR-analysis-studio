@@ -26,12 +26,11 @@ import {
 } from "@/packages/importers/src";
 import {
   createAnalysisSession,
-  previewAnalysisSessionChange,
-  projectAnalysisSession,
+  createAnalysisSessionProjector,
   transitionAnalysisSession,
 } from "@/packages/analysis-session/src";
 import type { AnalysisSessionCommand, AnalysisSessionState } from "@/packages/analysis-session/src";
-import { buildAnalysisExportStem } from "@/packages/qpcr-core/src";
+import { buildAnalysisExportStem, previewLayoutTransfer } from "@/packages/qpcr-core/src";
 import ImportManager from "./components/ImportManager";
 import CalculationOverview from "./components/CalculationOverview";
 import MeltAnalysis from "./components/MeltAnalysis";
@@ -236,6 +235,7 @@ export default function QpcrAnalysisStudio() {
   const analysisStartSelectedByUser = useRef(false);
   const [sources, setSources] = useState<ImportedSource[]>([]);
   const [analysisSession, setAnalysisSession] = useState<AnalysisSessionState | null>(null);
+  const [projectSession] = useState(createAnalysisSessionProjector);
   const [analysisStart, setAnalysisStart] = useState<AnalysisStart>("cq");
   const [selected, setSelected] = useState<string[]>([]);
   const [selectionAnchor, setSelectionAnchor] = useState<string | null>(null);
@@ -264,8 +264,8 @@ export default function QpcrAnalysisStudio() {
 
   const readiness = useMemo(() => assessImportReadiness(sources), [sources]);
   const sessionView = useMemo(
-    () => analysisSession ? projectAnalysisSession(analysisSession) : null,
-    [analysisSession],
+    () => analysisSession ? projectSession(analysisSession) : null,
+    [analysisSession, projectSession],
   );
   const dataset = sessionView?.dataset ?? null;
   const analysisExportStem = useMemo(
@@ -290,7 +290,8 @@ export default function QpcrAnalysisStudio() {
   const analysisLocked = sessionView?.analysisLocked ?? false;
   const referenceTargets = sessionView?.settings.referenceTargets ?? [];
   const calibrator = sessionView?.settings.calibratorValue ?? "";
-  const selectedWells = useMemo(() => draftWells.filter((well) => selected.includes(well.id)), [draftWells, selected]);
+  const selectedIds = useMemo(() => new Set(selected), [selected]);
+  const selectedWells = useMemo(() => draftWells.filter((well) => selectedIds.has(well.id)), [draftWells, selectedIds]);
   const plateIds = useMemo(() => [...new Set(draftWells.map((well) => well.plateId))], [draftWells]);
   const plateOptions = useMemo(
     () => plateIds.map((plateId, index) => ({ plateId, label: plateDisplayName(draftWells, plateId, index, l) })),
@@ -301,6 +302,7 @@ export default function QpcrAnalysisStudio() {
     () => draftWells.filter((well) => well.plateId === (activePlateId || plateIds[0])),
     [activePlateId, draftWells, plateIds],
   );
+  const activeWellByPosition = useMemo(() => new Map(activePlateWells.map(well => [well.well, well])), [activePlateWells]);
   const importedWellById = useMemo(() => new Map(importedWells.map((well) => [well.id, well])), [importedWells]);
   const selectedRestorableCount = useMemo(() => selectedWells.filter((well) => {
     const baseline = importedWellById.get(well.id);
@@ -397,18 +399,12 @@ export default function QpcrAnalysisStudio() {
       ? draftWells.find((well) => well.well === destinationWell && (!destinationPlate || well.plateId === destinationPlate))
       : undefined;
     if (!selected.length || !destination) return null;
-    if (!analysisSession) return null;
-    const preview = previewAnalysisSessionChange(analysisSession, {
-      type: "transfer-annotations",
-      request: {
-        mode: transferMode,
-        sourceWellIds: selected,
-        destinationAnchorWellId: destination.id,
-      },
-      reason: l("按相对几何位置修正布局", "Correct layout by relative geometry"),
+    return previewLayoutTransfer(draftWells, {
+      mode: transferMode,
+      sourceWellIds: selected,
+      destinationAnchorWellId: destination.id,
     });
-    return preview.kind === "layout-transfer" ? preview.result : null;
-  }, [analysisSession, draftWells, l, selected, selectedWells, transferDestination, transferDestinationPlateId, transferMode]);
+  }, [draftWells, selected, selectedWells, transferDestination, transferDestinationPlateId, transferMode]);
 
   function executeSessionCommand(command: AnalysisSessionCommand) {
     if (!analysisSession) return null;
@@ -477,7 +473,7 @@ export default function QpcrAnalysisStudio() {
       calculationMode: built.analysisStart === "delta-delta-cq" ? "delta-delta-cq" : "delta-cq",
     };
     const nextSession = createAnalysisSession(built, nextReadiness.analysisMode, initialSettings);
-    const nextView = projectAnalysisSession(nextSession);
+    const nextView = projectSession(nextSession);
     setAnalysisSession(nextSession);
     setError(nextView.blockingError ?? "");
     const firstDefined = built.wells.find((well) => well.sampleName || well.targetName);
@@ -1214,9 +1210,9 @@ export default function QpcrAnalysisStudio() {
                         <button type="button" className="axis-label row-axis" key={`axis-${row}`} onClick={() => setSelected(activePlateWells.filter((well) => well.row === row).map((well) => well.id))}>{row}</button>,
                         ...plateDefinition.columns.map((column) => {
                           const wellName = `${row}${column}`;
-                          const well = activePlateWells.find((item) => item.well === wellName);
+                          const well = activeWellByPosition.get(wellName);
                           const physicalWellId = well ? physicalWellIdOf(well) : null;
-                          const isSelected = Boolean(well && selected.includes(well.id));
+                          const isSelected = Boolean(well && selectedIds.has(well.id));
                           const hasGroupWarning = Boolean(physicalWellId && draftQcState.groupWarnings.has(physicalWellId));
                           const hasSpecificWarning = Boolean(physicalWellId && draftQcState.specificWarnings.has(physicalWellId));
                           const alignmentIssue = well ? alignmentIssueById.get(well.id) : undefined;
