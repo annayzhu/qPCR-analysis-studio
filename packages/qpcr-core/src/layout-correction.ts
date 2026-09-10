@@ -1,5 +1,5 @@
 import type { EditLog, WellRecord } from "../../schemas/src";
-import { updateWellFields } from "./audit";
+import { assignWellAnnotations, type WellAnnotationAssignment } from "./audit";
 
 export type LayoutTransferMode = "move" | "copy" | "swap";
 
@@ -59,7 +59,8 @@ export function previewLayoutTransfer(
   if (!sources.length) return failed(wells, "empty-selection");
   if (new Set(sources.map((well) => well.plateId)).size !== 1) return failed(wells, "mixed-source-plates");
 
-  const destinationAnchor = wells.find((well) => well.id === request.destinationAnchorWellId);
+  const wellById = new Map(wells.map(well => [well.id, well]));
+  const destinationAnchor = wellById.get(request.destinationAnchorWellId);
   if (!destinationAnchor) return failed(wells, "out-of-bounds");
   const sourceAnchor = sources.reduce((anchor, well) =>
     well.row.localeCompare(anchor.row) < 0 || (well.row === anchor.row && well.column < anchor.column) ? well : anchor,
@@ -91,7 +92,7 @@ export function previewLayoutTransfer(
     return failed(wells, "overlapping-copy", mappings);
   }
   const collisionWellIds = request.mode === "swap" ? [] : mappings
-    .map((mapping) => wells.find((well) => well.id === mapping.destinationWellId))
+    .map((mapping) => wellById.get(mapping.destinationWellId))
     .filter((well): well is WellRecord => Boolean(well))
     .filter((well) => !sourceIds.has(well.id) && hasAnnotation(well))
     .map((well) => well.id);
@@ -116,13 +117,9 @@ export function transferLayoutAnnotations(
     mapping.destinationWellId,
     annotation(wellById.get(mapping.destinationWellId)!),
   ]));
-  let nextWells = wells;
-  const logs: EditLog[] = [];
-
+  const assignments: WellAnnotationAssignment[] = [];
   const apply = (wellId: string, changes: LayoutAnnotation) => {
-    const updated = updateWellFields(nextWells, [wellId], changes, timestamp);
-    nextWells = updated.wells;
-    logs.push(...updated.logs);
+    assignments.push({ wellId, changes });
   };
 
   if (request.mode === "move") {
@@ -138,5 +135,6 @@ export function transferLayoutAnnotations(
     }
   }
 
-  return { ...preview, wells: nextWells, logs };
+  const updated = assignWellAnnotations(wells, assignments, timestamp);
+  return { ...preview, wells: updated.wells, logs: updated.logs };
 }

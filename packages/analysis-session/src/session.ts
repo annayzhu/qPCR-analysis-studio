@@ -6,26 +6,21 @@ import type {
   EditLog,
   ExclusionLog,
   LayoutOperationLog,
-  RelativeQuantificationResult,
   WellRecord,
 } from "../../schemas/src";
-import type { DatasetAlignment, ImportReadiness } from "../../importers/src";
+import type { ImportReadiness } from "../../importers/src";
 import {
   assessDatasetAlignment,
-  getAnalysisBlockingError,
-  getUnresolvedAlignmentIssues,
 } from "../../importers/src";
-import type { LayoutTransferRequest, LayoutTransferResult, QcWorkspaceState, SuppliedCalculationResult } from "../../qpcr-core/src";
+import type { LayoutTransferRequest, LayoutTransferResult, WellAnnotationAssignment } from "../../qpcr-core/src";
 import {
-  buildQcWorkspaceState,
-  calculateRelativeQuantification,
-  calculateFromSuppliedCalculations,
-  previewLayoutTransfer,
+  assignWellAnnotations,
   restoreWellsToBaseline,
   setWellExclusion,
   transferLayoutAnnotations,
-  updateWellFields,
 } from "../../qpcr-core/src";
+import { reviewSessionAlignment } from "./projection";
+export type { WellAnnotationAssignment } from "../../qpcr-core/src";
 
 export type AnalysisMode = NonNullable<ImportReadiness["analysisMode"]>;
 export type AnalysisAuditLog = EditLog | ExclusionLog | LayoutOperationLog | AlignmentDispositionLog;
@@ -63,36 +58,9 @@ export interface AnalysisSessionState {
   history: DraftSnapshot[];
 }
 
-export interface AnalysisSessionReadModel {
-  dataset: CanonicalDataset;
-  importedWells: WellRecord[];
-  draftWells: WellRecord[];
-  appliedWells: WellRecord[];
-  settings: AnalysisSettings;
-  draftAlignment: DatasetAlignment;
-  unresolvedAlignmentIssues: ReturnType<typeof getUnresolvedAlignmentIssues>;
-  blockingError: string | null;
-  draftQcState: QcWorkspaceState;
-  appliedQcState: QcWorkspaceState;
-  relativeResults: RelativeQuantificationResult[];
-  suppliedResults: SuppliedCalculationResult[];
-  pendingCount: number;
-  analysisLocked: boolean;
-  alignmentReviewPending: boolean;
-  pendingAuditLogs: AnalysisAuditLog[];
-  auditLogs: AnalysisAuditLog[];
-  alignmentDispositions: Readonly<Record<string, AlignmentIssueType>>;
-  canUndo: boolean;
-}
-
 export interface AnalysisSessionDependencies {
   now(): string;
   nextId(prefix: string): string;
-}
-
-export interface WellAnnotationAssignment {
-  wellId: string;
-  changes: Partial<EditableWellFields>;
 }
 
 export type AnalysisSessionCommand =
@@ -128,10 +96,6 @@ export type AnalysisSessionCommand =
   | { type: "apply"; reason: string }
   | { type: "configure-analysis"; settings: AnalysisSettings };
 
-export type AnalysisSessionPreview =
-  | { kind: "layout-transfer"; result: LayoutTransferResult }
-  | { kind: "none" };
-
 export interface AnalysisSessionError {
   code:
     | "empty-change"
@@ -145,8 +109,8 @@ export interface AnalysisSessionError {
 }
 
 export type AnalysisSessionTransition =
-  | { ok: true; state: AnalysisSessionState; readModel: AnalysisSessionReadModel }
-  | { ok: false; state: AnalysisSessionState; readModel: AnalysisSessionReadModel; error: AnalysisSessionError };
+  | { ok: true; state: AnalysisSessionState }
+  | { ok: false; state: AnalysisSessionState; error: AnalysisSessionError };
 
 const defaultDependencies: AnalysisSessionDependencies = {
   now: () => new Date().toISOString(),
@@ -179,64 +143,6 @@ export function createAnalysisSession(
   };
 }
 
-export function projectAnalysisSession(state: AnalysisSessionState): AnalysisSessionReadModel {
-  const candidateDataset = { ...state.dataset, wells: state.draftWells };
-  const draftAlignment = assessDatasetAlignment(candidateDataset, state.analysisMode);
-  const unresolvedAlignmentIssues = getUnresolvedAlignmentIssues(
-    draftAlignment,
-    Object.keys(state.alignmentDispositions),
-  );
-  const blockingError = getAnalysisBlockingError(candidateDataset, state.analysisMode);
-  const pendingAuditLogs: AnalysisAuditLog[] = [
-    ...state.pendingEditLogs,
-    ...state.pendingExclusionLogs,
-    ...state.pendingOperationLogs,
-    ...state.pendingDispositionLogs,
-  ];
-  const pendingCount = pendingAuditLogs.length;
-  const alignmentReviewPending = unresolvedAlignmentIssues.length > 0 || Boolean(blockingError);
-
-  return {
-    dataset: state.dataset,
-    importedWells: state.importedWells,
-    draftWells: state.draftWells,
-    appliedWells: state.appliedWells,
-    settings: state.settings,
-    draftAlignment,
-    unresolvedAlignmentIssues,
-    blockingError,
-    draftQcState: buildQcWorkspaceState(state.draftWells),
-    appliedQcState: buildQcWorkspaceState(state.appliedWells),
-    relativeResults: state.dataset.analysisStart === "cq" && state.settings.referenceTargets.length
-      ? calculateRelativeQuantification(state.appliedWells, state.settings)
-      : [],
-    suppliedResults: state.dataset.analysisStart === "cq"
-      ? []
-      : calculateFromSuppliedCalculations(state.dataset.suppliedCalculations, {
-          analysisStart: state.dataset.analysisStart,
-          calibratorValue: state.settings.calibratorValue,
-        }),
-    pendingCount,
-    analysisLocked: alignmentReviewPending || pendingCount > 0,
-    alignmentReviewPending,
-    pendingAuditLogs,
-    auditLogs: state.auditLogs,
-    alignmentDispositions: state.alignmentDispositions,
-    canUndo: state.history.length > 0,
-  };
-}
-
-export function previewAnalysisSessionChange(
-  state: AnalysisSessionState,
-  command: AnalysisSessionCommand,
-): AnalysisSessionPreview {
-  if (command.type !== "transfer-annotations") return { kind: "none" };
-  return {
-    kind: "layout-transfer",
-    result: previewLayoutTransfer(state.draftWells, command.request),
-  };
-}
-
 export function transitionAnalysisSession(
   state: AnalysisSessionState,
   command: AnalysisSessionCommand,
@@ -265,7 +171,7 @@ export function transitionAnalysisSession(
   }
 
   if (command.type === "apply") {
-    const readModel = projectAnalysisSession(state);
+    const readModel = reviewSessionAlignment(state);
     if (readModel.unresolvedAlignmentIssues.length) {
       return failed(
         state,
@@ -316,15 +222,8 @@ export function transitionAnalysisSession(
   const history = [...state.history.slice(-19), snapshotOf(state)];
 
   if (command.type === "assign-annotations") {
-    let wells = state.draftWells;
-    const logs: EditLog[] = [];
-    const wellIds: string[] = [];
-    for (const assignment of command.assignments) {
-      const updated = updateWellFields(wells, [assignment.wellId], assignment.changes, timestamp);
-      wells = updated.wells;
-      logs.push(...updated.logs);
-      wellIds.push(assignment.wellId);
-    }
+    const { wells, logs } = assignWellAnnotations(state.draftWells, command.assignments, timestamp);
+    const wellIds = command.assignments.map(assignment => assignment.wellId);
     if (!logs.length) return failed(state, "empty-change", "The requested annotation change has no effect.", wellIds);
     const next = invalidateDispositions(state, wellIds);
     return succeeded({
@@ -436,7 +335,7 @@ export function transitionAnalysisSession(
 }
 
 function succeeded(state: AnalysisSessionState): AnalysisSessionTransition {
-  return { ok: true, state, readModel: projectAnalysisSession(state) };
+  return { ok: true, state };
 }
 
 function failed(
@@ -446,7 +345,7 @@ function failed(
   wellIds: string[],
   cause?: LayoutTransferResult["error"],
 ): AnalysisSessionTransition {
-  return { ok: false, state, readModel: projectAnalysisSession(state), error: { code, message, wellIds, cause } };
+  return { ok: false, state, error: { code, message, wellIds, cause } };
 }
 
 function snapshotOf(state: AnalysisSessionState): DraftSnapshot {

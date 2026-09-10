@@ -89,10 +89,14 @@ export function assessDatasetAlignment(
   const replicateGroups = new Map<string, CanonicalDataset["wells"]>();
   for (const well of dataset.wells) {
     const physicalKey = physicalWellIdOf(well);
-    physicalGroups.set(physicalKey, [...(physicalGroups.get(physicalKey) ?? []), well]);
+    const physicalGroup = physicalGroups.get(physicalKey);
+    if (physicalGroup) physicalGroup.push(well);
+    else physicalGroups.set(physicalKey, [well]);
     if (well.sampleName && well.targetName) {
       const replicateKey = `${well.plateId}\u241f${well.sampleName}\u241f${well.targetName}`;
-      replicateGroups.set(replicateKey, [...(replicateGroups.get(replicateKey) ?? []), well]);
+      const replicateGroup = replicateGroups.get(replicateKey);
+      if (replicateGroup) replicateGroup.push(well);
+      else replicateGroups.set(replicateKey, [well]);
     }
   }
   const duplicateDestinations = [...physicalGroups.values()]
@@ -142,7 +146,7 @@ export function getAnalysisBlockingError(
   analysisMode: ImportReadiness["analysisMode"],
 ): string | null {
   if (analysisMode !== "quantification" || dataset.analysisStart !== "cq") return null;
-  return assessDatasetAlignment(dataset, analysisMode).joinedDetectedCount
+  return dataset.wells.some(well => well.cqStatus === "detected" && well.cq !== null && well.sampleName && well.targetName)
     ? null
     : "未找到与样本和基因正确合并的有效 Cq/Ct/Cp。请检查结果文件与板布局的板名和孔位是否对应。";
 }
@@ -218,7 +222,7 @@ export function assessImportReadiness(sources: ImportedSource[]): ImportReadines
   const layouts = capabilities.filter((item) => item.role === "plate-layout");
   const hasBlockingConflict = capabilities.some((item) => item.blockingConflicts.length > 0);
   const templateValidation = sources.map(validateAnalysisStartSource).filter((item) => item !== null);
-  const hasTemplateErrors = templateValidation.some((item) => item.errorCount > 0);
+  const hasTemplateErrors = templateValidation.some((item) => item.unresolvedCount > 0);
   const analysisResults = [...primaryResults, ...supplementalResults];
   const analysisMode = primaryResults.length ? "quantification" : supplementalResults.length ? "melt-only" : null;
   const resultIncludesPlateLayout = analysisResults.some((item) => item.includesPlateLayout);
@@ -236,7 +240,7 @@ export function assessImportReadiness(sources: ImportedSource[]): ImportReadines
       primaryResultCount: primaryResults.length,
       supplementalResultCount: supplementalResults.length,
       layoutCount: layouts.length,
-      message: "数据模板存在阻断错误。请按工作表、行号和列提示修正后重新导入。",
+      message: "数据模板仍有待处理问题。请在导入页修正、排除或确认后继续。",
     };
   }
 

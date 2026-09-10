@@ -1,12 +1,11 @@
 export {
   createAnalysisSession,
-  previewAnalysisSessionChange,
-  projectAnalysisSession,
   transitionAnalysisSession,
 } from "./session";
 
 export type {
   AnalysisSessionCommand,
-  AnalysisSessionReadModel,
   AnalysisSessionState,
 } from "./session";
+export { createAnalysisSessionProjector, projectAnalysisSession } from "./projection";
+export type { AnalysisSessionReadModel } from "./projection";

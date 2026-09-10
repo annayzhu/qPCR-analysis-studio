@@ -1,22 +1,9 @@
+import { mean, sampleSd, standardError, exponentialUncertainty as exponentialSd } from "./statistics";
 import type {
   AnalysisSettings,
   RelativeQuantificationResult,
   WellRecord,
 } from "../../schemas/src";
-
-function mean(values: number[]): number | null {
-  return values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null;
-}
-
-function sampleSd(values: number[]): number | null {
-  if (values.length < 2) return null;
-  const average = mean(values)!;
-  return Math.sqrt(values.reduce((sum, value) => sum + (value - average) ** 2, 0) / (values.length - 1));
-}
-
-function standardError(sd: number | null, count: number): number | null {
-  return sd === null || count < 2 ? null : sd / Math.sqrt(count);
-}
 
 interface TargetMean {
   plateId: string;
@@ -33,10 +20,6 @@ function propagatedSd(parts: Array<number | null>): number | null {
   if (parts.some((value) => value === null)) return null;
   const numericParts = parts.filter((value): value is number => value !== null);
   return Math.sqrt(numericParts.reduce((sum, value) => sum + value ** 2, 0));
-}
-
-function exponentialSd(quantity: number, cqSd: number | null, base: number): number | null {
-  return cqSd === null ? null : Math.log(base) * quantity * cqSd;
 }
 
 function targetMeans(wells: WellRecord[]): TargetMean[] {

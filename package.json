@@ -13,12 +13,13 @@
     "typecheck": "tsc --noEmit",
     "test:unit": "vitest run --config vitest.config.ts",
     "test:real": "node --import tsx scripts/validate-roche-real-files.ts",
-    "test": "npm run test:unit && npm run typecheck && npm run build && node --test tests/rendered-html.test.mjs",
+    "test:offline": "npm run build:offline && node --test tests/offline-package.test.mjs",
+    "test": "npm run test:unit && npm run typecheck && npm run build && node --test tests/rendered-html.test.mjs && npm run test:offline",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
-    "db:generate": "drizzle-kit generate"
+    "benchmark": "node --import tsx scripts/benchmark-session.ts",
+    "test:browser": "node --test tests/offline-workflow.test.mjs"
   },
   "dependencies": {
-    "drizzle-orm": "0.45.2",
     "next": "16.2.6",
     "react": "19.2.6",
     "react-dom": "19.2.6",
@@ -33,9 +34,10 @@
     "@types/react-dom": "19.2.3",
     "@vitejs/plugin-react": "6.0.2",
     "@vitejs/plugin-rsc": "0.5.26",
-    "drizzle-kit": "0.31.10",
     "eslint": "9.39.4",
     "eslint-config-next": "16.2.6",
+    "esbuild": "0.28.0",
+    "playwright": "1.62.1",
     "react-server-dom-webpack": "19.2.6",
     "tailwindcss": "4.2.1",
     "tsx": "^4.23.5",

@@ -87,12 +87,17 @@
 
 完整结果使用稳定英文列名。XLSX 附带 `Data Dictionary` 工作表，TSV 下载会同时生成独立的数据字典 TSV。`assay_type_role` 保留参与目标结果行的输入 Assay Type/role；`warnings` 汇总导入、孔级/复孔 QC 与计算警告。`target_technical_sd` 与 `target_technical_sem` 为目标技术复孔统计；`reference_technical_sd` 与 `reference_technical_sem` 为内参传播统计；`relative_expression_technical_sd` 与 `relative_expression_technical_sem` 为相对表达传播统计。它们均不代表生物学重复变异、置信区间或推断统计。当有效技术复孔少于 2 个时，SD/SEM 留空而不是记为 0。
 
-## 用户计算值结果导出（schema 1.1.0）
+当 Cq/Ct/Cp 导入阶段发生修正、排除、确认或恢复时，XLSX 额外包含 `Import Decisions`，TSV 导出同时生成 `qpcr-import-decisions.tsv`。该日志明确保留原始文件、source ID、工作表、原始行号、字段、原值、新值、原因和时间；原始上传值不被覆盖。
 
-- XLSX 包含 `Complete Results`、`Supplied Values`、`Export Metadata`、`Data Dictionary` 四个工作表；TSV 结果会同时下载独立的数据字典 TSV。
+## 用户计算值结果导出（schema 1.2.0）
+
+- XLSX 包含 `Complete Results`、`Supplied Values`、`Import Decisions`（有导入修正时）、`Export Metadata`、`Data Dictionary`；TSV 结果会分别下载完整结果、行级溯源、导入决定和数据字典。
 - `reference_targets`、`reference_method`、`source_calibrator` 是导入文件声明的上游计算依据，仅用于溯源。
 - `calibrator` 是当前结果实际采用的下游校准样本。它与 `source_calibrator` 分列，避免用户在结果页改变或清空校准选择时改写来源记录。
 - `supplied_value` 保留用户导入的原始 Δ 值；系统计算的均值、SD、SEM 和负二次幂转换另列输出。
+- `import_status` 区分 `included`、`corrected` 和 `excluded`；被排除的行仍保留在 `Supplied Values` 中，但不进入均值、SD、SEM 或下游指数转换。
+- `original_supplied_value` 始终保留上传文件的原始正式数值文本；`corrected_value` 仅在用户修正正式 Δ 值时记录新值。
+- `Import Decisions` 以追加式日志保留 edit、exclude、confirm 和 restore，包含文件、工作表、原始行号、字段、原值、新值、原因和时间。
 - `warnings` 在未提供内参时包含 `REFERENCE_TARGET_NOT_PROVIDED`。技术复孔不足或找不到下游校准样本时保留对应警告代码。
 - 同一次用户计算值分析中的多个工作簿必须声明一致的内参集合、处理方法和来源校准样本；不一致时阻止合并，避免把第一份文件的来源信息错误套用到其他行。
 - 全部 SD/SEM 均为技术复孔统计，不代表生物学重复、置信区间或推断统计。

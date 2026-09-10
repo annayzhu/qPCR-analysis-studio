@@ -65,6 +65,7 @@ const ENGLISH_RUNTIME_MESSAGES: Record<string, string> = {
   "请先导入 Cq/Ct/Cp 或 Tm/熔解结果文件。": "Import a Cq/Ct/Cp or Tm/melt result file first.",
   "关键字段存在映射冲突，请确认孔位、样本、基因或结果字段后再分析。": "Key field mappings conflict. Confirm the well, sample, target, or result fields before analysis.",
   "数据模板存在阻断错误。请按工作表、行号和列提示修正后重新导入。": "The data template contains blocking errors. Correct the listed sheet, row, and column issues, then re-import it.",
+  "数据模板仍有待处理问题。请在导入页修正、排除或确认后继续。": "The data template still has open issues. Correct, exclude, or confirm them on the import page before continuing.",
   "未找到与样本和基因正确合并的有效 Cq/Ct/Cp。请检查结果文件与板布局的板名和孔位是否对应。": "No valid Cq/Ct/Cp values were joined to annotated sample/target wells. Check that plate names and well positions match between the result file and plate layout.",
   "仍有板布局对齐提示未处理。请修正孔位，或选中后确认该状态。": "Some plate-layout alignment alerts remain unresolved. Correct the wells or select them and confirm their state.",
   "结果文件未包含完整的 Sample/Target 信息，请再导入修正后的板布局。": "The result file does not contain complete Sample/Target information. Import the corrected plate layout.",

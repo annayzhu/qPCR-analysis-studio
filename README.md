@@ -29,7 +29,9 @@ docs/                        计算规范、数据字典、适配记录
 apps/desktop/                未来 Electron 离线封装边界
 ```
 
-界面只通过 Analysis Session 的创建、读取投影、变更预览和状态迁移接口操作分析状态；原始测量、布局草稿、已应用快照和计算结果不会在 React 组件内分别维护。领域术语见 [`CONTEXT.md`](./CONTEXT.md)，关键取舍见 [`docs/adr/`](./docs/adr/)。
+界面通过 Analysis Session 创建和状态迁移接口操作分析状态。命令只返回 state/error；读取使用每个工作台独立的投影器，草稿修改不会重算已应用的科学结果。布局预览直接使用纯函数 `previewLayoutTransfer`，无需通用命令预览层。两种计算路径共用图表组件，但不共用归一化策略。完整导出仅在点击导出时生成。
+
+领域术语见 [`CONTEXT.md`](./CONTEXT.md)，关键取舍见 [`docs/adr/`](./docs/adr/)，本次发现、基准与未解决风险见 [2026-09-10 架构审查](./docs/reviews/2026-09-10-architecture-review.md)。
 
 ## 本地运行
 
@@ -40,7 +42,7 @@ npm run dev
 
 默认开发地址由 vinext 输出，通常是 `http://localhost:3000` 或下一个可用端口。
 
-“打开 Bar 图”默认链接到 Visualization Studio 本地独立版 `http://127.0.0.1:3400/visualization-studio/?plot=bar`。部署时可通过 `NEXT_PUBLIC_VISUALIZATION_STUDIO_URL` 指向实际的 Visualization Studio 地址；单文件离线版在没有 Node.js `process` 对象时也会安全使用该默认地址。
+“Visualization Studio · 柱状图格式”标题旁的箭头默认链接到独立 Site `https://visualization-studio.pountneycitlali784.chatgpt.site/?plot=bar`。该 Site 当前使用账户访问控制；部署时仍可通过 `NEXT_PUBLIC_VISUALIZATION_STUDIO_URL` 覆盖目标地址。所有结果、柱状图数据与图像导出文件名均由来源文件名、分析起点和分析日期组成，便于区分不同批次。
 
 ## 验证
 
@@ -50,7 +52,13 @@ npm run test:unit
 npm run typecheck
 npm run build
 npm test
+npm run test:browser
+npm run benchmark
 ```
+
+`npm test` 包含单元、类型、生产构建、服务端渲染，以及 ZIP 全新解压/哈希检查。`test:browser` 在最新离线包上验证三种分析起点、板编辑、图表和实际下载，默认使用本机 Chrome；也可先运行 `npx playwright install chromium`，再执行 `PLAYWRIGHT_BROWSER=chromium npm run test:browser`。测试数据均为合成示例，截图与下载位于 `outputs/verification/`。
+
+`npm run build:offline` 保留历史包，以内容哈希区分同日版本；`outputs/offline/latest.json` 记录本次 ZIP、解压目录和 SHA256。生成新包不等于已部署 Site 或更新桌面 LATEST。
 
 真实 Roche 480 回归不将实验文件复制入仓库：
 

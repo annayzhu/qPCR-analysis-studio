@@ -1,3 +1,4 @@
+import { mean, sampleSd, standardError, exponentialUncertainty as transformedUncertainty } from "./statistics";
 import type { AnalysisSettings, RelativeQuantificationResult, WellRecord } from "../../schemas/src";
 
 export const COMPLETE_RESULTS_SCHEMA_VERSION = "2.0.0";
@@ -189,11 +190,8 @@ interface SummaryStats {
 }
 
 function summarize(values: number[]): SummaryStats {
-  const average = values.reduce((sum, value) => sum + value, 0) / values.length;
-  const sd = values.length < 2
-    ? null
-    : Math.sqrt(values.reduce((sum, value) => sum + (value - average) ** 2, 0) / (values.length - 1));
-  return { mean: average, sd, sem: sd === null ? null : sd / Math.sqrt(values.length), count: values.length };
+  const sd = sampleSd(values);
+  return { mean: mean(values)!, sd, sem: standardError(sd, values.length), count: values.length };
 }
 
 function quadratureMean(values: Array<number | null>): number | null {
@@ -204,10 +202,6 @@ function quadratureMean(values: Array<number | null>): number | null {
 function quadrature(values: Array<number | null>): number | null {
   if (!values.length || values.some((value) => value === null)) return null;
   return Math.sqrt(values.reduce<number>((sum, value) => sum + Number(value) ** 2, 0));
-}
-
-function transformedUncertainty(quantity: number, cqUncertainty: number | null, base: number): number | null {
-  return cqUncertainty === null ? null : Math.log(base) * quantity * cqUncertainty;
 }
 
 function exportInclusion(well: WellRecord): { included: boolean; reason: string } {

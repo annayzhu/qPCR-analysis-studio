@@ -1,7 +1,13 @@
 import XLSX from "xlsx-js-style";
-import type { CanonicalField, ImportedSource, ImportedTable, RawImportedRow } from "../../schemas/src";
+import type { CanonicalField, ImportDecisionField, ImportedSource, ImportedTable, RawImportedRow } from "../../schemas/src";
 import { analysisStartPolicy, normalizeWell } from "../../schemas/src";
 import { selectedTable } from "./adapters";
+import {
+  effectiveImportMetadata,
+  effectiveImportRowValue,
+  isImportIssueConfirmed,
+  isImportRowExcluded,
+} from "./import-review";
 
 export const QPCR_INPUT_TEMPLATE_SCHEMA_VERSION = "2.2.0";
 export const QPCR_INPUT_TEMPLATE_HEADERS = [
@@ -36,6 +42,7 @@ export interface TemplateValidationIssue {
     | "missing-plate"
     | "duplicate-well"
     | "duplicate-replicate"
+    | "no-included-row"
     | "missing-reference-target";
   severity: "error" | "warning";
   sourceSheet: string;
@@ -44,6 +51,11 @@ export interface TemplateValidationIssue {
   suppliedValue: string;
   messageZh: string;
   messageEn: string;
+  scope: "source" | "row";
+  field: ImportDecisionField;
+  canEdit: boolean;
+  canExclude: boolean;
+  canConfirm: boolean;
 }
 
 export interface TemplateValidationSummary {
@@ -52,6 +64,9 @@ export interface TemplateValidationSummary {
   nonDetectedCount: number;
   warningCount: number;
   errorCount: number;
+  includedCount: number;
+  excludedCount: number;
+  unresolvedCount: number;
   issues: TemplateValidationIssue[];
 }
 
@@ -173,10 +188,6 @@ function acceptedMapping(table: ImportedTable): Partial<Record<CanonicalField, s
   return record;
 }
 
-function rawText(row: RawImportedRow, header: string | undefined): string {
-  return header ? String(row.rawValues[header] ?? "").normalize("NFKC").trim() : "";
-}
-
 function issue(
   code: TemplateValidationIssue["code"],
   severity: TemplateValidationIssue["severity"],
@@ -187,6 +198,24 @@ function issue(
   messageZh: string,
   messageEn: string,
 ): TemplateValidationIssue {
+  const fieldByColumn: Record<string, ImportDecisionField> = {
+    Data: "row",
+    Sample: "sampleName",
+    Assay: "targetName",
+    "Assay Type": "taskType",
+    Replicate: "replicate",
+    "Cq/Ct/Cp": "cq",
+    "Delta Cq": "deltaCq",
+    "Delta Delta Cq": "deltaDeltaCq",
+    Well: "well",
+    "Plate + Well": "well",
+    Plate: "plateName",
+    "Plate Format": "plateFormat",
+    Tm1: "tm1",
+    Tm2: "tm2",
+  };
+  const field = fieldByColumn[column] ?? "row";
+  const rowScoped = Boolean(row);
   return {
     code,
     severity,
@@ -196,14 +225,18 @@ function issue(
     suppliedValue: value,
     messageZh,
     messageEn,
+    scope: rowScoped ? "row" : "source",
+    field,
+    canEdit: rowScoped && field !== "row" && code !== "mean-column-not-allowed",
+    canExclude: rowScoped && code !== "invalid-analysis-start" && code !== "missing-column" && code !== "mean-column-not-allowed",
+    canConfirm: code === "duplicate-replicate",
   };
 }
 
 function validateAnalysisStartRows(source: ImportedSource): TemplateValidationSummary {
   const table = selectedTable(source);
-  if (!table) return { totalRows: 0, detectedCount: 0, nonDetectedCount: 0, warningCount: 0, errorCount: 1, issues: [] };
+  if (!table) return { totalRows: 0, detectedCount: 0, nonDetectedCount: 0, warningCount: 0, errorCount: 1, includedCount: 0, excludedCount: 0, unresolvedCount: 1, issues: [] };
   const mappings = acceptedMapping(table);
-  const plateFormatHeader = table.headers.find((header) => /^(?:plate\s*format|plate\s*size|板型)$/i.test(header.normalize("NFKC").trim()));
   const issues: TemplateValidationIssue[] = [];
   if (!table.rawRows.length) issues.push(issue(
     "missing-value", "error", table, null, "Data", "",
@@ -211,15 +244,23 @@ function validateAnalysisStartRows(source: ImportedSource): TemplateValidationSu
     "The Data sheet has no data rows. Keep the headers and enter single-well records from row 2.",
   ));
   const analysisStart = source.metadata.qpcrAnalysisStart ?? "cq";
-  if (analysisStart !== "cq" && !source.metadata.qpcrReferenceTargets) issues.push({
+  const referenceTargets = effectiveImportMetadata(source, "referenceTargets");
+  if (analysisStart !== "cq" && !referenceTargets && !isImportIssueConfirmed(
+    source, "missing-reference-target", "referenceTargets", "Analysis Settings", null,
+  )) issues.push({
     code: "missing-reference-target",
     severity: "warning",
     sourceSheet: "Analysis Settings",
-    sourceRowNumber: 2,
+    sourceRowNumber: null,
     column: "Reference Target(s)",
     suppliedValue: "",
     messageZh: "未提供内参基因。结果仍可分析，但结果页和导出将标记计算依据不完整。",
     messageEn: "Reference Target(s) were not provided. Results remain analyzable, but the Results page and exports will mark the calculation basis as incomplete.",
+    scope: "source",
+    field: "referenceTargets",
+    canEdit: true,
+    canExclude: false,
+    canConfirm: true,
   });
   const selectedValue: [CanonicalField, string] = analysisStart === "delta-cq"
     ? ["deltaCq", "Delta Cq"]
@@ -241,6 +282,11 @@ function validateAnalysisStartRows(source: ImportedSource): TemplateValidationSu
     suppliedValue: "",
     messageZh: "分析起点必须选择 Cq/Ct/Cp、Delta Cq 或 Delta Delta Cq。系统不会自动改用其他起点。",
     messageEn: "Analysis Start must be Cq/Ct/Cp, Delta Cq, or Delta Delta Cq. The system will not silently switch to another start.",
+    scope: "source",
+    field: "row",
+    canEdit: false,
+    canExclude: false,
+    canConfirm: false,
   });
   for (const [field, label] of required) {
     if (!mappings[field]) issues.push(issue(
@@ -258,25 +304,32 @@ function validateAnalysisStartRows(source: ImportedSource): TemplateValidationSu
   let nonDetectedCount = 0;
   const physicalKeys = new Map<string, RawImportedRow>();
   const replicateKeys = new Map<string, RawImportedRow>();
-  const namedPlateValues = new Set(table.rawRows.map((row) => rawText(row, mappings.plateName)).filter(Boolean));
+  const activeRows = table.rawRows.filter((row) => !isImportRowExcluded(source, row));
+  if (table.rawRows.length > 0 && activeRows.length === 0) issues.push(issue(
+    "no-included-row", "error", table, null, "Data", "",
+    "所有数据行都已排除。请在“已处理”中至少恢复一行有效正式数值。",
+    "Every data row is excluded. Restore at least one valid authoritative row from Handled items.",
+  ));
+  const namedPlateValues = new Set(activeRows.map((row) => effectiveImportRowValue(source, table, row, "plateName")).filter(Boolean));
   for (const row of table.rawRows) {
-    const suppliedPlate = rawText(row, mappings.plateName);
-    const suppliedPlateFormat = rawText(row, plateFormatHeader);
+    if (isImportRowExcluded(source, row)) continue;
+    const suppliedPlate = effectiveImportRowValue(source, table, row, "plateName");
+    const suppliedPlateFormat = effectiveImportRowValue(source, table, row, "plateFormat");
     const plate = suppliedPlate || "Plate 1";
-    const wellValue = rawText(row, mappings.well);
-    const sample = rawText(row, mappings.sampleName);
-    const assay = rawText(row, mappings.targetName);
-    const assayType = rawText(row, mappings.taskType);
-    const replicate = rawText(row, mappings.replicate);
-    const cq = rawText(row, mappings.cq);
-    const selectedCycleValue = rawText(row, mappings[selectedValue[0]]);
+    const wellValue = effectiveImportRowValue(source, table, row, "well");
+    const sample = effectiveImportRowValue(source, table, row, "sampleName");
+    const assay = effectiveImportRowValue(source, table, row, "targetName");
+    const assayType = effectiveImportRowValue(source, table, row, "taskType");
+    const replicate = effectiveImportRowValue(source, table, row, "replicate");
+    const cq = effectiveImportRowValue(source, table, row, "cq");
+    const selectedCycleValue = effectiveImportRowValue(source, table, row, selectedValue[0]);
     if (analysisStart === "cq" && namedPlateValues.size > 0 && !suppliedPlate) issues.push(issue(
       "missing-plate", "error", table, row, "Plate", suppliedPlate,
       `第 ${row.sourceRowNumber} 行的 Plate 为空；同一工作表已出现具名孔板，多板数据必须逐行填写 Plate。`,
       `Plate is blank on row ${row.sourceRowNumber}; this sheet contains a named plate, so Plate is required on every row of multi-plate data.`,
     ));
     for (const [field, label] of required) {
-      const supplied = rawText(row, mappings[field]);
+      const supplied = effectiveImportRowValue(source, table, row, field);
       if (!supplied) issues.push(issue(
         "missing-value", "error", table, row, label, supplied,
         `第 ${row.sourceRowNumber} 行的 ${label} 为空。`,
@@ -323,7 +376,7 @@ function validateAnalysisStartRows(source: ImportedSource): TemplateValidationSu
       else detectedCount += 1;
     }
     for (const [field, label] of [["tm1", "Tm1"], ["tm2", "Tm2"]] as const) {
-      const supplied = rawText(row, mappings[field]);
+      const supplied = effectiveImportRowValue(source, table, row, field);
       if (supplied && !Number.isFinite(Number(supplied))) issues.push(issue(
         "invalid-number", "error", table, row, label, supplied,
         `第 ${row.sourceRowNumber} 行 ${label} 必须为数值。`,
@@ -343,7 +396,7 @@ function validateAnalysisStartRows(source: ImportedSource): TemplateValidationSu
     if (sample && assay && replicate && Number.isInteger(Number(replicate)) && Number(replicate) > 0) {
       const replicateKey = `${plate}\u241f${sample}\u241f${assay}\u241f${Number(replicate)}`;
       const previous = replicateKeys.get(replicateKey);
-      if (previous) issues.push(issue(
+      if (previous && !isImportIssueConfirmed(source, "duplicate-replicate", "replicate", row.sourceSheet, row.sourceRowNumber)) issues.push(issue(
         "duplicate-replicate", "warning", table, row, "Replicate", replicate,
         `第 ${row.sourceRowNumber} 行与第 ${previous.sourceRowNumber} 行在同一 Plate + Sample + Assay 中使用了相同复孔序号。`,
         `Row ${row.sourceRowNumber} and row ${previous.sourceRowNumber} reuse the same replicate identifier within Plate + Sample + Assay.`,
@@ -359,6 +412,9 @@ function validateAnalysisStartRows(source: ImportedSource): TemplateValidationSu
     nonDetectedCount,
     warningCount: issues.filter((item) => item.severity === "warning").length,
     errorCount: issues.filter((item) => item.severity === "error").length,
+    includedCount: activeRows.length,
+    excludedCount: table.rawRows.length - activeRows.length,
+    unresolvedCount: issues.length,
     issues,
   };
 }

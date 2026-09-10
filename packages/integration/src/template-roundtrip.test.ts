@@ -6,6 +6,7 @@ import {
   assessImportReadiness,
   parseWorkbookBytes,
   QPCR_INPUT_TEMPLATE_HEADERS,
+  recordImportDecision,
   validateQpcrInputTemplate,
 } from "../../importers/src";
 import {
@@ -16,6 +17,8 @@ import {
   SUPPLIED_RESULTS_EXPORT_SCHEMA_VERSION,
   SUPPLIED_TRACEABILITY_HEADERS,
   buildCompleteResultRows,
+  buildImportDecisionRows,
+  IMPORT_DECISION_EXPORT_DICTIONARY,
   buildCalculationExportBundle,
   buildCalculationWorkbookBytes,
   buildVisualizationBarRows,
@@ -44,6 +47,132 @@ function filledTemplateBytes(): ArrayBuffer {
 }
 
 describe("downloadable template to complete-results export", () => {
+  it("applies auditable import corrections before supplied Delta Cq analysis", () => {
+    const workbook = buildQpcrInputTemplateWorkbook();
+    workbook.Sheets["Analysis Settings"].B1.v = "Delta Cq";
+    workbook.Sheets.Data = XLSX.utils.aoa_to_sheet([
+      ["Sample", "Assay", "Replicate", "Delta Cq"],
+      ["Control", "GENE", 1, 3.0],
+      ["Control", "GENE", 1, 3.2],
+      ["Treat", "GENE", 1, 2.1],
+      ["Treat", "GENE", 2, ""],
+      ["Treat", "GENE", 3, ""],
+    ]);
+    const bytes = XLSX.write(workbook, { bookType: "xlsx", type: "array" }) as ArrayBuffer;
+    let source = parseWorkbookBytes(bytes, "delta-cq-import-review.xlsx");
+    const initial = validateQpcrInputTemplate(source)!;
+
+    expect(initial.issues).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: "missing-reference-target" }),
+      expect.objectContaining({ code: "duplicate-replicate", sourceRowNumber: 3 }),
+      expect.objectContaining({ code: "missing-value", sourceRowNumber: 5, column: "Delta Cq" }),
+      expect.objectContaining({ code: "missing-value", sourceRowNumber: 6, column: "Delta Cq" }),
+    ]));
+
+    source = recordImportDecision(source, {
+      scope: "source",
+      field: "referenceTargets",
+      action: "edit",
+      newValue: "GAPDH",
+      reason: "Reference target supplied during import review",
+    });
+    source = recordImportDecision(source, {
+      scope: "row",
+      sourceSheet: "Data",
+      sourceRowNumber: 3,
+      field: "replicate",
+      action: "edit",
+      newValue: "2",
+      reason: "Correct duplicate replicate identifier",
+    });
+    for (const sourceRowNumber of [5, 6]) {
+      source = recordImportDecision(source, {
+        scope: "row",
+        sourceSheet: "Data",
+        sourceRowNumber,
+        field: "row",
+        action: "exclude",
+        reason: "Missing authoritative Delta Cq",
+      });
+    }
+
+    expect(validateQpcrInputTemplate(source)).toMatchObject({
+      errorCount: 0,
+      warningCount: 0,
+      excludedCount: 2,
+      unresolvedCount: 0,
+    });
+    expect(assessImportReadiness([source])).toMatchObject({ canAnalyze: true, status: "ready" });
+
+    const dataset = buildCanonicalDataset([source]);
+    expect(dataset.suppliedCalculationProvenance?.referenceTargets).toEqual(["GAPDH"]);
+    expect(dataset.suppliedCalculations.filter((row) => row.importStatus !== "excluded").map((row) => row.value))
+      .toEqual([3, 3.2, 2.1]);
+    expect(dataset.suppliedCalculations.filter((row) => row.importStatus === "excluded")).toHaveLength(2);
+    expect(dataset.suppliedCalculations.find((row) => row.sourceRowNumber === 3)).toMatchObject({
+      importStatus: "corrected",
+      verificationStatus: "unverified",
+      originalSuppliedValue: "3.2",
+      correctedValue: "",
+    });
+    expect(buildImportDecisionRows(dataset.importDecisions ?? [])).toEqual(expect.arrayContaining([
+      expect.objectContaining({ scope: "source", field: "referenceTargets", action: "edit", new_value: "GAPDH" }),
+      expect.objectContaining({ source_row: 3, field: "replicate", action: "edit", new_value: "2" }),
+      expect.objectContaining({ source_row: 5, field: "row", action: "exclude" }),
+      expect.objectContaining({ source_row: 6, field: "row", action: "exclude" }),
+    ]));
+    expect(IMPORT_DECISION_EXPORT_DICTIONARY.map((entry) => entry.field)).toEqual([
+      "timestamp", "actor", "source_file", "source_id", "source_sheet", "source_row", "scope", "field",
+      "action", "issue_code", "original_value", "new_value", "reason",
+    ]);
+
+    const results = calculateFromSuppliedCalculations(dataset.suppliedCalculations, {
+      analysisStart: "delta-cq",
+      calibratorValue: "",
+    });
+    expect(results.find((row) => row.sampleName === "Control")?.deltaCq).toBeCloseTo(3.1);
+    expect(results.find((row) => row.sampleName === "Treat")?.deltaCq).toBe(2.1);
+
+    const traceability = buildSuppliedTraceabilityRows(
+      dataset.suppliedCalculations,
+      dataset.suppliedCalculationProvenance,
+    );
+    expect(traceability.filter((row) => row.import_status === "excluded")).toEqual([
+      expect.objectContaining({ source_row: 5, original_supplied_value: "", exclusion_reason: "Missing authoritative Delta Cq" }),
+      expect.objectContaining({ source_row: 6, original_supplied_value: "", exclusion_reason: "Missing authoritative Delta Cq" }),
+    ]);
+
+    const restoredSource = recordImportDecision(source, {
+      scope: "row",
+      sourceSheet: "Data",
+      sourceRowNumber: 3,
+      field: "replicate",
+      action: "restore",
+      reason: "Restore the uploaded replicate identifier",
+    });
+    const restoredDataset = buildCanonicalDataset([restoredSource]);
+    expect(restoredDataset.suppliedCalculations.find((row) => row.sourceRowNumber === 3)).toMatchObject({
+      replicate: 1,
+      importStatus: "included",
+      correctedValue: "",
+    });
+
+    const unmappedSource = {
+      ...source,
+      tables: source.tables.map((table) => table.id !== source.selectedTableId ? table : {
+        ...table,
+        suggestedMappings: table.suggestedMappings.map((mapping) => mapping.canonicalField !== "replicate" ? mapping : {
+          ...mapping,
+          canonicalField: null,
+          confidence: 0,
+          matchMethod: "unmapped" as const,
+        }),
+      }),
+    };
+    expect(buildCanonicalDataset([unmappedSource]).suppliedCalculations.find((row) => row.sourceRowNumber === 3)?.replicate)
+      .toBeNull();
+  });
+
   it("preserves supplied-calculation reference provenance without renormalizing Delta Cq", () => {
     const workbook = buildQpcrInputTemplateWorkbook();
     workbook.Sheets["Analysis Settings"].B1.v = "Delta Cq";
@@ -90,7 +219,7 @@ describe("downloadable template to complete-results export", () => {
       reference_method: "Geometric mean of relative quantities",
       source_calibrator: "Control",
     });
-    expect(SUPPLIED_RESULTS_EXPORT_SCHEMA_VERSION).toBe("1.1.0");
+    expect(SUPPLIED_RESULTS_EXPORT_SCHEMA_VERSION).toBe("1.2.0");
     expect(new Set(SUPPLIED_EXPORT_DICTIONARY.filter((entry) => entry.sheet === "Complete Results").map((entry) => entry.field)))
       .toEqual(new Set(SUPPLIED_COMPLETE_HEADERS));
     expect(new Set(SUPPLIED_EXPORT_DICTIONARY.filter((entry) => entry.sheet === "Supplied Values").map((entry) => entry.field)))
@@ -154,13 +283,18 @@ describe("downloadable template to complete-results export", () => {
       ["Control", "GENE", 2, 3.2],
     ]);
     const bytes = XLSX.write(workbook, { bookType: "xlsx", type: "array" }) as ArrayBuffer;
-    const source = parseWorkbookBytes(bytes, "delta-cq-calculation-only.xlsx");
+    let source = parseWorkbookBytes(bytes, "delta-cq-calculation-only.xlsx");
 
     expect(validateQpcrInputTemplate(source)).toMatchObject({ errorCount: 0, warningCount: 1 });
     expect(validateQpcrInputTemplate(source)?.issues).toContainEqual(expect.objectContaining({
       code: "missing-reference-target",
       severity: "warning",
     }));
+    expect(assessImportReadiness([source])).toMatchObject({ status: "review-mapping", canAnalyze: false });
+    source = recordImportDecision(source, {
+      scope: "source", field: "referenceTargets", action: "confirm",
+      issueCode: "missing-reference-target", reason: "Proceed with incomplete upstream provenance",
+    });
     expect(assessImportReadiness([source])).toMatchObject({
       status: "ready",
       canAnalyze: true,
@@ -207,9 +341,13 @@ describe("downloadable template to complete-results export", () => {
       ["Source Plate", 96, "A2", "Treat", "GENE", "Target", 2, -0.8, 84.3, ""],
     ]);
     const bytes = XLSX.write(workbook, { bookType: "xlsx", type: "array" }) as ArrayBuffer;
-    const source = parseWorkbookBytes(bytes, "delta-delta-cq-with-provenance.xlsx");
+    let source = parseWorkbookBytes(bytes, "delta-delta-cq-with-provenance.xlsx");
 
     expect(validateQpcrInputTemplate(source)).toMatchObject({ errorCount: 0 });
+    source = recordImportDecision(source, {
+      scope: "source", field: "referenceTargets", action: "confirm",
+      issueCode: "missing-reference-target", reason: "Proceed with incomplete upstream provenance",
+    });
     expect(assessImportReadiness([source])).toMatchObject({
       status: "ready",
       layoutRequired: false,
@@ -279,9 +417,13 @@ describe("downloadable template to complete-results export", () => {
       ["Plate 01", 96, "A2", "Control", "GENE", "Target", 2, "Ct", "", 3.2, "", "", ""],
     ]);
     const bytes = XLSX.write(workbook, { bookType: "xlsx", type: "array" }) as ArrayBuffer;
-    const source = parseWorkbookBytes(bytes, "delta-cq-template.xlsx");
+    let source = parseWorkbookBytes(bytes, "delta-cq-template.xlsx");
 
     expect(validateQpcrInputTemplate(source)?.errorCount).toBe(0);
+    source = recordImportDecision(source, {
+      scope: "source", field: "referenceTargets", action: "confirm",
+      issueCode: "missing-reference-target", reason: "Proceed with incomplete upstream provenance",
+    });
     expect(assessImportReadiness([source])).toMatchObject({ status: "ready", canAnalyze: true });
     const dataset = buildCanonicalDataset([source]);
     expect(dataset.analysisStart).toBe("delta-cq");
@@ -337,10 +479,17 @@ describe("downloadable template to complete-results export", () => {
       efficiencyByTarget: {}, calculationMode: "delta-delta-cq" as const,
     };
     const bundle = buildCalculationExportBundle(dataset.wells, results, ["Treat", "Control"], ["GENE"], settings);
-    const workbookBytes = buildCalculationWorkbookBytes(bundle);
+    const auditedSource = recordImportDecision(source, {
+      scope: "row", sourceSheet: "Data", sourceRowNumber: 2, field: "tm1", action: "edit", newValue: "82.3",
+      reason: "Correct Tm during Cq import review",
+    });
+    const workbookBytes = buildCalculationWorkbookBytes({
+      ...bundle,
+      importDecisions: buildCanonicalDataset([auditedSource]).importDecisions,
+    });
     const workbook = XLSX.read(workbookBytes, { type: "array" });
     expect(workbook.SheetNames).toEqual([
-      "Complete Results", "Well Calculations", "Plate Summaries", "Calculation Guide", "Data Dictionary",
+      "Complete Results", "Well Calculations", "Plate Summaries", "Calculation Guide", "Import Decisions", "Data Dictionary",
     ]);
     const wellRows = XLSX.utils.sheet_to_json<Record<string, string | number>>(workbook.Sheets["Well Calculations"]);
     expect(wellRows).toHaveLength(8);
@@ -349,5 +498,14 @@ describe("downloadable template to complete-results export", () => {
     const dictionaryRows = XLSX.utils.sheet_to_json<Record<string, string>>(workbook.Sheets["Data Dictionary"]);
     expect(dictionaryRows.find((row) => row.field === "delta_cq_technical_sd")?.["中文定义"]).toContain("平方和开根号");
     expect(dictionaryRows.find((row) => row.field === "delta_cq_technical_sem")?.["中文定义"]).toContain("SD/√n");
+    expect(dictionaryRows.find((row) => row["工作表"] === "Import Decisions" && row.field === "source_file")?.["English definition"])
+      .toBe("Original uploaded file name.");
+    expect(XLSX.utils.sheet_to_json<Record<string, string | number>>(workbook.Sheets["Import Decisions"])[0]).toMatchObject({
+      source_file: "qpcr-input-template.xlsx",
+      source_sheet: "Data",
+      source_row: 2,
+      field: "tm1",
+      action: "edit",
+    });
   });
 });

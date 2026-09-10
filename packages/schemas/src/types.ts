@@ -85,6 +85,27 @@ export interface ImportedSource {
   selectedTableId: string;
   metadata: Record<string, string>;
   warnings: string[];
+  importDecisions?: ImportDecision[];
+}
+
+export type ImportDecisionField = CanonicalField | "plateFormat" | "referenceTargets" | "row";
+
+export interface ImportDecision {
+  id: string;
+  scope: "source" | "row";
+  sourceId: string;
+  sourceFileName: string;
+  sourceSheet: string;
+  sourceRowNumber: number | null;
+  sourceColumn: string;
+  field: ImportDecisionField;
+  action: "edit" | "exclude" | "restore" | "confirm";
+  issueCode: string;
+  originalValue: string;
+  newValue: string;
+  reason: string;
+  actor: "user";
+  timestamp: string;
 }
 
 export interface QcFlag {
@@ -97,6 +118,8 @@ export interface QcFlag {
 export interface WellRecord {
   id: string;
   plateId: string;
+  /** Human-readable plate name from the imported data. plateId remains the stable join key. */
+  plateName?: string;
   well: string;
   row: string;
   column: number;
@@ -190,7 +213,7 @@ export interface SuppliedCalculationRecord {
   sampleName: string;
   targetName: string;
   replicate: number | null;
-  value: number;
+  value: number | null;
   analysisStart?: Exclude<AnalysisStart, "cq">;
   plateId?: string;
   plateName?: string;
@@ -201,6 +224,13 @@ export interface SuppliedCalculationRecord {
   tm1?: number | null;
   tm2?: number | null;
   verificationStatus: "unverified" | "user-confirmed";
+  importStatus?: "included" | "corrected" | "excluded";
+  exclusionReason?: string;
+  excludedBy?: "user" | null;
+  originalSuppliedValue?: string;
+  correctedValue?: string;
+  decisionTimestamp?: string | null;
+  sourceFileName?: string;
   sourceSheet?: string;
   sourceRowNumber?: number;
   rawRow?: RawImportedRow;
@@ -224,6 +254,7 @@ export interface CanonicalDataset {
   mappings: FieldMapping[];
   warnings: string[];
   assumptions: string[];
+  importDecisions?: ImportDecision[];
 }
 
 export interface ReplicateQc {

@@ -3,10 +3,10 @@ import type { AnalysisSettings } from "../../schemas/src";
 import { buildCanonicalDataset, parseDelimitedText } from "../../importers/src";
 import {
   createAnalysisSession,
-  previewAnalysisSessionChange,
-  projectAnalysisSession,
   transitionAnalysisSession,
 } from "./session";
+import { projectAnalysisSession } from "./projection";
+import { previewLayoutTransfer } from "../../qpcr-core/src";
 
 const settings: AnalysisSettings = {
   referenceTargets: ["REF"],
@@ -73,12 +73,8 @@ describe("analysis session workflow", () => {
     const physicalCpBefore = new Map(imported.wells.map((well) => [well.id, well.cq]));
     let state = createAnalysisSession(imported, "quantification", settings, deps);
 
-    const preview = previewAnalysisSessionChange(state, {
-      type: "transfer-annotations",
-      request: { mode: "move", sourceWellIds: [source.id], destinationAnchorWellId: destination.id },
-      reason: "Correct shifted plate layout",
-    });
-    expect(preview).toMatchObject({ kind: "layout-transfer", result: { ok: true } });
+    const preview = previewLayoutTransfer(state.draftWells, { mode: "move", sourceWellIds: [source.id], destinationAnchorWellId: destination.id });
+    expect(preview.ok).toBe(true);
 
     const changed = transitionAnalysisSession(state, {
       type: "transfer-annotations",
@@ -110,8 +106,9 @@ describe("analysis session workflow", () => {
     expect(applied.state.appliedWells).toBe(applied.state.draftWells);
     expect(applied.state.dataset.wells).toBe(applied.state.appliedWells);
     expect(applied.state.appliedRevision).toBe(applied.state.revision);
-    expect(applied.readModel).toMatchObject({ analysisLocked: false, pendingCount: 0 });
-    expect(applied.readModel.relativeResults.find((row) => row.targetName === "GENE")).toMatchObject({
+    const appliedView = projectAnalysisSession(applied.state);
+    expect(appliedView).toMatchObject({ analysisLocked: false, pendingCount: 0 });
+    expect(appliedView.relativeResults.find((row) => row.targetName === "GENE")).toMatchObject({
       sampleName: "Control",
       deltaCq: 4,
       relativeExpression: 1,
@@ -177,7 +174,7 @@ describe("analysis session workflow", () => {
     expect(undone.state.draftWells).toBe(state.draftWells);
     expect(undone.state.pendingEditLogs).toEqual([]);
     expect(undone.state.pendingOperationLogs).toEqual([]);
-    expect(undone.readModel.canUndo).toBe(false);
+    expect(projectAnalysisSession(undone.state).canUndo).toBe(false);
   });
 
   it("changes analysis settings against the applied snapshot, never an unapplied draft", () => {
@@ -201,7 +198,7 @@ describe("analysis session workflow", () => {
       settings: { ...settings, calibratorValue: "", calculationMode: "delta-cq" },
     }, deps);
 
-    expect(configured.readModel.relativeResults.map((row) => row.targetName)).toEqual(["GENE"]);
+    expect(projectAnalysisSession(configured.state).relativeResults.map((row) => row.targetName)).toEqual(["GENE"]);
     expect(configured.state.draftWells.find((well) => well.id === gene.id)?.targetName).toBe("OTHER");
     expect(configured.state.appliedWells.find((well) => well.id === gene.id)?.targetName).toBe("GENE");
   });

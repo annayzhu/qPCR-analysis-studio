@@ -9,8 +9,7 @@ import { build } from "esbuild";
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const outputRoot = path.join(projectRoot, "outputs", "offline");
 const releaseDate = process.env.RELEASE_DATE || new Date().toISOString().slice(0, 10).replaceAll("-", "");
-const folderName = `qPCR-Analysis-Studio_Offline_${releaseDate}`;
-const releaseFolder = path.join(outputRoot, folderName);
+if (!/^\d{8}$/.test(releaseDate)) throw new Error("RELEASE_DATE must use YYYYMMDD format.");
 const temporaryRoot = await mkdtemp(path.join(tmpdir(), "qpcr-analysis-offline-"));
 
 function escapeInline(source, tag) {
@@ -54,18 +53,25 @@ try {
     nodePaths: [path.join(projectRoot, "node_modules")],
   });
 
-  const [javascript, rawCss] = await Promise.all([
+  const [javascript, rawCss, monoRegular, monoSemibold] = await Promise.all([
     readFile(bundlePath, "utf8"),
     readFile(path.join(projectRoot, "app", "globals.css"), "utf8"),
+    readFile(path.join(projectRoot, "public", "fonts", "ibm-plex-mono", "IBMPlexMono-Regular.ttf")),
+    readFile(path.join(projectRoot, "public", "fonts", "ibm-plex-mono", "IBMPlexMono-SemiBold.ttf")),
   ]);
-  const css = rawCss.replace(/^@import\s+["']tailwindcss["'];\s*/mu, "");
+  const css = rawCss
+    .replace(/^@import\s+["']tailwindcss["'];\s*/mu, "")
+    .replace('/fonts/ibm-plex-mono/IBMPlexMono-Regular.ttf', `data:font/ttf;base64,${monoRegular.toString("base64")}`)
+    .replace('/fonts/ibm-plex-mono/IBMPlexMono-SemiBold.ttf', `data:font/ttf;base64,${monoSemibold.toString("base64")}`);
   const html = `<!doctype html><html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light"><title>qPCR Analysis Studio</title><style>${escapeInline(css, "style")}</style></head><body><noscript>请启用浏览器 JavaScript 后使用本工具。</noscript><div id="qpcr-analysis-root"></div><script>${escapeInline(javascript, "script")}</script></body></html>`;
 
-  await rm(outputRoot, { recursive: true, force: true });
+  // Content-addressed releases preserve previous packages, including same-day builds.
+  const htmlHash = createHash("sha256").update(html).digest("hex");
+  const folderName = `qPCR-Analysis-Studio_Offline_${releaseDate}_${htmlHash.slice(0, 12)}`;
+  const releaseFolder = path.join(outputRoot, folderName);
   await mkdir(releaseFolder, { recursive: true });
   const htmlPath = path.join(releaseFolder, "index.html");
   await writeFile(htmlPath, html, "utf8");
-  const htmlHash = createHash("sha256").update(await readFile(htmlPath)).digest("hex");
   await writeFile(path.join(releaseFolder, "README_使用说明.txt"), [
     "qPCR Analysis Studio 离线版",
     "",
@@ -85,6 +91,7 @@ try {
   const zipPath = path.join(outputRoot, zipName);
   const zipHash = createHash("sha256").update(await readFile(zipPath)).digest("hex");
   await writeFile(path.join(outputRoot, "SHA256SUMS.txt"), `${zipHash}  ${zipName}\n`);
+  await writeFile(path.join(outputRoot, "latest.json"), JSON.stringify({ folderName, zipName, htmlSha256: htmlHash, zipSha256: zipHash }, null, 2));
   console.log(JSON.stringify({
     releaseFolder,
     zipPath,

@@ -18,17 +18,19 @@ import {
   assessImportReadiness,
   buildCanonicalDataset,
   parseBrowserFile,
+  recordImportDecision,
   resolveAnalysisStartForImport,
   transitionAnalysisStart,
   validateAnalysisStartSource,
+  type RecordImportDecisionInput,
 } from "@/packages/importers/src";
 import {
   createAnalysisSession,
-  previewAnalysisSessionChange,
-  projectAnalysisSession,
+  createAnalysisSessionProjector,
   transitionAnalysisSession,
 } from "@/packages/analysis-session/src";
 import type { AnalysisSessionCommand, AnalysisSessionState } from "@/packages/analysis-session/src";
+import { buildAnalysisExportStem, previewLayoutTransfer } from "@/packages/qpcr-core/src";
 import ImportManager from "./components/ImportManager";
 import CalculationOverview from "./components/CalculationOverview";
 import MeltAnalysis from "./components/MeltAnalysis";
@@ -52,6 +54,20 @@ function singleWellCqDisplay(well: WellRecord, l: Localizer): string {
   if (well.cqStatus === "invalid") return l("无效值", "Invalid value");
   if (well.cqStatus === "not-applicable") return l("不适用", "Not applicable");
   return l("未提供", "Not provided");
+}
+
+function plateDisplayName(wells: WellRecord[], plateId: string, index: number, l: Localizer): string {
+  const representative = wells.find((well) => well.plateId === plateId);
+  const importedName = representative?.plateName?.trim();
+  if (importedName) return importedName;
+
+  const sourceSheet = representative?.sourceSheet?.trim();
+  if (sourceSheet && !/^(?:data|sheet\s*\d*|well[_ -]?detail)$/i.test(sourceSheet)) return sourceSheet;
+
+  const sourceFileName = representative?.rawRow.sourceFileName?.trim();
+  if (sourceFileName) return sourceFileName.replace(/\.(?:xlsx?|csv|tsv|txt)$/i, "");
+
+  return l(`第 ${index + 1} 块板`, `Plate ${index + 1}`);
 }
 
 function targetColor(target: string): string {
@@ -219,6 +235,7 @@ export default function QpcrAnalysisStudio() {
   const analysisStartSelectedByUser = useRef(false);
   const [sources, setSources] = useState<ImportedSource[]>([]);
   const [analysisSession, setAnalysisSession] = useState<AnalysisSessionState | null>(null);
+  const [projectSession] = useState(createAnalysisSessionProjector);
   const [analysisStart, setAnalysisStart] = useState<AnalysisStart>("cq");
   const [selected, setSelected] = useState<string[]>([]);
   const [selectionAnchor, setSelectionAnchor] = useState<string | null>(null);
@@ -247,10 +264,16 @@ export default function QpcrAnalysisStudio() {
 
   const readiness = useMemo(() => assessImportReadiness(sources), [sources]);
   const sessionView = useMemo(
-    () => analysisSession ? projectAnalysisSession(analysisSession) : null,
-    [analysisSession],
+    () => analysisSession ? projectSession(analysisSession) : null,
+    [analysisSession, projectSession],
   );
   const dataset = sessionView?.dataset ?? null;
+  const analysisExportStem = useMemo(
+    () => dataset
+      ? buildAnalysisExportStem(dataset.sources.map((source) => source.fileName), dataset.analysisStart, dataset.createdAt)
+      : "qpcr-analysis",
+    [dataset],
+  );
   const plateDefinition = dataset?.plate ?? null;
   const importedWells = sessionView?.importedWells ?? EMPTY_WELLS;
   const draftWells = sessionView?.draftWells ?? EMPTY_WELLS;
@@ -261,17 +284,25 @@ export default function QpcrAnalysisStudio() {
   const pendingDispositionLogs = analysisSession?.pendingDispositionLogs ?? [];
   const alignmentDispositions = sessionView?.alignmentDispositions ?? {};
   const auditLogs = sessionView?.auditLogs ?? [];
+  const importDecisions = dataset?.importDecisions ?? [];
   const pendingCount = sessionView?.pendingCount ?? 0;
   const alignmentReviewPending = sessionView?.alignmentReviewPending ?? false;
   const analysisLocked = sessionView?.analysisLocked ?? false;
   const referenceTargets = sessionView?.settings.referenceTargets ?? [];
   const calibrator = sessionView?.settings.calibratorValue ?? "";
-  const selectedWells = useMemo(() => draftWells.filter((well) => selected.includes(well.id)), [draftWells, selected]);
+  const selectedIds = useMemo(() => new Set(selected), [selected]);
+  const selectedWells = useMemo(() => draftWells.filter((well) => selectedIds.has(well.id)), [draftWells, selectedIds]);
   const plateIds = useMemo(() => [...new Set(draftWells.map((well) => well.plateId))], [draftWells]);
+  const plateOptions = useMemo(
+    () => plateIds.map((plateId, index) => ({ plateId, label: plateDisplayName(draftWells, plateId, index, l) })),
+    [draftWells, l, plateIds],
+  );
+  const plateLabelById = useMemo(() => new Map(plateOptions.map((option) => [option.plateId, option.label])), [plateOptions]);
   const activePlateWells = useMemo(
     () => draftWells.filter((well) => well.plateId === (activePlateId || plateIds[0])),
     [activePlateId, draftWells, plateIds],
   );
+  const activeWellByPosition = useMemo(() => new Map(activePlateWells.map(well => [well.well, well])), [activePlateWells]);
   const importedWellById = useMemo(() => new Map(importedWells.map((well) => [well.id, well])), [importedWells]);
   const selectedRestorableCount = useMemo(() => selectedWells.filter((well) => {
     const baseline = importedWellById.get(well.id);
@@ -368,18 +399,12 @@ export default function QpcrAnalysisStudio() {
       ? draftWells.find((well) => well.well === destinationWell && (!destinationPlate || well.plateId === destinationPlate))
       : undefined;
     if (!selected.length || !destination) return null;
-    if (!analysisSession) return null;
-    const preview = previewAnalysisSessionChange(analysisSession, {
-      type: "transfer-annotations",
-      request: {
-        mode: transferMode,
-        sourceWellIds: selected,
-        destinationAnchorWellId: destination.id,
-      },
-      reason: l("按相对几何位置修正布局", "Correct layout by relative geometry"),
+    return previewLayoutTransfer(draftWells, {
+      mode: transferMode,
+      sourceWellIds: selected,
+      destinationAnchorWellId: destination.id,
     });
-    return preview.kind === "layout-transfer" ? preview.result : null;
-  }, [analysisSession, draftWells, l, selected, selectedWells, transferDestination, transferDestinationPlateId, transferMode]);
+  }, [draftWells, selected, selectedWells, transferDestination, transferDestinationPlateId, transferMode]);
 
   function executeSessionCommand(command: AnalysisSessionCommand) {
     if (!analysisSession) return null;
@@ -418,9 +443,16 @@ export default function QpcrAnalysisStudio() {
   }
 
   function buildAndApply(sourceList: ImportedSource[]) {
-    const built = buildCanonicalDataset(sourceList);
+    let built: ReturnType<typeof buildCanonicalDataset>;
+    try {
+      built = buildCanonicalDataset(sourceList);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : l("无法应用导入修正。", "Unable to apply import corrections."));
+      setNeedsRebuild(true);
+      return false;
+    }
     const nextReadiness = assessImportReadiness(sourceList);
-    if (!nextReadiness.analysisMode) return;
+    if (!nextReadiness.analysisMode) return false;
     const builtSamples = [...new Set((built.analysisStart === "cq"
       ? built.wells.map((well) => well.sampleName)
       : built.suppliedCalculations.map((row) => row.sampleName)).filter(Boolean))].sort();
@@ -441,7 +473,7 @@ export default function QpcrAnalysisStudio() {
       calculationMode: built.analysisStart === "delta-delta-cq" ? "delta-delta-cq" : "delta-cq",
     };
     const nextSession = createAnalysisSession(built, nextReadiness.analysisMode, initialSettings);
-    const nextView = projectAnalysisSession(nextSession);
+    const nextView = projectSession(nextSession);
     setAnalysisSession(nextSession);
     setError(nextView.blockingError ?? "");
     const firstDefined = built.wells.find((well) => well.sampleName || well.targetName);
@@ -457,6 +489,7 @@ export default function QpcrAnalysisStudio() {
     setResultSection(built.analysisStart !== "cq" || hasCq || !hasMelt ? "quantification" : "melt");
     setDisplaySamples(builtSamples);
     setDisplayTargets(builtTargets);
+    return true;
   }
 
   function resetBuiltAnalysis() {
@@ -530,6 +563,15 @@ export default function QpcrAnalysisStudio() {
     setNeedsRebuild(true);
   }
 
+  function recordImportDecisions(sourceId: string, decisions: RecordImportDecisionInput[]) {
+    setSources((current) => current.map((source) => {
+      if (source.id !== sourceId) return source;
+      return decisions.reduce((reviewed, decision) => recordImportDecision(reviewed, decision), source);
+    }));
+    setNeedsRebuild(true);
+    setError("");
+  }
+
   function changeAnalysisStart(next: AnalysisStart) {
     analysisStartSelectedByUser.current = true;
     const transitioned = transitionAnalysisStart({
@@ -557,9 +599,10 @@ export default function QpcrAnalysisStudio() {
     else resetBuiltAnalysis();
   }
 
-  function rebuildCurrentSources() {
+  function applyImportCorrections() {
     const currentReadiness = assessImportReadiness(sources);
-    if (currentReadiness.canAnalyze) buildAndApply(sources);
+    if (!currentReadiness.canAnalyze) return;
+    if (buildAndApply(sources)) setDataManagerOpen(false);
   }
 
   function clearProject() {
@@ -805,13 +848,17 @@ export default function QpcrAnalysisStudio() {
       ["Raw measurement policy", "Cp/Cq/Ct, Tm and instrument flags remain on their original physical wells"],
     ];
     const pendingAuditLogs = [...pendingEditLogs, ...pendingExclusionLogs, ...pendingOperationLogs, ...pendingDispositionLogs];
-    const auditRows = [
+    const analysisAuditRows = [
       ...auditLogs.map((log) => ({ log, status: l("已应用", "Applied") })),
       ...pendingAuditLogs.map((log) => ({ log, status: l("待应用", "Pending") })),
     ].map(({ log, status }) => ({
       Timestamp: log.timestamp,
       Status: status,
       Action: auditLogTitle(log, l),
+      "Source file": "",
+      "Source ID": "",
+      "Source sheet": "",
+      "Source row": "",
       Wells: auditLogReference(log, draftWells),
       "Source wells": "operation" in log ? auditWellReferences(log.sourceWellRecordIds, draftWells) : auditLogReference(log, draftWells),
       "Destination wells": "operation" in log ? auditWellReferences(log.destinationWellRecordIds, draftWells) : auditLogReference(log, draftWells),
@@ -820,6 +867,25 @@ export default function QpcrAnalysisStudio() {
       "New value": "field" in log ? log.newValue : "newState" in log ? String(log.newState) : "operation" in log ? log.changes.map((change) => `${change.wellRecordId}.${change.field}=${change.newValue ?? ""}`).join("; ") || log.newSnapshot : "",
       Reason: auditLogDescription(log, l),
     }));
+    const auditRows = [
+      ...importDecisions.map((decision) => ({
+        Timestamp: decision.timestamp,
+        Status: l("导入时已应用", "Applied at import"),
+        Action: decision.action === "exclude" ? l("排除导入行", "Exclude import row") : decision.action === "confirm" ? l("确认导入提醒", "Confirm import warning") : decision.action === "restore" ? l("恢复导入值", "Restore import value") : l("修正导入值", "Correct import value"),
+        "Source file": decision.sourceFileName,
+        "Source ID": decision.sourceId,
+        "Source sheet": decision.sourceSheet,
+        "Source row": decision.sourceRowNumber ?? "",
+        Wells: `${decision.sourceSheet}${decision.sourceRowNumber ? ` row ${decision.sourceRowNumber}` : ""}`,
+        "Source wells": "",
+        "Destination wells": "",
+        Field: decision.field,
+        "Previous value": decision.originalValue,
+        "New value": decision.newValue,
+        Reason: decision.reason,
+      })),
+      ...analysisAuditRows,
+    ];
     const workbook = XLSX.utils.book_new();
     const layoutSheet = XLSX.utils.json_to_sheet(layoutRows);
     layoutSheet["!cols"] = [{ wch: 18 }, { wch: 8 }, { wch: 6 }, { wch: 8 }, { wch: 28 }, { wch: 20 }, { wch: 16 }, { wch: 10 }, { wch: 14 }, { wch: 28 }];
@@ -888,6 +954,16 @@ export default function QpcrAnalysisStudio() {
     if (!dataset?.plate && nextView === "plate") return;
     if (analysisLocked && nextView !== "plate") return;
     setView(nextView);
+  }
+
+  function openQcWellsInPlate(row: ReplicateQc, requestedWells: string[] = row.wells) {
+    const matchingWells = draftWells.filter((well) => well.plateId === row.plateId && requestedWells.includes(well.well));
+    if (!matchingWells.length) return;
+    setActivePlateId(row.plateId);
+    setTransferDestinationPlateId(row.plateId);
+    setSelected(matchingWells.map((well) => well.id));
+    setSelectionAnchor(matchingWells[0].id);
+    setView("plate");
   }
 
   function toggleOrderedSelection(value: string, selectedValues: string[], update: (values: string[]) => void) {
@@ -988,8 +1064,9 @@ export default function QpcrAnalysisStudio() {
             onRemoveSource={removeSource}
             onUpdateSelectedTable={updateSelectedTable}
             onUpdateMapping={updateMapping}
+            onRecordImportDecisions={recordImportDecisions}
             onAnalysisStartChange={changeAnalysisStart}
-            onRebuild={rebuildCurrentSources}
+            onApply={applyImportCorrections}
             onContinue={() => { setDataManagerOpen(false); setView(alignmentReviewPending ? "plate" : "overview"); }}
           />
         </div>
@@ -1047,12 +1124,12 @@ export default function QpcrAnalysisStudio() {
                   calibrator={calibrator}
                   sources={sources}
                   dataNotes={[...dataset.warnings, ...dataset.assumptions].map((item) => localizeRuntimeMessage(item, language))}
-                  auditCount={auditLogs.length}
+                  auditCount={auditLogs.length + importDecisions.length}
                   onOpenResults={() => switchWorkspaceView("results")}
                 /> : <div className="overview-qc-grid">
                   {plateDefinition && <article className="qc-workbench">
                     <div className="card-heading compact-card-heading">
-                      <div><p className="eyebrow">REPLICATE QC</p><h3>{l("技术复孔", "Technical replicates")}</h3><div className="qc-scope-counts"><span>{l(`复孔组 ${qcIssueCount}`, `${qcIssueCount} replicate group(s)`)}</span><span>{l(`孔级 ${qcWellIssueCount}`, `${qcWellIssueCount} well alert(s)`)}</span></div></div>
+                      <div><p className="eyebrow">REPLICATE QC</p><h3>{l("技术复孔", "Technical replicates")}</h3><div className="qc-scope-counts"><span>{l(`复孔组 ${qcIssueCount}`, `${qcIssueCount} replicate group(s)`)}</span><span>{l(`孔级 ${qcWellIssueCount}`, `${qcWellIssueCount} well alert(s)`)}</span></div><p className="qc-workflow-hint">{l("点击孔位定位单孔；“去板上复核”定位整个复孔组。", "Select a well to locate it, or review the complete replicate group on the plate.")}</p></div>
                       <details className="inline-rules"><summary>{l("规则：Cq/Tm 极差 > 0.5", "Rule: Cq/Tm range > 0.5")}</summary><p>{l("仅提示，不自动排除；单孔不计算 SD/CV；Tm 偏移需结合曲线和实验设计人工判断。", "Warnings do not automatically exclude wells. SD/CV are not calculated for a single well. Interpret Tm shifts with the curve and experimental design.")}</p></details>
                     </div>
                     <div className="table-filterbar compact-filterbar">
@@ -1064,7 +1141,7 @@ export default function QpcrAnalysisStudio() {
                       <table>
                         <thead><tr><th>{l("样本", "Sample")}</th><th>{l("靶标", "Target")}</th><th>{l("孔位", "Wells")}</th>{hasRawQuantification && <><th>{l("有效 Cq/总数", "Valid/total Cq")}</th><th>Mean Cq</th><th>SD</th><th>Cq range</th><th>{l("线性量 CV%", "Linear quantity CV%")}</th></>}{hasMeltAnalysis && <><th>Mean Tm1</th><th>Tm1 range</th><th>{l("第二峰", "Second peak")}</th><th>{l("熔解分组", "Melt groups")}</th></>}<th>{l("判定", "Status")}</th></tr></thead>
                         <tbody>{filteredQc.map((row) => <tr key={row.id} className={row.warningCodes.length ? "flagged-row" : ""}>
-                          <td><b>{row.sampleName}</b></td><td>{row.targetName}</td><td>{row.wells.join(", ")}</td>{hasRawQuantification && <><td>{row.validReplicates}/{row.totalReplicates}</td><td>{formatNumber(row.meanCq, 3)}</td><td>{formatNumber(row.sdCq, 3)}</td><td>{formatNumber(row.cqRange, 3)}</td><td>{formatNumber(row.linearQuantityCvPercent, 1)}</td></>}{hasMeltAnalysis && <><td>{formatNumber(row.meanTm1, 2)}</td><td>{formatNumber(row.tm1Range, 2)}</td><td>{row.secondaryPeakCount || "—"}</td><td>{row.meltGroups.join(", ") || "—"}</td></>}<td>{row.warningCodes.length ? <span className="status warning-status">{l("复核", "Review")} {row.suspectWell ? `· ${row.suspectWell}` : ""}</span> : <span className="status pass-status">{l("通过", "Pass")}</span>}</td>
+                          <td><b>{row.sampleName}</b></td><td>{row.targetName}</td><td><div className="qc-well-links">{row.wells.map((wellName) => <button type="button" key={wellName} onClick={() => openQcWellsInPlate(row, [wellName])} aria-label={l(`在板工作区查看 ${wellName}`, `Open ${wellName} in the plate workspace`)}>{wellName}</button>)}</div></td>{hasRawQuantification && <><td>{row.validReplicates}/{row.totalReplicates}</td><td>{formatNumber(row.meanCq, 3)}</td><td>{formatNumber(row.sdCq, 3)}</td><td>{formatNumber(row.cqRange, 3)}</td><td>{formatNumber(row.linearQuantityCvPercent, 1)}</td></>}{hasMeltAnalysis && <><td>{formatNumber(row.meanTm1, 2)}</td><td>{formatNumber(row.tm1Range, 2)}</td><td>{row.secondaryPeakCount || "—"}</td><td>{row.meltGroups.join(", ") || "—"}</td></>}<td>{row.warningCodes.length ? <button type="button" className="qc-review-action" onClick={() => openQcWellsInPlate(row)}><span><b>{l("去板上复核", "Review on plate")}</b><small>{row.suspectWell ? l(`优先检查 ${row.suspectWell}`, `Inspect ${row.suspectWell} first`) : l(`${row.wells.length} 个孔`, `${row.wells.length} wells`)}</small></span><svg aria-hidden="true" viewBox="0 0 16 16"><path d="M3 8h9M9 4.5 12.5 8 9 11.5" /></svg></button> : <span className="status pass-status">{l("通过", "Pass")}</span>}</td>
                         </tr>)}</tbody>
                       </table>
                     </div>
@@ -1079,9 +1156,12 @@ export default function QpcrAnalysisStudio() {
                       {(dataset.warnings.length > 0 || dataset.assumptions.length > 0) && <details className="assumption-details"><summary>{dataset.warnings.length + dataset.assumptions.length} {l("条数据说明", "data note(s)")}</summary>{[...dataset.warnings, ...dataset.assumptions].map((item) => <p key={item}>{localizeRuntimeMessage(item, language)}</p>)}</details>}
                     </article>
                     <article className="audit-card">
-                      <div className="card-heading"><div><p className="eyebrow">AUDIT TRAIL</p><h3>{l("审计记录", "Audit trail")}</h3></div><span>{auditLogs.length} {l("已应用", "applied")} · {pendingCount} {l("待应用", "pending")}</span></div>
+                      <div className="card-heading"><div><p className="eyebrow">AUDIT TRAIL</p><h3>{l("审计记录", "Audit trail")}</h3></div><span>{auditLogs.length + importDecisions.length} {l("已应用", "applied")} · {pendingCount} {l("待应用", "pending")}</span></div>
                       <div className="timeline compact-timeline">
-                        {auditLogs.length === 0 && <div className="empty-table embedded">{l("尚无已应用的人工改动。", "No applied manual changes yet.")}</div>}
+                        {auditLogs.length === 0 && importDecisions.length === 0 && <div className="empty-table embedded">{l("尚无已应用的人工改动。", "No applied manual changes yet.")}</div>}
+                        {[...importDecisions].reverse().slice(0, 4).map((decision) => (
+                          <article key={decision.id}><span className="timeline-dot" /><div><b>{decision.action === "exclude" ? l("排除导入行", "Exclude import row") : decision.action === "confirm" ? l("确认导入提醒", "Confirm import warning") : decision.action === "restore" ? l("恢复导入值", "Restore import value") : l("修正导入值", "Correct import value")}</b><p>{decision.reason}</p><small>{decision.sourceSheet}{decision.sourceRowNumber ? ` · row ${decision.sourceRowNumber}` : ""} · {new Date(decision.timestamp).toLocaleString(language === "zh" ? "zh-CN" : "en-US")}</small></div></article>
+                        ))}
                         {[...auditLogs].reverse().slice(0, 8).map((log) => (
                           <article key={log.id}><span className="timeline-dot" /><div><b>{auditLogTitle(log, l)}</b><p>{auditLogDescription(log, l)}</p><small>{auditLogReference(log, draftWells)} · {new Date(log.timestamp).toLocaleString(language === "zh" ? "zh-CN" : "en-US")}</small></div></article>
                         ))}
@@ -1095,8 +1175,11 @@ export default function QpcrAnalysisStudio() {
             {view === "plate" && plateDefinition && (
               <div className="plate-workspace">
                 <div className="section-heading plate-heading">
-                  <div><p className="eyebrow">PLATE WORKSPACE</p><h2>{l(`${plateDefinition.plateFormat} 孔板 · ${activeNamedReactionCount} 个已定义反应`, `${plateDefinition.plateFormat}-well plate · ${activeNamedReactionCount} defined reactions`)}</h2>{plateIds.length > 1 && <label className="active-plate-selector">{l("当前板", "Active plate")}<select value={activePlateId || plateIds[0]} onChange={(event) => { setActivePlateId(event.target.value); setTransferDestinationPlateId(event.target.value); setSelected([]); setSelectionAnchor(null); }}>{plateIds.map((plateId) => <option key={plateId} value={plateId}>{plateId}</option>)}</select></label>}</div>
-                  <div className="legend"><span><i className="dot selected-dot" />{l("已选", "Selected")}</span><span><i className="dot alignment-warning-dot" />{l("布局对齐提示", "Layout alignment")}</span><span><i className="dot group-warning-dot" />{l("复孔组提示", "Replicate-group warning")}</span><span><i className="dot warning-dot" />{l("孔级提示", "Well-level alert")}</span><span><i className="dot excluded-dot" />{l("已排除", "Excluded")}</span></div>
+                  <div className="plate-heading-copy"><p className="eyebrow">PLATE WORKSPACE</p><h2>{l(`${plateDefinition.plateFormat} 孔板 · ${activeNamedReactionCount} 个已定义反应`, `${plateDefinition.plateFormat}-well plate · ${activeNamedReactionCount} defined reactions`)}</h2></div>
+                  <div className="plate-heading-tools">
+                    {plateIds.length > 1 && <label className="active-plate-selector"><span>{l("当前板", "Active plate")}</span><select aria-label={l("当前板", "Active plate")} value={activePlateId || plateIds[0]} onChange={(event) => { setActivePlateId(event.target.value); setTransferDestinationPlateId(event.target.value); setSelected([]); setSelectionAnchor(null); }}>{plateOptions.map((option) => <option key={option.plateId} value={option.plateId}>{option.label}</option>)}</select></label>}
+                    <div className="legend"><span><i className="dot selected-dot" />{l("已选", "Selected")}</span><span><i className="dot alignment-warning-dot" />{l("布局对齐提示", "Layout alignment")}</span><span><i className="dot group-warning-dot" />{l("复孔组提示", "Replicate-group warning")}</span><span><i className="dot warning-dot" />{l("孔级提示", "Well-level alert")}</span><span><i className="dot excluded-dot" />{l("已排除", "Excluded")}</span></div>
+                  </div>
                 </div>
                 {dataset.warnings.map((warning) => <div className="notice" key={warning}>{localizeRuntimeMessage(warning, language)}</div>)}
                 {error && <div className="notice error">{localizeRuntimeMessage(error, language)}</div>}
@@ -1127,9 +1210,9 @@ export default function QpcrAnalysisStudio() {
                         <button type="button" className="axis-label row-axis" key={`axis-${row}`} onClick={() => setSelected(activePlateWells.filter((well) => well.row === row).map((well) => well.id))}>{row}</button>,
                         ...plateDefinition.columns.map((column) => {
                           const wellName = `${row}${column}`;
-                          const well = activePlateWells.find((item) => item.well === wellName);
+                          const well = activeWellByPosition.get(wellName);
                           const physicalWellId = well ? physicalWellIdOf(well) : null;
-                          const isSelected = Boolean(well && selected.includes(well.id));
+                          const isSelected = Boolean(well && selectedIds.has(well.id));
                           const hasGroupWarning = Boolean(physicalWellId && draftQcState.groupWarnings.has(physicalWellId));
                           const hasSpecificWarning = Boolean(physicalWellId && draftQcState.specificWarnings.has(physicalWellId));
                           const alignmentIssue = well ? alignmentIssueById.get(well.id) : undefined;
@@ -1214,7 +1297,7 @@ export default function QpcrAnalysisStudio() {
                       </div>
                       <div className="layout-transfer-form">
                         <label>{l("操作", "Operation")}<select value={transferMode} onChange={(event) => setTransferMode(event.target.value as "move" | "copy" | "swap")}><option value="move">{l("移动", "Move")}</option><option value="copy">{l("复制", "Copy")}</option><option value="swap">{l("交换", "Swap")}</option></select></label>
-                        {plateIds.length > 1 && <label>{l("目标板", "Destination plate")}<select value={transferDestinationPlateId || selectedWells[0]?.plateId || plateIds[0]} onChange={(event) => setTransferDestinationPlateId(event.target.value)}>{plateIds.map((plateId) => <option key={plateId} value={plateId}>{plateId}</option>)}</select></label>}
+                        {plateIds.length > 1 && <label>{l("目标板", "Destination plate")}<select value={transferDestinationPlateId || selectedWells[0]?.plateId || plateIds[0]} onChange={(event) => setTransferDestinationPlateId(event.target.value)}>{plateOptions.map((option) => <option key={option.plateId} value={option.plateId}>{option.label}</option>)}</select></label>}
                         <label>{l("目标左上角孔", "Destination top-left well")}<input value={transferDestination} placeholder="B4" onChange={(event) => setTransferDestination(event.target.value.toUpperCase())} /></label>
                       </div>
                       {transferDestination && (
@@ -1223,7 +1306,7 @@ export default function QpcrAnalysisStudio() {
                             const source = draftWells.find((well) => well.id === mapping.sourceWellId);
                             const destination = draftWells.find((well) => well.id === mapping.destinationWellId);
                             const sourceLabel = [source?.sampleName, source?.targetName].filter(Boolean).join(" / ") || l("无布局注释", "No layout annotation");
-                            return `${source?.plateId ?? ""} ${mapping.sourceWell} [${sourceLabel}] → ${destination?.plateId ?? ""} ${mapping.destinationWell} [Cp ${destination ? singleWellCqDisplay(destination, l) : "—"}]`;
+                            return `${plateLabelById.get(source?.plateId ?? "") ?? ""} ${mapping.sourceWell} [${sourceLabel}] → ${plateLabelById.get(destination?.plateId ?? "") ?? ""} ${mapping.destinationWell} [Cp ${destination ? singleWellCqDisplay(destination, l) : "—"}]`;
                           }).join(" · ")}{layoutTransferPreview.mappings.length > 4 ? "…" : ""}</span></> : <><b>{l("暂不能应用", "Cannot apply")}</b><span>{layoutTransferPreview?.error === "collision" ? l("目标区域已有布局，系统不会静默覆盖。请先清空、移动或使用交换。", "The destination already contains layout annotations. Nothing will be overwritten silently; clear, move, or use swap first.") : layoutTransferPreview?.error === "out-of-bounds" ? l("目标区域超出孔板范围。", "The destination extends beyond the plate.") : layoutTransferPreview?.error === "mixed-source-plates" ? l("一次操作只能选择同一块板。", "One operation can only use wells from the same plate.") : layoutTransferPreview?.error === "overlapping-copy" ? l("复制目标不能与源区域重叠，否则无法完整保留源布局。", "A copy destination cannot overlap the source region because the full source must be retained.") : layoutTransferPreview?.error === "overlapping-swap" ? l("交换区域不能与源区域重叠。", "Swap regions cannot overlap.") : l("请输入板内有效目标孔。", "Enter a valid destination well.")}</span></>}
                         </div>
                       )}
@@ -1295,7 +1378,7 @@ export default function QpcrAnalysisStudio() {
                       <p>{l("设置后计算 ΔΔCq 与相对表达量；未提供扩增效率时按 100% 计算并记录假设。", "A calibrator enables ΔΔCq and relative expression. Missing amplification efficiency is recorded and assumed to be 100%.")}</p>
                     </section>
                   </div>
-                  {!referenceTargets.length ? <div className="empty-table">{l("请先在第 1 区选择至少一个内参基因。", "Select at least one reference target in section 1.")}</div> : <ResultExplorer results={relativeResults} wells={appliedWells} sampleOrder={displaySamples} targetOrder={selectedDisplayTargets} settings={sessionView!.settings} provenanceWarnings={resultExportWarnings} />}
+                  {!referenceTargets.length ? <div className="empty-table">{l("请先在第 1 区选择至少一个内参基因。", "Select at least one reference target in section 1.")}</div> : <ResultExplorer results={relativeResults} wells={appliedWells} sampleOrder={displaySamples} targetOrder={selectedDisplayTargets} settings={sessionView!.settings} provenanceWarnings={resultExportWarnings} importDecisions={importDecisions} exportFileStem={analysisExportStem} />}
                 </> : <>
                   <div className={`result-settings-grid supplied-result-settings ${dataset.analysisStart === "delta-delta-cq" ? "single-setting" : ""}`}>
                     <section className="result-setting-step display-step">
@@ -1309,7 +1392,7 @@ export default function QpcrAnalysisStudio() {
                       <p>{l("ΔCq 已由用户提供；校准样本仅用于后续 ΔΔCq 与相对表达量。", "ΔCq is user supplied; the calibrator is used only for downstream ΔΔCq and relative expression.")}</p>
                     </section>}
                   </div>
-                  <SuppliedResultExplorer results={suppliedResults} records={dataset.suppliedCalculations} analysisStart={dataset.analysisStart} sampleOrder={displaySamples} targetOrder={selectedDisplayTargets} provenance={dataset.suppliedCalculationProvenance} />
+                  <SuppliedResultExplorer results={suppliedResults} records={dataset.suppliedCalculations} analysisStart={dataset.analysisStart} sampleOrder={displaySamples} targetOrder={selectedDisplayTargets} provenance={dataset.suppliedCalculationProvenance} importDecisions={importDecisions} exportFileStem={analysisExportStem} />
                 </>}</>}
                 {resultSection === "quantification" && !hasQuantification && <div className="empty-table">{l("当前仅导入了 Tm/熔解结果；添加单孔 Cq/Ct/Cp 后可进行相对定量。", "Only Tm/melt results are currently imported. Add well-level Cq/Ct/Cp data for relative quantification.")}</div>}
                 {resultSection === "melt" && hasMeltAnalysis && <MeltAnalysis wells={appliedWells} />}

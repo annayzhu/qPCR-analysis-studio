@@ -1,3 +1,4 @@
+import { mean, sampleSd, standardError as sem, exponentialUncertainty as exponentialError } from "./statistics";
 import type { AnalysisStart, SuppliedCalculationProvenance, SuppliedCalculationRecord } from "../../schemas/src";
 
 export type { SuppliedCalculationRecord } from "../../schemas/src";
@@ -41,14 +42,16 @@ export const SUPPLIED_COMPLETE_HEADERS = [
 export type SuppliedCompleteRow = Record<(typeof SUPPLIED_COMPLETE_HEADERS)[number], string | number | null>;
 
 export const SUPPLIED_TRACEABILITY_HEADERS = [
-  "analysis_start", "value_provenance", "reference_targets", "reference_method", "source_calibrator", "verification_status", "plate", "plate_format", "well",
+  "analysis_start", "value_provenance", "reference_targets", "reference_method", "source_calibrator", "verification_status",
+  "import_status", "exclusion_reason", "excluded_by", "original_supplied_value", "corrected_value", "decision_timestamp", "source_file",
+  "plate", "plate_format", "well",
   "sample", "target", "assay_type", "replicate", "supplied_value", "cycle_type", "tm1", "tm2",
   "source_sheet", "source_row", "warnings",
 ] as const;
 
 export type SuppliedTraceabilityRow = Record<(typeof SUPPLIED_TRACEABILITY_HEADERS)[number], string | number | null>;
 
-export const SUPPLIED_RESULTS_EXPORT_SCHEMA_VERSION = "1.1.0";
+export const SUPPLIED_RESULTS_EXPORT_SCHEMA_VERSION = "1.2.0";
 
 export interface SuppliedExportDictionaryEntry {
   sheet: "Complete Results" | "Supplied Values";
@@ -87,6 +90,13 @@ const COMPLETE_ONLY_DEFINITIONS: Record<string, [string, string]> = {
 
 const TRACEABILITY_ONLY_DEFINITIONS: Record<string, [string, string]> = {
   verification_status: ["该用户提供值的核验状态。", "Verification status of the user-supplied value."],
+  import_status: ["该来源行的导入决定：included、corrected 或 excluded。", "Import decision for the source row: included, corrected, or excluded."],
+  exclusion_reason: ["用户排除该来源行时记录的原因。", "Reason recorded when the user excluded the source row."],
+  excluded_by: ["执行排除的主体；当前仅允许 user。", "Actor who excluded the row; currently user only."],
+  original_supplied_value: ["上传文件中未经修改的正式 ΔCq 或 ΔΔCq 单元格文本。", "Unmodified authoritative Delta Cq or Delta-delta Cq cell text from the uploaded file."],
+  corrected_value: ["导入修正后的正式数值文本；未修正时为空。", "Corrected authoritative value text; blank when unchanged."],
+  decision_timestamp: ["最近一次行级导入决定的时间。", "Timestamp of the latest row-level import decision."],
+  source_file: ["原始上传文件名。", "Original uploaded file name."],
   plate: ["可选的来源孔板标识，仅用于溯源。", "Optional source plate identifier for provenance only."],
   plate_format: ["可选的来源板规格（96 或 384）。", "Optional source plate format (96 or 384)."],
   well: ["可选的来源物理孔位，仅用于溯源。", "Optional source physical well for provenance only."],
@@ -124,24 +134,6 @@ export interface SuppliedVisualizationBarRow {
   group: string;
 }
 
-function mean(values: number[]): number {
-  return values.reduce((sum, value) => sum + value, 0) / values.length;
-}
-
-function sampleSd(values: number[]): number | null {
-  if (values.length < 2) return null;
-  const center = mean(values);
-  return Math.sqrt(values.reduce((sum, value) => sum + (value - center) ** 2, 0) / (values.length - 1));
-}
-
-function sem(sd: number | null, count: number): number | null {
-  return sd === null ? null : sd / Math.sqrt(count);
-}
-
-function exponentialError(quantity: number, cycleError: number | null): number | null {
-  return cycleError === null ? null : Math.log(2) * quantity * cycleError;
-}
-
 function combineErrors(left: number | null, right: number | null): number | null {
   return left === null || right === null ? null : Math.sqrt(left ** 2 + right ** 2);
 }
@@ -152,14 +144,16 @@ export function calculateFromSuppliedCalculations(
 ): SuppliedCalculationResult[] {
   const groups = new Map<string, SuppliedCalculationRecord[]>();
   for (const record of records) {
-    if (!record.sampleName || !record.targetName || !Number.isFinite(record.value)) continue;
+    if (record.importStatus === "excluded" || !record.sampleName || !record.targetName || record.value === null || !Number.isFinite(record.value)) continue;
     const key = `${record.sampleName}\u241f${record.targetName}`;
-    groups.set(key, [...(groups.get(key) ?? []), record]);
+    const group = groups.get(key);
+    if (group) group.push(record);
+    else groups.set(key, [record]);
   }
 
   const summarized = [...groups.values()].map((group): SuppliedCalculationResult => {
-    const values = group.map((record) => record.value);
-    const center = mean(values);
+    const values = group.map((record) => record.value).filter((value): value is number => value !== null);
+    const center = mean(values)!; // Groups contain at least one validated supplied value.
     const sd = sampleSd(values);
     const standardError = sem(sd, values.length);
     const normalizedQuantity = settings.analysisStart === "delta-cq" ? 2 ** -center : null;
@@ -274,6 +268,13 @@ export function buildSuppliedTraceabilityRows(
     reference_method: provenance?.referenceMethod || null,
     source_calibrator: provenance?.calibratorValue || null,
     verification_status: record.verificationStatus,
+    import_status: record.importStatus ?? "included",
+    exclusion_reason: record.exclusionReason || null,
+    excluded_by: record.excludedBy || null,
+    original_supplied_value: record.originalSuppliedValue ?? (record.value === null ? "" : String(record.value)),
+    corrected_value: record.correctedValue || null,
+    decision_timestamp: record.decisionTimestamp ?? null,
+    source_file: record.sourceFileName ?? record.rawRow?.sourceFileName ?? null,
     plate: record.plateName ?? null,
     plate_format: record.plateFormat ?? null,
     well: record.well ?? null,

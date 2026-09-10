@@ -7,6 +7,7 @@ import {
   buildQpcrInputTemplateWorkbook,
   parseWorkbookBytes,
   QPCR_INPUT_TEMPLATE_HEADERS,
+  recordImportDecision,
   validateAnalysisStartSource,
   validateQpcrInputTemplate,
 } from "./index";
@@ -100,10 +101,11 @@ describe("qPCR user input template", () => {
     ]);
 
     const bytes = XLSX.write(workbook, { bookType: "xlsx", type: "array" }) as ArrayBuffer;
-    const source = parseWorkbookBytes(bytes, "delta-cq-without-cq-column.xlsx");
+    let source = parseWorkbookBytes(bytes, "delta-cq-without-cq-column.xlsx");
 
     expect(validateQpcrInputTemplate(source)).toMatchObject({ errorCount: 0 });
     expect(getSourceCapabilities(source)).toMatchObject({ role: "primary-result", hasCq: false });
+    source = recordImportDecision(source, { scope: "source", field: "referenceTargets", action: "confirm", issueCode: "missing-reference-target", reason: "Proceed with incomplete provenance" });
     expect(assessImportReadiness([source])).toMatchObject({
       analysisMode: "quantification",
       canAnalyze: true,
@@ -119,10 +121,11 @@ describe("qPCR user input template", () => {
       ["A2", "A2", "Control", "GENE", 2, 3.2],
     ]);
     const bytes = XLSX.write(workbook, { bookType: "xlsx", type: "array" }) as ArrayBuffer;
-    const source = parseWorkbookBytes(bytes, "delta-cq-optional-well-conflict.xlsx");
+    let source = parseWorkbookBytes(bytes, "delta-cq-optional-well-conflict.xlsx");
 
     expect(getSourceCapabilities(source).blockingConflicts).toEqual([]);
     expect(validateQpcrInputTemplate(source)).toMatchObject({ errorCount: 0 });
+    source = recordImportDecision(source, { scope: "source", field: "referenceTargets", action: "confirm", issueCode: "missing-reference-target", reason: "Proceed with incomplete provenance" });
     expect(assessImportReadiness([source])).toMatchObject({ status: "ready", canAnalyze: true, layoutRequired: false });
   });
 
@@ -165,7 +168,7 @@ describe("qPCR user input template", () => {
   });
 
   it("does not validate an independent layout source as a Delta result after switching starts", () => {
-    const result = parseDelimitedText(
+    let result = parseDelimitedText(
       "Sample\tAssay\tReplicate\tDelta Cq\nControl\tGENE\t1\t3.0\n",
       "delta-result.tsv",
     );
@@ -175,6 +178,7 @@ describe("qPCR user input template", () => {
     );
     result.metadata.qpcrAnalysisStart = "delta-cq";
     layout.metadata.qpcrAnalysisStart = "delta-cq";
+    result = recordImportDecision(result, { scope: "source", field: "referenceTargets", action: "confirm", issueCode: "missing-reference-target", reason: "Proceed with incomplete provenance" });
 
     expect(validateAnalysisStartSource(layout)).toBeNull();
     expect(assessImportReadiness([result, layout])).toMatchObject({
@@ -229,6 +233,55 @@ describe("qPCR user input template", () => {
       sourceSheet: "Data", sourceRowNumber: 2, column: "Well", suppliedValue: "Z99",
     });
     expect(assessImportReadiness([source])).toMatchObject({ status: "review-mapping", canAnalyze: false });
+  });
+
+  it("never treats duplicate-replicate confirmation as approval of a physical-well collision", () => {
+    const workbook = buildQpcrInputTemplateWorkbook();
+    workbook.Sheets.Data = XLSX.utils.aoa_to_sheet([
+      [...QPCR_INPUT_TEMPLATE_HEADERS],
+      ["Plate 01", 96, "A1", "S01", "GENE", "Target", 1, "Cq", 22.1, "", "", "", ""],
+      ["Plate 01", 96, "A1", "S01", "GENE", "Target", 1, "Cq", 22.2, "", "", "", ""],
+    ]);
+    const bytes = XLSX.write(workbook, { bookType: "xlsx", type: "array" }) as ArrayBuffer;
+    let source = parseWorkbookBytes(bytes, "duplicate-well-and-replicate.xlsx");
+    source = recordImportDecision(source, {
+      scope: "row",
+      sourceSheet: "Data",
+      sourceRowNumber: 3,
+      field: "replicate",
+      action: "confirm",
+      issueCode: "duplicate-replicate",
+      reason: "Keep the duplicate replicate label",
+    });
+
+    expect(validateQpcrInputTemplate(source)?.issues).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: "duplicate-well", sourceRowNumber: 3 }),
+    ]));
+  });
+
+  it("blocks analysis when every authoritative row has been excluded", () => {
+    const workbook = buildQpcrInputTemplateWorkbook();
+    workbook.Sheets["Analysis Settings"].B1.v = "Delta Cq";
+    workbook.Sheets["Analysis Settings"].B2.v = "GAPDH";
+    workbook.Sheets.Data = XLSX.utils.aoa_to_sheet([
+      ["Sample", "Assay", "Replicate", "Delta Cq"],
+      ["Control", "GENE", 1, 3.0],
+    ]);
+    const bytes = XLSX.write(workbook, { bookType: "xlsx", type: "array" }) as ArrayBuffer;
+    let source = parseWorkbookBytes(bytes, "all-rows-excluded.xlsx");
+    source = recordImportDecision(source, {
+      scope: "row",
+      sourceSheet: "Data",
+      sourceRowNumber: 2,
+      field: "row",
+      action: "exclude",
+      reason: "Exclude the only authoritative row",
+    });
+
+    expect(validateQpcrInputTemplate(source)?.issues).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: "no-included-row", sourceRowNumber: null }),
+    ]));
+    expect(assessImportReadiness([source])).toMatchObject({ canAnalyze: false, status: "review-mapping" });
   });
 
   it("blocks blank Plate cells when the same template contains a named plate", () => {
@@ -295,6 +348,8 @@ describe("Roche LightCycler 480 adapter", () => {
     const dataset = buildCanonicalDataset([source]);
     expect(dataset.wells).toHaveLength(2);
     expect(new Set(dataset.wells.map((well) => well.plateId)).size).toBe(2);
+    expect(dataset.wells.map((well) => well.plateName)).toEqual(["Plate 01", "Plate 02"]);
+    expect(dataset.wells.every((well) => well.plateName !== well.plateId)).toBe(true);
     expect(dataset.assumptions.join(" ")).toContain("检测到 2 块板");
   });
 
