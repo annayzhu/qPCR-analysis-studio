@@ -297,7 +297,7 @@ export default function QpcrAnalysisStudio() {
     await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
     const projection=projectSession(state);
     const current=stateRef.current;
-    const selected=current.chartConfig.selectedTargets;
+    const selected=current.chartConfig.selectedTargets.filter(target=>current.displayTargets.includes(target) && (state.dataset.analysisStart!=="cq" || !state.settings.referenceTargets.includes(target)));
     const values=(state.dataset.analysisStart==='cq'?projection.relativeResults:projection.suppliedResults).filter(row=>selected.includes(row.targetName) && current.displaySamples.includes(row.sampleName));
     if(!values.length)throw new Error('请选择要插入的基因图和样本');
     const images=Array.from(document.querySelectorAll<HTMLElement>('[data-chart-selected="true"]')).flatMap(chart=>Array.from(chart.querySelectorAll<SVGSVGElement>('svg.expression-chart')).map((svg,index)=>{const clone=svg.cloneNode(true) as SVGSVGElement;clone.setAttribute('xmlns','http://www.w3.org/2000/svg');const view=svg.viewBox.baseVal;clone.setAttribute('width',String(view.width));clone.setAttribute('height',String(view.height));clone.removeAttribute('style');return {svg:new XMLSerializer().serializeToString(clone),caption:`${chart.dataset.chartTarget} · 分面 ${index+1} · ${current.displaySamples.length} 个类别（当前选择）`};}));
@@ -1071,7 +1071,10 @@ export default function QpcrAnalysisStudio() {
 
   useEffect(()=>{
     if(!selectedDisplayTargets.length)return;
-    setChartConfig(current=>selectedDisplayTargets.includes(current.activeTarget)?current:{...current,activeTarget:selectedDisplayTargets[0],selectedTargets:current.selectedTargets.filter(target=>selectedDisplayTargets.includes(target)).length?current.selectedTargets.filter(target=>selectedDisplayTargets.includes(target)):[selectedDisplayTargets[0]]});
+    setChartConfig(current=>({...current,
+      activeTarget:selectedDisplayTargets.includes(current.activeTarget)?current.activeTarget:selectedDisplayTargets[0],
+      selectedTargets:current.activeTarget?current.selectedTargets.filter(target=>selectedDisplayTargets.includes(target)):[selectedDisplayTargets[0]],
+    }));
   },[selectedDisplayTargets.join('\0')]);
 
   return (

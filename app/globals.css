@@ -1163,8 +1163,8 @@ html[data-labnest-embedded] .analysis-page{min-height:0}
 .section-summary{font-size:12px;line-height:1.5}
 .workflow-review{padding:16px 0}.workflow-review h3{font-size:15px;margin:0}.workflow-review label{font-size:12px;display:flex;gap:6px;align-items:center}
 .workflow-review-empty{padding:16px 0;color:var(--ink-soft)}
-.overview-qc-grid.is-clear{grid-template-columns:1fr;gap:16px}
-.overview-qc-grid.is-clear .overview-side-stack{display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:start}
+.overview-qc-grid:has(.workflow-review[data-visible-count="0"]){grid-template-columns:1fr;gap:16px}
+.overview-qc-grid:has(.workflow-review[data-visible-count="0"]) .overview-side-stack{display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:start}
 .audit-card>summary{font-size:13px;cursor:pointer;font-weight:600}.audit-card[open]>.card-heading{margin-top:14px}
 .source-summary-list span{overflow-wrap:anywhere}
 .workflow-layout-picker{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:0 auto 16px;width:min(1280px,100%);font-size:13px}
@@ -1195,7 +1195,7 @@ html[data-labnest-embedded] .analysis-page{min-height:0}
 .plate-scroll:focus-visible{outline:2px solid var(--teal);outline-offset:2px}
 .editor-panel{position:static;padding:14px;border-radius:8px}.plate-workspace .form-stack label,.plate-workspace .selection-summary span,.plate-workspace .selection-summary b{font-size:12px}
 @media(max-width:1000px){.plate-and-editor{grid-template-columns:1fr}.editor-panel{max-width:none}.overview-qc-grid{grid-template-columns:1fr}}
-@media(max-width:640px){.workspace-content{padding:16px 12px 32px}.workflow-analysis-settings .result-settings-grid,.overview-qc-grid.is-clear .overview-side-stack{grid-template-columns:1fr}.plate-scroll.is-fit .well-name{font-size:8px}.plate-grid{gap:1px}html[data-labnest-embedded] .workspace-tabs{padding-inline:8px}.workflow-chart-toolbar>span{margin-right:0}}
+@media(max-width:640px){.workspace-content{padding:16px 12px 32px}.workflow-analysis-settings .result-settings-grid,.overview-qc-grid:has(.workflow-review[data-visible-count="0"]) .overview-side-stack{grid-template-columns:1fr}.plate-scroll.is-fit .well-name{font-size:8px}.plate-grid{gap:1px}html[data-labnest-embedded] .workspace-tabs{padding-inline:8px}.workflow-chart-toolbar>span{margin-right:0}}
 .results-panel{max-width:1000px}
 .plate-workspace .selection-summary b{white-space:normal;overflow-wrap:anywhere;text-overflow:clip}
 .layout-correction-tools>summary{font-size:13px;cursor:pointer;color:var(--ink-soft)}

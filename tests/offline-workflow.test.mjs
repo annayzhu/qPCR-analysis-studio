@@ -177,6 +177,10 @@ test('embedded-reference-controls-stay-visible-and-384-plate-is-mouse-accessible
   assert.ok(await reference.isVisible(),'reference settings must stay visible after choosing TBP');
   assert.ok(await page.locator('.calibrator-step select').isVisible(),'calibrator remains accessible');
   await page.screenshot({path:path.join(artifacts,'embedded-results-desktop.png'),fullPage:false});
+  await page.getByRole('checkbox',{name:'Include chart',exact:true}).uncheck();
+  await page.locator('.reference-step label').filter({hasText:/^GENE$/}).click();
+  await reference.click();
+  assert.equal(await page.getByRole('checkbox',{name:'Include chart',exact:true}).isChecked(),false,'changing the available chart must preserve an explicit decision not to insert it');
   await page.locator('.workspace-tabs').getByRole('button',{name:/Plate workspace/}).click();
   const bounds=await page.locator('.plate-scroll').evaluate(el=>({width:el.clientWidth,scrollWidth:el.scrollWidth,height:el.clientHeight,scrollHeight:el.scrollHeight}));
   assert.ok(bounds.scrollWidth<=bounds.width+1,JSON.stringify(bounds));

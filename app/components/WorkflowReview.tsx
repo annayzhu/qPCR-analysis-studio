@@ -27,7 +27,7 @@ export function WorkflowReview({ rows, wells, history, onDecision, onLocate, onE
     });
     const pending = groups.filter(group => !group.decision || group.decision.action === 'restore').length;
     const visible = groups.filter(group => !onlyPending || !group.decision || group.decision.action === 'restore');
-    return <section className="workflow-review"><header><h3>{l(`待复核 ${pending} 项`, `${pending} groups to review`)}</h3>{groups.length > 0 && <label><input type="checkbox" checked={onlyPending} onChange={event => setOnlyPending(event.target.checked)}/>{l("仅看待复核", "Pending only")}</label>}</header>
+    return <section className="workflow-review" data-visible-count={visible.length}><header><h3>{l(`待复核 ${pending} 项`, `${pending} groups to review`)}</h3>{groups.length > 0 && <label><input type="checkbox" checked={onlyPending} onChange={event => setOnlyPending(event.target.checked)}/>{l("仅看待复核", "Pending only")}</label>}</header>
  {!visible.length && <p className="workflow-review-empty">{groups.length ? l("当前没有待复核项，可取消筛选查看已处理记录。", "No pending reviews. Clear the filter to see reviewed groups.") : l("复孔质控未发现待复核项。可继续查看结果。", "Replicate QC found no groups requiring review. Results are ready to inspect.")}</p>}
  {visible.map(({ row, members, fingerprint, decision }) => <article key={row.id}>
   <div><strong>{row.wells.join('、')} · {row.warningCodes.some(code => code.includes('RANGE')) ? l("复孔差异较大", "Replicate variation") : l("数值或孔状态需复核", "Review values or well status")}</strong><span>{decision?.action === 'keep' ? l("已复核保留", "Reviewed and retained") : decision?.action === 'exclude' ? l("已排除", "Excluded") : l("需复核", "Needs review")}</span></div>
