@@ -1149,3 +1149,56 @@ html[data-labnest-embedded] .topbar button{color:var(--ink)}
 .workspace-tabs{background:var(--surface)}.workspace-tabs button.active{border-color:var(--teal)}
 
 .workflow-export{margin:8px 0;font-size:13px}.workflow-export>summary{cursor:pointer;color:var(--ink-soft)}.result-subsection-heading{display:none}.workflow-chart .chart-scroll{max-width:760px!important}.workflow-chart .expression-chart{max-width:760px!important}.workflow-target-toolbar{margin:8px 0}.workflow-chart{margin:8px 0}.workflow-chart-toolbar{margin-bottom:6px}
+
+/* The embedded workspace uses one content rail and ordinary page scrolling. */
+html[data-labnest-embedded] .topbar{position:static;height:36px;min-height:36px;padding-inline:24px}
+html[data-labnest-embedded] .workspace-tabs{position:sticky;top:0;height:46px;padding-inline:max(24px,calc((100vw - 1280px)/2));z-index:20}
+html[data-labnest-embedded] .workspace-tabs button{min-width:120px;font-size:13px}
+html[data-labnest-embedded] .workspace-tabs button span{font-size:13px;font-weight:600}
+html[data-labnest-embedded] .workspace-tabs button small{display:none}
+html[data-labnest-embedded] .analysis-page{min-height:0}
+.workspace-content{padding:24px 24px 48px}
+.panel-stack,.plate-workspace,.overview-layout,.results-panel{width:min(1280px,100%);margin-inline:auto}
+.section-heading h2{font-size:20px;letter-spacing:-.02em}
+.section-summary{font-size:12px;line-height:1.5}
+.workflow-review{padding:16px 0}.workflow-review h3{font-size:15px;margin:0}.workflow-review label{font-size:12px;display:flex;gap:6px;align-items:center}
+.workflow-review-empty{padding:16px 0;color:var(--ink-soft)}
+.overview-qc-grid.is-clear{grid-template-columns:1fr;gap:16px}
+.overview-qc-grid.is-clear .overview-side-stack{display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:start}
+.audit-card>summary{font-size:13px;cursor:pointer;font-weight:600}.audit-card[open]>.card-heading{margin-top:14px}
+.source-summary-list span{overflow-wrap:anywhere}
+.workflow-layout-picker{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:0 auto 16px;width:min(1280px,100%);font-size:13px}
+.workflow-layout-picker select{width:auto;max-width:100%;font-size:13px}
+.workflow-analysis-settings{padding:0 0 16px;margin-bottom:16px}
+.workflow-analysis-settings .result-settings-grid{grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:16px;margin-bottom:12px}
+.workflow-analysis-settings .result-setting-step{padding:14px;background:var(--surface);border:1px solid var(--line);border-radius:8px}
+.workflow-analysis-settings .setting-step-heading>span,.workflow-analysis-settings .setting-step-heading p{display:none}
+.workflow-analysis-settings .setting-step-heading h3{font-size:14px}.workflow-analysis-settings .result-setting-step p{font-size:12px}
+.workflow-analysis-settings .display-step{background:transparent;border:0;padding:0}
+.workflow-analysis-settings .display-step>summary{font-size:13px;cursor:pointer;color:var(--ink-soft)}
+.workflow-analysis-settings .display-step[open]>.display-choice-group{margin-top:12px}
+.workflow-target-toolbar{display:flex;align-items:end;justify-content:flex-start;gap:12px;flex-wrap:wrap;margin:12px 0;font-size:13px}
+.workflow-target-toolbar label{display:grid;gap:6px;min-width:160px}.workflow-target-toolbar select{font-size:13px;padding:8px 10px}.workflow-target-toolbar button{min-height:36px}
+.workflow-chart{max-width:1000px;margin:16px auto}.workflow-chart-toolbar{display:flex;justify-content:flex-start;align-items:center;gap:8px;flex-wrap:wrap;font-size:12px}
+.workflow-chart-toolbar>span{margin-right:auto}.workflow-chart-toolbar label{display:flex;align-items:center;gap:6px}
+.workflow-chart .chart-card{padding:16px}.workflow-chart .chart-scroll{margin-inline:auto}
+.plate-and-editor{grid-template-columns:minmax(0,1fr) 280px;gap:16px}.plate-canvas{min-width:0}
+.plate-viewport-controls{display:flex;align-items:center;gap:8px;margin-bottom:8px;font-size:12px;flex-wrap:wrap}
+.plate-viewport-controls button{display:inline-flex;align-items:center;justify-content:center;min-width:32px;min-height:32px;padding:5px 8px;border:1px solid var(--line-strong);border-radius:6px;background:var(--surface);color:var(--ink)}
+.plate-pan-controls{display:flex;gap:4px;margin-left:auto}
+.plate-scroll{padding:8px;height:clamp(260px,calc(100dvh - 300px),620px);max-height:none;overflow:scroll;scrollbar-gutter:stable;scrollbar-width:auto;scrollbar-color:var(--line-strong) var(--surface-soft);border-radius:8px}
+.plate-scroll::-webkit-scrollbar{width:12px;height:12px}.plate-scroll::-webkit-scrollbar-thumb{background:var(--line-strong);border:2px solid var(--surface-soft);border-radius:6px}.plate-scroll::-webkit-scrollbar-track{background:var(--surface-soft)}
+.plate-grid{min-width:0;gap:2px}.plate-grid .well-cell,.plate-grid .row-axis{height:100%;min-width:0;min-height:0}
+.plate-grid .well-cell{padding:4px;border-radius:4px}.plate-grid .well-cell.selected{padding:3px;background:var(--teal-soft)}
+.plate-scroll.is-fit .well-cell b,.plate-scroll.is-fit .well-cell small{display:none}
+.plate-scroll.is-fit .well-name{font-size:10px;color:var(--ink);text-align:center}.plate-scroll .well-cell b{font-size:11px}.plate-scroll .well-cell small{font-size:10px}
+.plate-scroll:focus-visible{outline:2px solid var(--teal);outline-offset:2px}
+.editor-panel{position:static;padding:14px;border-radius:8px}.plate-workspace .form-stack label,.plate-workspace .selection-summary span,.plate-workspace .selection-summary b{font-size:12px}
+@media(max-width:1000px){.plate-and-editor{grid-template-columns:1fr}.editor-panel{max-width:none}.overview-qc-grid{grid-template-columns:1fr}}
+@media(max-width:640px){.workspace-content{padding:16px 12px 32px}.workflow-analysis-settings .result-settings-grid,.overview-qc-grid.is-clear .overview-side-stack{grid-template-columns:1fr}.plate-scroll.is-fit .well-name{font-size:8px}.plate-grid{gap:1px}html[data-labnest-embedded] .workspace-tabs{padding-inline:8px}.workflow-chart-toolbar>span{margin-right:0}}
+.results-panel{max-width:1000px}
+.plate-workspace .selection-summary b{white-space:normal;overflow-wrap:anywhere;text-overflow:clip}
+.layout-correction-tools>summary{font-size:13px;cursor:pointer;color:var(--ink-soft)}
+.language-switch button.active,.language-toggle button.active{background:var(--teal-soft);color:var(--ink);box-shadow:none}
+.workflow-analysis-settings .choice{font-size:12px;padding:6px 10px}.workflow-analysis-settings select{font-size:13px}
+.source-summary-list span{font-size:12px}.source-summary-list small{font-size:11px}

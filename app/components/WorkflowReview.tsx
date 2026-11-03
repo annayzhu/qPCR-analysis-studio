@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useLanguage } from '../i18n';
 import type { ReplicateQc, WellRecord } from '@/packages/schemas/src';
 export type ReviewDecision = {
     key: string;
@@ -15,6 +16,7 @@ export function WorkflowReview({ rows, wells, history, onDecision, onLocate, onE
     onLocate: (row: ReplicateQc) => void;
     onExclude: (ids: string[], excluded: boolean, reason: string) => void;
 }) {
+    const { l } = useLanguage();
     const [onlyPending, setOnlyPending] = useState(true);
     const [reason, setReason] = useState('');
     const groups = rows.filter(row => row.warningCodes.length).map(row => {
@@ -23,13 +25,16 @@ export function WorkflowReview({ rows, wells, history, onDecision, onLocate, onE
         const decision = history.filter(item => item.key === row.id && item.fingerprint === fingerprint).at(-1);
         return { row, members, fingerprint, decision };
     });
-    return <section className="workflow-review"><header><h3>待复核 {groups.filter(group => !group.decision || group.decision.action === 'restore').length} 项</h3><label><input type="checkbox" checked={onlyPending} onChange={event => setOnlyPending(event.target.checked)}/>仅看待复核</label></header>
- {groups.filter(group => !onlyPending || !group.decision || group.decision.action === 'restore').map(({ row, members, fingerprint, decision }) => <article key={row.id}>
-  <div><strong>{row.wells.join('、')} · {row.warningCodes.some(code => code.includes('RANGE')) ? '复孔差异较大' : '数值或孔状态需复核'}</strong><span>{decision?.action === 'keep' ? '已复核保留' : decision?.action === 'exclude' ? '已排除' : '需复核'}</span></div>
-  <p>{row.plateId} · Cq 极差 {row.cqRange?.toFixed(3) ?? '—'} / 阈值 0.5 · 有效技术复孔 {row.validReplicates}/{row.totalReplicates}</p>
+    const pending = groups.filter(group => !group.decision || group.decision.action === 'restore').length;
+    const visible = groups.filter(group => !onlyPending || !group.decision || group.decision.action === 'restore');
+    return <section className="workflow-review"><header><h3>{l(`待复核 ${pending} 项`, `${pending} groups to review`)}</h3>{groups.length > 0 && <label><input type="checkbox" checked={onlyPending} onChange={event => setOnlyPending(event.target.checked)}/>{l("仅看待复核", "Pending only")}</label>}</header>
+ {!visible.length && <p className="workflow-review-empty">{groups.length ? l("当前没有待复核项，可取消筛选查看已处理记录。", "No pending reviews. Clear the filter to see reviewed groups.") : l("复孔质控未发现待复核项。可继续查看结果。", "Replicate QC found no groups requiring review. Results are ready to inspect.")}</p>}
+ {visible.map(({ row, members, fingerprint, decision }) => <article key={row.id}>
+  <div><strong>{row.wells.join('、')} · {row.warningCodes.some(code => code.includes('RANGE')) ? l("复孔差异较大", "Replicate variation") : l("数值或孔状态需复核", "Review values or well status")}</strong><span>{decision?.action === 'keep' ? l("已复核保留", "Reviewed and retained") : decision?.action === 'exclude' ? l("已排除", "Excluded") : l("需复核", "Needs review")}</span></div>
+  <p>{row.plateId} · {l("Cq 极差", "Cq range")} {row.cqRange?.toFixed(3) ?? '—'} / {l("阈值", "threshold")} 0.5 · {l("有效技术复孔", "valid technical replicates")} {row.validReplicates}/{row.totalReplicates}</p>
   <div className="workflow-review-actions">{(['keep', 'exclude', 'restore'] as const).map(action => <button key={action} type="button" onClick={() => { if (action !== 'keep')
-            onExclude(members.map(well => well.id), action === 'exclude', reason.trim() || '人工排除复孔组'); onDecision({ key: row.id, fingerprint, action, at: new Date().toISOString(), reason: reason.trim() || (action === 'exclude' ? '人工排除复孔组' : '人工复核') }); }}>{action === 'keep' ? '保留' : action === 'exclude' ? '排除以上孔' : '恢复'}</button>)}<button type="button" onClick={() => onLocate(row)}>查看孔位</button></div>
-  <details><summary>详情</summary><p>{row.sampleName} · {row.targetName}</p><p>{row.warningCodes.join(' · ')}</p><label>处理原因<input value={reason} onChange={event => setReason(event.target.value)}/></label><table><thead><tr><th>孔位</th><th>Cq</th><th>Tm</th><th>状态</th></tr></thead><tbody>{members.map(well => <tr key={well.id}><td>{well.well}</td><td>{well.cq ?? '—'}</td><td>{well.tm1 ?? '—'}</td><td>{well.cqStatus}{well.instrumentOmit ? ' · 仪器排除' : ''}{well.userExcluded ? ' · 人工排除' : ''}</td></tr>)}</tbody></table></details>
+            onExclude(members.map(well => well.id), action === 'exclude', reason.trim() || l("人工排除复孔组", "Manually excluded replicate group")); onDecision({ key: row.id, fingerprint, action, at: new Date().toISOString(), reason: reason.trim() || (action === 'exclude' ? l("人工排除复孔组", "Manually excluded replicate group") : l("人工复核", "Manual review")) }); }}>{action === 'keep' ? l("保留", "Keep") : action === 'exclude' ? l("排除以上孔", "Exclude wells") : l("恢复", "Restore")}</button>)}<button type="button" onClick={() => onLocate(row)}>{l("查看孔位", "Locate wells")}</button></div>
+  <details><summary>{l("详情", "Details")}</summary><p>{row.sampleName} · {row.targetName}</p><p>{row.warningCodes.join(' · ')}</p><label>{l("处理原因", "Reason")}<input value={reason} onChange={event => setReason(event.target.value)}/></label><table><thead><tr><th>{l("孔位", "Well")}</th><th>Cq</th><th>Tm</th><th>{l("状态", "Status")}</th></tr></thead><tbody>{members.map(well => <tr key={well.id}><td>{well.well}</td><td>{well.cq ?? '—'}</td><td>{well.tm1 ?? '—'}</td><td>{well.cqStatus}{well.instrumentOmit ? l(" · 仪器排除", " · instrument omitted") : ''}{well.userExcluded ? l(" · 人工排除", " · manually excluded") : ''}</td></tr>)}</tbody></table></details>
  </article>)}
  </section>;
 }
