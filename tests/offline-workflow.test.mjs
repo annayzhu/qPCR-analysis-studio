@@ -49,6 +49,7 @@ async function results(page) {
   await page.locator(".result-chart-stack svg").first().waitFor();
 }
 async function download(page, button) {
+  if(!await button.isVisible())await page.locator(".workflow-export > summary").click();
   const pending = page.waitForEvent("download");
   await button.click();
   const file = await pending;
@@ -90,6 +91,7 @@ test("cq-plate-edit-undo-apply-and-export", async t => {
   assert.equal(await page.locator(".result-table-wrap tbody tr").count(), 8);
   await download(page, page.getByRole("button", { name: "SVG", exact: true }).first());
   await download(page, page.getByRole("button", { name: "PNG 4×", exact: true }).first());
+  if(!await page.getByRole("button", { name: "Propagated technical SD", exact: true }).isVisible())await page.locator(".workflow-export > summary").click();
   await page.getByRole("button", { name: "Propagated technical SD", exact: true }).click();
   assert.ok(await page.locator('svg g[aria-label*="propagated technical-replicate SD"]').count() > 0);
   await page.evaluate(() => {

@@ -244,6 +244,7 @@ export interface SuppliedCalculationProvenance {
 }
 
 export interface CanonicalDataset {
+  sampleDisplayNames?:Record<string,string>;
   id: string;
   createdAt: string;
   sources: ImportedSource[];

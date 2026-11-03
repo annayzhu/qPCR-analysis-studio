@@ -177,6 +177,19 @@ export function buildCanonicalDataset(inputSources: ImportedSource[]): Canonical
     .map((source) => source.metadata.qpcrAnalysisStart as AnalysisStart | undefined)
     .filter((start): start is AnalysisStart => Boolean(start)))];
   const analysisStart: AnalysisStart = declaredStarts.length === 1 ? declaredStarts[0] : "cq";
+  // Explicit identities are independent of mutable display names. Legacy name-only files retain their keys.
+  const sampleDisplayNames:Record<string,string>={};
+  const idsByName=new Map<string,Set<string>>();
+  const idsByWell=new Map<string,Set<string>>();
+  for(const source of sources){const table=selectedTable(source);if(!table)continue;for(const row of table.rawRows){
+    const id=effectiveImportRowValue(source,table,row,'sampleId');if(!id)continue;
+    const name=effectiveImportRowValue(source,table,row,'sampleName');
+    const names=idsByName.get(name) ?? new Set<string>();names.add(id);idsByName.set(name,names);
+    const well=normalizeWell(effectiveImportRowValue(source,table,row,'well'));
+    const plate=effectiveImportRowValue(source,table,row,'plateName');
+    if(well){const key=`${plate}:${well}`;const ids=idsByWell.get(key) ?? new Set<string>();ids.add(id);idsByWell.set(key,ids);}
+    sampleDisplayNames[JSON.stringify(['id',id])]=name || id;
+  }}
   const partials = new Map<string, ParsedWell>();
   const suppliedCalculations: SuppliedCalculationRecord[] = [];
   const warnings: string[] = [];
@@ -271,8 +284,10 @@ export function buildCanonicalDataset(inputSources: ImportedSource[]): Canonical
         normalizeWell(`${rowLabel}${columnLabel}`);
 
       let sampleName = effectiveImportRowValue(source, table, rawRow, "sampleName");
-      const sampleId=effectiveImportRowValue(source,table,rawRow,"sampleId");
-      if(sampleId)sampleName=`${sampleName} [${sampleId}]`;
+      let sampleId=effectiveImportRowValue(source,table,rawRow,"sampleId");
+      const knownIds=idsByWell.get(`${rawPlateName || inferredPlateName}:${well}`) ?? idsByName.get(sampleName);
+      if(!sampleId && knownIds?.size===1)sampleId=[...knownIds][0];
+      if(idsByName.size && sampleName){const identity=JSON.stringify(sampleId?['id',sampleId]:['name',sampleName]);sampleDisplayNames[identity] ??= sampleName;sampleName=identity;}
       let targetName = effectiveImportRowValue(source, table, rawRow, "targetName");
       const placeholder = sampleName === "1" && targetName === "1";
       if (placeholder) {
@@ -419,6 +434,7 @@ export function buildCanonicalDataset(inputSources: ImportedSource[]): Canonical
     id: stableId("dataset", sources.map((source) => source.id).join(":")),
     createdAt: new Date().toISOString(),
     sources,
+    sampleDisplayNames,
     analysisStart,
     plate,
     wells,

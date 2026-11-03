@@ -270,23 +270,24 @@ export default function QpcrAnalysisStudio() {
   const [reviewHistory,setReviewHistory]=useState<ReviewDecision[]>([]);
   const [layoutChoices,setLayoutChoices]=useState<NonNullable<WorkflowContext['layouts']>>([]);
   const [layoutRef,setLayoutRef]=useState<{id:string;revision:number}|null>(null);
-  const bridgeState=useMemo(()=>({schemaVersion:1,sources,analysisSession,analysisStart,displaySamples,displayTargets,chartConfig,reviewHistory,layoutRef,pendingApply:Boolean(analysisSession && projectSession(analysisSession).analysisLocked)}),[sources,analysisSession,analysisStart,displaySamples,displayTargets,chartConfig,reviewHistory,layoutRef]);
+  const bridgeState=useMemo(()=>({schemaVersion:1,sources,analysisSession,analysisStart,displaySamples,displayTargets,chartConfig,reviewHistory,layoutRef,needsRebuild,pendingApply:needsRebuild || Boolean(analysisSession && projectSession(analysisSession).analysisLocked)}),[sources,analysisSession,analysisStart,displaySamples,displayTargets,chartConfig,reviewHistory,layoutRef,needsRebuild]);
   const stateRef=useRef(bridgeState);stateRef.current=bridgeState;
   async function adoptLayout(id:string,choices=layoutChoices){
     const choice=choices.find(item=>item.id===id);if(!choice)return;
     const response=await fetch(`/api/attachments/${choice.sessionAttachmentId}`);if(!response.ok)throw new Error('布局读取失败');
     const saved=await response.json();
-    const rows=[['Plate ID','Well','Sample Name','Target Name','Task','Replicate']];
-    for(const plate of saved.state.plateEditing.plan.plates)for(const well of plate.wells)if(well.sample && well.gene)rows.push([plate.name || `Plate ${String(plate.plateNumber).padStart(2,"0")}`,well.wellId,well.sample,well.gene,well.geneType==='reference'?'REFERENCE':'TARGET',String(well.replicateIndex??'')]);
+    const rows=[['Plate ID','Well','Sample Name','Sample ID','Target Name','Task','Replicate']];
+    for(const plate of saved.state.plateEditing.plan.plates)for(const well of plate.wells)if(well.sample && well.gene)rows.push([plate.name || `Plate ${String(plate.plateNumber).padStart(2,"0")}`,well.wellId,well.sample,saved.state.setup.samples.find((sample:{name:string;id:string})=>sample.name===well.sample)?.id ?? '',well.gene,well.geneType==='reference'?'REFERENCE':'TARGET',String(well.replicateIndex??'')]);
     const quote=(value:string)=>'"'+value.replaceAll('"','""')+'"';
     const source=await parseBrowserFile(new File([rows.map(row=>row.map(quote).join(',')).join('\n')],`LabNest-layout-${choice.id}.csv`,{type:'text/csv'}));
     setSources(current=>[...current.filter(item=>!item.fileName.startsWith('LabNest-layout-')),source]);setNeedsRebuild(true);setLayoutRef({id:choice.id,revision:choice.revision});
   }
   useWorkflowBridge(bridgeState,context=>{
     setLayoutChoices(context.layouts??[]);
-    if(context.state){const state=context.state as typeof bridgeState;if(state.schemaVersion!==1)throw new Error('方案格式不兼容');setSources(state.sources);setAnalysisSession(state.analysisSession);setAnalysisStart(state.analysisStart);setDisplaySamples(state.displaySamples);setDisplayTargets(state.displayTargets);setChartConfig(state.chartConfig??emptyChartPresentation);setReviewHistory(state.reviewHistory??[]);setLayoutRef(state.layoutRef);setDataManagerOpen(!state.analysisSession);setView('results');}
+    if(context.state){const state=context.state as typeof bridgeState;if(state.schemaVersion!==1)throw new Error('方案格式不兼容');setSources(state.sources);setAnalysisSession(state.analysisSession);setAnalysisStart(state.analysisStart);setDisplaySamples(state.displaySamples);setDisplayTargets(state.displayTargets);setChartConfig(state.chartConfig??emptyChartPresentation);setReviewHistory(state.reviewHistory??[]);setLayoutRef(state.layoutRef);setNeedsRebuild(state.needsRebuild??false);setDataManagerOpen(!state.analysisSession || Boolean(state.needsRebuild));setView('results');}
     else if(context.layouts?.length===1)void adoptLayout(context.layouts[0].id,context.layouts).catch(error=>setError(error.message));
   },async()=>{
+    if(stateRef.current.needsRebuild){if(!buildAndApply(stateRef.current.sources))throw new Error('请先在数据文件中确认导入修改');await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));}
     let state=stateRef.current.analysisSession;if(!state)throw new Error('请先导入并应用数据');
     const before=projectSession(state);
     if(before.analysisLocked){const applied=transitionAnalysisSession(state,{type:'apply',reason:'应用并插入当前结果'});if(!applied.ok)throw new Error(applied.error.message);state=applied.state;setAnalysisSession(state);}
@@ -299,11 +300,14 @@ export default function QpcrAnalysisStudio() {
     if(!values.length)throw new Error('请选择要插入的基因图和样本');
     const images=Array.from(document.querySelectorAll<HTMLElement>('[data-chart-selected="true"]')).flatMap(chart=>Array.from(chart.querySelectorAll<SVGSVGElement>('svg.expression-chart')).map((svg,index)=>{const clone=svg.cloneNode(true) as SVGSVGElement;clone.setAttribute('xmlns','http://www.w3.org/2000/svg');const view=svg.viewBox.baseVal;clone.setAttribute('width',String(view.width));clone.setAttribute('height',String(view.height));clone.removeAttribute('style');return {svg:new XMLSerializer().serializeToString(clone),caption:`${chart.dataset.chartTarget} · 分面 ${index+1} · ${current.displaySamples.length} 个类别（当前选择）`};}));
     if(!images.length)throw new Error('图表尚未就绪，请打开结果后重试');
-    const headers=Object.keys(values[0]);const rows=values.map(row=>headers.map(key=>{const value=(row as unknown as Record<string,unknown>)[key];return value===null||value===undefined?'':typeof value==='object'?JSON.stringify(value):String(value);}));
-    const compactKeys=['sampleName','targetName','deltaCq','deltaDeltaCq','relativeExpression','normalizedQuantity','targetValidReplicates','validReplicates'].filter(key=>headers.includes(key));
-    const titles:Record<string,string>={sampleName:'原始样本 / ID',targetName:'基因',deltaCq:'ΔCq',deltaDeltaCq:'ΔΔCq',relativeExpression:'相对表达',normalizedQuantity:'归一化量',targetValidReplicates:'技术复孔',validReplicates:'技术复孔'};
-    const compactRows=rows.map(row=>compactKeys.map(key=>row[headers.indexOf(key)]));
-    return {label:'qPCR 分析',images,fullTable:{headers,rows},table:{headers:compactKeys.map(key=>titles[key]),rows:compactRows},method:`起点 ${state.dataset.analysisStart} · 内参 ${state.settings.referenceTargets.join('、') || '来源记录'} · 校准 ${state.settings.calibratorValue || '未设置'}。误差条：${Object.values(current.chartConfig.settings).some(item=>item.showTechnicalSd)?'技术复孔传播 SD':'未显示'}；孔数为技术重复，不代表生物学样本量。`};
+    const headers=["displayName",...Object.keys(values[0])];const rows=values.map(row=>headers.map(key=>{if(key==="displayName")return current.chartConfig.names[row.sampleName] || row.sampleName;const value=(row as unknown as Record<string,unknown>)[key];return value===null||value===undefined?'':typeof value==='object'?JSON.stringify(value):String(value);}));
+    const sourceMethod=state.dataset.suppliedCalculationProvenance;
+    const methodReferences=state.dataset.analysisStart==='cq'?state.settings.referenceTargets:sourceMethod?.referenceTargets ?? [];
+    const methodCalibrator=state.dataset.analysisStart==='delta-delta-cq'?sourceMethod?.calibratorValue:state.settings.calibratorValue;
+    const compactKeys=[...(values.some(row=>(current.chartConfig.names[row.sampleName] || row.sampleName)!==row.sampleName)?['displayName']:[]),'sampleName','targetName','deltaCq','deltaDeltaCq','relativeExpression','normalizedQuantity','targetValidReplicates','validReplicates'].filter(key=>headers.includes(key));
+    const titles:Record<string,string>={displayName:'显示名称',sampleName:'样本身份',targetName:'基因',deltaCq:'ΔCq',deltaDeltaCq:'ΔΔCq',relativeExpression:'相对表达',normalizedQuantity:'归一化量',targetValidReplicates:'技术复孔',validReplicates:'技术复孔'};
+    const compactRows=rows.map(row=>compactKeys.map(key=>{const value=row[headers.indexOf(key)];return !['displayName','sampleName','targetName'].includes(key) && value!=='' && Number.isFinite(Number(value))?String(Number(Number(value).toPrecision(6))):value;}));
+    return {label:'qPCR 分析',images,fullTable:{headers,rows},table:{headers:compactKeys.map(key=>titles[key]),rows:compactRows},method:`起点 ${state.dataset.analysisStart} · 内参 ${methodReferences.join('、') || '未提供'} · 校准 ${methodCalibrator || '未提供'}。误差条：${Object.values(current.chartConfig.settings).some(item=>item.showTechnicalSd)?'技术复孔传播 SD':'未显示'}；孔数为技术重复，不代表生物学样本量。`};
   });
   const readiness = useMemo(() => assessImportReadiness(sources), [sources]);
   const sessionView = useMemo(
@@ -530,6 +534,7 @@ export default function QpcrAnalysisStudio() {
     const hasCq = built.wells.some((well) => well.cq !== null);
     const hasMelt = built.wells.some((well) => well.tm1 !== null || well.tm2 !== null || Boolean(well.meltGroup));
     setResultSection(built.analysisStart !== "cq" || hasCq || !hasMelt ? "quantification" : "melt");
+    setChartConfig(current=>({...current,names:{...built.sampleDisplayNames,...current.names}}));
     setDisplaySamples(builtSamples);
     setDisplayTargets(builtTargets);
     return true;
@@ -1397,14 +1402,14 @@ export default function QpcrAnalysisStudio() {
                         <div className="display-choice-label"><span>{l("样本", "Samples")}</span><small>{l(`${displaySamples.length} 已选 · 编号即图中从左到右顺序`, `${displaySamples.length} selected · numbers define left-to-right order`)}</small></div>
                         <div className="ordered-choice-row">{samples.map((sample) => {
                           const selectionIndex = displaySamples.indexOf(sample);
-                          return <button type="button" key={sample} aria-pressed={selectionIndex >= 0} className={selectionIndex >= 0 ? "ordered-choice active" : "ordered-choice"} onClick={() => toggleOrderedSelection(sample, displaySamples, setDisplaySamples)}><span>{sample}</span>{selectionIndex >= 0 && <i>{selectionIndex + 1}</i>}</button>;
+                          return <button type="button" key={sample} aria-pressed={selectionIndex >= 0} className={selectionIndex >= 0 ? "ordered-choice active" : "ordered-choice"} onClick={() => toggleOrderedSelection(sample, displaySamples, setDisplaySamples)}><span>{chartConfig.names[sample] || sample}</span>{selectionIndex >= 0 && <i>{selectionIndex + 1}</i>}</button>;
                         })}</div>
                       </div>
                     </section>
 
                     <section className="result-setting-step calibrator-step">
                       <div className="setting-step-heading"><span>3</span><div><h3>{l("选择校准样本", "Select calibrator sample")}</h3><p>{l("ΔΔCq 基准", "ΔΔCq baseline")}</p></div></div>
-                      <label className="compact-field">{l("校准样本", "Calibrator")}<select value={calibrator} onChange={(event) => setCalibrator(event.target.value)}><option value="">{l("不设置，仅计算 ΔCq", "None - calculate ΔCq only")}</option>{samples.map((sample) => <option key={sample} value={sample}>{sample}</option>)}</select></label>
+                      <label className="compact-field">{l("校准样本", "Calibrator")}<select value={calibrator} onChange={(event) => setCalibrator(event.target.value)}><option value="">{l("不设置，仅计算 ΔCq", "None - calculate ΔCq only")}</option>{samples.map((sample) => <option key={sample} value={sample}>{chartConfig.names[sample] || sample}</option>)}</select></label>
                       <p>{l("设置后计算 ΔΔCq 与相对表达量；未提供扩增效率时按 100% 计算并记录假设。", "A calibrator enables ΔΔCq and relative expression. Missing amplification efficiency is recorded and assumed to be 100%.")}</p>
                     </section>
                   </div>
@@ -1414,11 +1419,11 @@ export default function QpcrAnalysisStudio() {
                     <section className="result-setting-step display-step">
                       <div className="setting-step-heading"><span>1</span><div><h3>{l("选择展示的基因和样本", "Choose displayed targets & samples")}</h3><p>{l("点选顺序即图表顺序", "Selection order defines chart order")}</p></div><button className="clear-selection-button" type="button" onClick={() => { setDisplayTargets([]); setDisplaySamples([]); }} disabled={!displayTargets.length && !displaySamples.length}>{l("清空", "Clear")}</button></div>
                       <div className="display-choice-group"><div className="display-choice-label"><span>{l("基因", "Targets")}</span><small>{selectedDisplayTargets.length} {l("已选", "selected")}</small></div><div className="ordered-choice-row">{targets.map((target) => { const selectionIndex = selectedDisplayTargets.indexOf(target); return <button type="button" key={target} aria-pressed={selectionIndex >= 0} className={selectionIndex >= 0 ? "ordered-choice active" : "ordered-choice"} onClick={() => toggleOrderedSelection(target, displayTargets, setDisplayTargets)}><span>{target}</span>{selectionIndex >= 0 && <i>{selectionIndex + 1}</i>}</button>; })}</div></div>
-                      <div className="display-choice-group sample-display-group"><div className="display-choice-label"><span>{l("样本", "Samples")}</span><small>{l(`${displaySamples.length} 已选 · 编号即图中从左到右顺序`, `${displaySamples.length} selected · numbers define left-to-right order`)}</small></div><div className="ordered-choice-row">{samples.map((sample) => { const selectionIndex = displaySamples.indexOf(sample); return <button type="button" key={sample} aria-pressed={selectionIndex >= 0} className={selectionIndex >= 0 ? "ordered-choice active" : "ordered-choice"} onClick={() => toggleOrderedSelection(sample, displaySamples, setDisplaySamples)}><span>{sample}</span>{selectionIndex >= 0 && <i>{selectionIndex + 1}</i>}</button>; })}</div></div>
+                      <div className="display-choice-group sample-display-group"><div className="display-choice-label"><span>{l("样本", "Samples")}</span><small>{l(`${displaySamples.length} 已选 · 编号即图中从左到右顺序`, `${displaySamples.length} selected · numbers define left-to-right order`)}</small></div><div className="ordered-choice-row">{samples.map((sample) => { const selectionIndex = displaySamples.indexOf(sample); return <button type="button" key={sample} aria-pressed={selectionIndex >= 0} className={selectionIndex >= 0 ? "ordered-choice active" : "ordered-choice"} onClick={() => toggleOrderedSelection(sample, displaySamples, setDisplaySamples)}><span>{chartConfig.names[sample] || sample}</span>{selectionIndex >= 0 && <i>{selectionIndex + 1}</i>}</button>; })}</div></div>
                     </section>
                     {dataset.analysisStart === "delta-cq" && <section className="result-setting-step calibrator-step">
                       <div className="setting-step-heading"><span>2</span><div><h3>{l("选择校准样本", "Select calibrator sample")}</h3><p>{l("可继续计算 ΔΔCq", "Continue to ΔΔCq")}</p></div></div>
-                      <label className="compact-field">{l("校准样本", "Calibrator")}<select value={calibrator} onChange={(event) => setCalibrator(event.target.value)}><option value="">{l("不设置，仅展示 ΔCq", "None - show ΔCq only")}</option>{samples.map((sample) => <option key={sample} value={sample}>{sample}</option>)}</select></label>
+                      <label className="compact-field">{l("校准样本", "Calibrator")}<select value={calibrator} onChange={(event) => setCalibrator(event.target.value)}><option value="">{l("不设置，仅展示 ΔCq", "None - show ΔCq only")}</option>{samples.map((sample) => <option key={sample} value={sample}>{chartConfig.names[sample] || sample}</option>)}</select></label>
                       <p>{l("ΔCq 已由用户提供；校准样本仅用于后续 ΔΔCq 与相对表达量。", "ΔCq is user supplied; the calibrator is used only for downstream ΔΔCq and relative expression.")}</p>
                     </section>}
                   </div>

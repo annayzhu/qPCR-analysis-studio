@@ -14,3 +14,8 @@ it('does not merge different sample IDs that share a name',async()=>{
  expect(new Set(dataset.wells.filter(w=>w.cq!==null).map(w=>w.sampleName)).size).toBe(2);
  expect(dataset.wells.filter(w=>w.cq!==null).map(w=>w.cq)).toEqual([20,24]);
 });
+it('keeps one stable ID together when a display name is corrected',async()=>{
+ const source=await parseBrowserFile(new File(['Well\tSample Name\tSample ID\tTarget\tCq\nA1\tOld name\tid-A\tREF\t20\nA2\tCorrected name\tid-A\tREF\t20.2'],'corrected.tsv'));
+ const dataset=buildCanonicalDataset([source]);
+ expect(new Set(dataset.wells.filter(w=>w.cq!==null).map(w=>w.sampleName)).size).toBe(1);
+});
