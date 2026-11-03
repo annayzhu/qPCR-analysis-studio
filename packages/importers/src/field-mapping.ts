@@ -88,8 +88,9 @@ function contentCandidate(values: unknown[]): {
 }
 
 export function inferFieldMappings(headers: string[], dataRows: unknown[][]): FieldMapping[] {
+  const hasSampleName=headers.some(header=>headerCandidates(header).some(item=>item.field==="sampleName"));
   const mappings = headers.map((sourceColumn, columnIndex) => {
-    const byHeader = headerCandidates(sourceColumn).sort((a, b) => b.confidence - a.confidence);
+    const byHeader = headerCandidates(sourceColumn).map(item=>item.field==="sampleId" && !hasSampleName?{...item,field:"sampleName" as CanonicalField}:item).sort((a, b) => b.confidence - a.confidence);
     const byContent = contentCandidate(dataRows.map((row) => row[columnIndex]));
     const winner = byHeader[0] ?? byContent;
     return {

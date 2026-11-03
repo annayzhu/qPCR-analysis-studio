@@ -1115,3 +1115,37 @@ footer { display: flex; justify-content: space-between; padding: 19px clamp(20px
   .melt-plot-card, .melt-group-card { padding: 12px; }
   .melt-plot-card .card-heading { flex-direction: column; }
 }
+
+/* Task-sized charts with all facets retained for saved outputs. */
+.result-chart-stack,.result-charts-grid,.expression-grid{display:block!important}.workflow-chart[hidden],.workflow-facet[hidden]{display:none!important}
+.workflow-chart{width:100%;min-width:0;margin:16px 0}.workflow-chart-toolbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:13px;margin-bottom:12px}.workflow-chart-toolbar>span{margin-right:auto}.workflow-chart-toolbar label{display:flex;gap:6px;align-items:center}
+.workflow-chart .publication-chart-card{width:100%;max-width:none}.workflow-chart .expression-chart{width:640px!important;min-width:640px!important;max-height:none!important;height:auto!important;max-width:none!important}.workflow-chart .chart-scroll{overflow:auto;max-height:none}.workflow-chart .publication-chart-card{padding:16px}
+.workflow-display-names{margin:8px 0;font-size:13px}.workflow-display-names>label{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin:8px 0;overflow-wrap:anywhere}
+.workflow-chart.is-expanded{position:fixed;inset:12px;z-index:1000;width:auto;overflow:auto;background:var(--surface,#fff);padding:20px;border:1px solid var(--border,#dfe5e1)}
+.workflow-target-toolbar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:16px 0}.workflow-target-toolbar select{max-width:100%;min-width:160px}
+@media(min-width:900px){.result-chart-stack{grid-template-columns:minmax(0,1fr)!important}.workflow-chart .expression-chart{width:max(640px,100%)!important;max-width:900px!important}.workflow-chart .chart-scroll{max-width:900px;margin:auto}}
+@media print{.workflow-chart[hidden],.workflow-facet[hidden]{display:block!important}.workflow-chart-toolbar,.workflow-display-names{display:none!important}.workflow-facet{break-inside:avoid}.workflow-chart .expression-chart{width:100%!important;min-width:0!important}}
+.workflow-review{min-width:0}.workflow-review>header,.workflow-review article>div{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}.workflow-review article{padding:16px 0;border-bottom:1px solid var(--border,#dfe5e1)}.workflow-review p{font-size:13px;margin:8px 0}.workflow-review details{font-size:13px;margin-top:10px}.workflow-review-actions{justify-content:flex-start!important}.workflow-review button{padding:6px 10px}.workflow-review table{width:100%}
+html[data-labnest-embedded] .intake-hero,html[data-labnest-embedded] .eyebrow,html[data-labnest-embedded] footer,html[data-labnest-embedded] .topbar-brand,html[data-labnest-embedded] .local-status{display:none!important}
+html[data-labnest-embedded] .studio-topbar{justify-content:flex-end;min-height:40px}
+html[data-labnest-embedded] .workspace-masthead p{display:none}
+
+/* Use the record workspace palette and keep secondary setup beside its disclosure. */
+:root{--ink:#243438;--ink-soft:#435559;--muted:#617278;--line:#dce3e5;--line-strong:#bac9ce;--canvas:#f5f7f8;--surface-soft:#f0f4f5;--night:#294a5d;--night-soft:#365b6d;--teal:#345f71;--teal-bright:#527f8e;--teal-soft:#eaf1f4;--shadow-sm:none}
+html[data-labnest-embedded] .brand-lockup,html[data-labnest-embedded] .processing-badge,html[data-labnest-embedded] .workspace-masthead{display:none!important}
+html[data-labnest-embedded] .topbar{height:44px;min-height:44px;background:var(--surface);color:var(--ink);justify-content:flex-end;padding:0 20px;border-bottom:1px solid var(--line)}
+html[data-labnest-embedded] .topbar-actions{color:var(--ink)}
+html[data-labnest-embedded] .topbar-actions>span{display:none}
+html[data-labnest-embedded] .topbar button{color:var(--ink)}
+.workflow-settings,.workflow-method{font-size:13px;padding:10px 0;border-bottom:1px solid var(--line)}
+.workflow-settings>summary,.workflow-method>summary{cursor:pointer;color:var(--ink-soft)}
+.workflow-settings[open]>.result-settings-grid{margin-top:12px}
+.results-heading .section-summary{display:none}.results-heading h2{font-size:20px}
+.workflow-chart-toolbar button,.workflow-target-toolbar button,.workflow-review button{border:1px solid var(--line-strong);border-radius:6px;background:var(--surface);padding:6px 10px;color:var(--ink);font-size:13px}
+.workflow-chart-toolbar button:hover,.workflow-target-toolbar button:hover{background:var(--surface-soft)}
+.workflow-target-toolbar input,.workflow-chart-toolbar input,.workflow-review input[type=checkbox]{width:auto}
+.result-commandbar-summary,.export-format-hint{display:none}.result-commandbar-grid{padding:8px;gap:12px}.result-command-group{padding:8px;gap:6px}.command-group-label{font-size:12px}
+.supplied-provenance-notice,.supplied-calculation-basis.incomplete{background:var(--surface-soft);border-color:var(--line)}
+.workspace-tabs{background:var(--surface)}.workspace-tabs button.active{border-color:var(--teal)}
+
+.workflow-export{margin:8px 0;font-size:13px}.workflow-export>summary{cursor:pointer;color:var(--ink-soft)}.result-subsection-heading{display:none}.workflow-chart .chart-scroll{max-width:760px!important}.workflow-chart .expression-chart{max-width:760px!important}.workflow-target-toolbar{margin:8px 0}.workflow-chart{margin:8px 0}.workflow-chart-toolbar{margin-bottom:6px}

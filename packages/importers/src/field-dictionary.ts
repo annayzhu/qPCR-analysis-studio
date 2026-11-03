@@ -1,9 +1,10 @@
 import type { CanonicalField } from "../../schemas/src";
 
 export const FIELD_SYNONYMS: Record<CanonicalField, readonly string[]> = {
+  sampleId: ["Sample ID", "Sample No", "Sample Number", "样本编号", "标本编号"],
   sampleName: [
-    "Sample", "Sample Name", "Sample ID", "Sample No", "Sample Number", "Samples",
-    "样本", "样本名", "样本名称", "样本编号", "样品", "样品名称", "标本", "标本编号",
+    "Sample", "Sample Name", "Samples",
+    "样本", "样本名", "样本名称", "样品", "样品名称", "标本",
   ],
   targetName: [
     "Target", "Targets", "Target Name", "Assay", "Assay Name", "Gene", "Gene Name",
@@ -35,6 +36,7 @@ export const CANONICAL_FIELD_LABELS: Record<CanonicalField, string> = {
   well: "Well",
   row: "Row",
   column: "Column",
+  sampleId: "Sample ID",
   sampleName: "Sample Name",
   targetName: "Target Name",
   cq: "Cq / Ct / Cp",

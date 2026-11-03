@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type {
   AnalysisSettings,
   AnalysisStart,
@@ -37,6 +37,10 @@ import MeltAnalysis from "./components/MeltAnalysis";
 import ResultExplorer from "./components/ResultExplorer";
 import SuppliedResultExplorer from "./components/SuppliedResultExplorer";
 import { localizeRuntimeMessage, useLanguage } from "./i18n";
+
+import { useWorkflowBridge, type WorkflowContext } from './workflow-bridge';
+import { ChartPresentationContext, emptyChartPresentation, type ChartPresentation } from './components/ChartPresentation';
+import { WorkflowReview, type ReviewDecision } from './components/WorkflowReview';
 
 type WorkspaceView = "overview" | "plate" | "results";
 type ResultSection = "quantification" | "melt";
@@ -262,6 +266,45 @@ export default function QpcrAnalysisStudio() {
   const [activePlateId, setActivePlateId] = useState("");
   const [transferDestinationPlateId, setTransferDestinationPlateId] = useState("");
 
+  const [chartConfig,setChartConfig]=useState<ChartPresentation>(emptyChartPresentation);
+  const [reviewHistory,setReviewHistory]=useState<ReviewDecision[]>([]);
+  const [layoutChoices,setLayoutChoices]=useState<NonNullable<WorkflowContext['layouts']>>([]);
+  const [layoutRef,setLayoutRef]=useState<{id:string;revision:number}|null>(null);
+  const bridgeState=useMemo(()=>({schemaVersion:1,sources,analysisSession,analysisStart,displaySamples,displayTargets,chartConfig,reviewHistory,layoutRef,pendingApply:Boolean(analysisSession && projectSession(analysisSession).analysisLocked)}),[sources,analysisSession,analysisStart,displaySamples,displayTargets,chartConfig,reviewHistory,layoutRef]);
+  const stateRef=useRef(bridgeState);stateRef.current=bridgeState;
+  async function adoptLayout(id:string,choices=layoutChoices){
+    const choice=choices.find(item=>item.id===id);if(!choice)return;
+    const response=await fetch(`/api/attachments/${choice.sessionAttachmentId}`);if(!response.ok)throw new Error('布局读取失败');
+    const saved=await response.json();
+    const rows=[['Plate ID','Well','Sample Name','Target Name','Task','Replicate']];
+    for(const plate of saved.state.plateEditing.plan.plates)for(const well of plate.wells)if(well.sample && well.gene)rows.push([plate.name || `Plate ${String(plate.plateNumber).padStart(2,"0")}`,well.wellId,well.sample,well.gene,well.geneType==='reference'?'REFERENCE':'TARGET',String(well.replicateIndex??'')]);
+    const quote=(value:string)=>'"'+value.replaceAll('"','""')+'"';
+    const source=await parseBrowserFile(new File([rows.map(row=>row.map(quote).join(',')).join('\n')],`LabNest-layout-${choice.id}.csv`,{type:'text/csv'}));
+    setSources(current=>[...current.filter(item=>!item.fileName.startsWith('LabNest-layout-')),source]);setNeedsRebuild(true);setLayoutRef({id:choice.id,revision:choice.revision});
+  }
+  useWorkflowBridge(bridgeState,context=>{
+    setLayoutChoices(context.layouts??[]);
+    if(context.state){const state=context.state as typeof bridgeState;if(state.schemaVersion!==1)throw new Error('方案格式不兼容');setSources(state.sources);setAnalysisSession(state.analysisSession);setAnalysisStart(state.analysisStart);setDisplaySamples(state.displaySamples);setDisplayTargets(state.displayTargets);setChartConfig(state.chartConfig??emptyChartPresentation);setReviewHistory(state.reviewHistory??[]);setLayoutRef(state.layoutRef);setDataManagerOpen(!state.analysisSession);setView('results');}
+    else if(context.layouts?.length===1)void adoptLayout(context.layouts[0].id,context.layouts).catch(error=>setError(error.message));
+  },async()=>{
+    let state=stateRef.current.analysisSession;if(!state)throw new Error('请先导入并应用数据');
+    const before=projectSession(state);
+    if(before.analysisLocked){const applied=transitionAnalysisSession(state,{type:'apply',reason:'应用并插入当前结果'});if(!applied.ok)throw new Error(applied.error.message);state=applied.state;setAnalysisSession(state);}
+    setDataManagerOpen(false);setView('results');setResultSection('quantification');
+    await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
+    const projection=projectSession(state);
+    const current=stateRef.current;
+    const selected=current.chartConfig.selectedTargets;
+    const values=(state.dataset.analysisStart==='cq'?projection.relativeResults:projection.suppliedResults).filter(row=>selected.includes(row.targetName) && current.displaySamples.includes(row.sampleName));
+    if(!values.length)throw new Error('请选择要插入的基因图和样本');
+    const images=Array.from(document.querySelectorAll<HTMLElement>('[data-chart-selected="true"]')).flatMap(chart=>Array.from(chart.querySelectorAll<SVGSVGElement>('svg.expression-chart')).map((svg,index)=>{const clone=svg.cloneNode(true) as SVGSVGElement;clone.setAttribute('xmlns','http://www.w3.org/2000/svg');const view=svg.viewBox.baseVal;clone.setAttribute('width',String(view.width));clone.setAttribute('height',String(view.height));clone.removeAttribute('style');return {svg:new XMLSerializer().serializeToString(clone),caption:`${chart.dataset.chartTarget} · 分面 ${index+1} · ${current.displaySamples.length} 个类别（当前选择）`};}));
+    if(!images.length)throw new Error('图表尚未就绪，请打开结果后重试');
+    const headers=Object.keys(values[0]);const rows=values.map(row=>headers.map(key=>{const value=(row as unknown as Record<string,unknown>)[key];return value===null||value===undefined?'':typeof value==='object'?JSON.stringify(value):String(value);}));
+    const compactKeys=['sampleName','targetName','deltaCq','deltaDeltaCq','relativeExpression','normalizedQuantity','targetValidReplicates','validReplicates'].filter(key=>headers.includes(key));
+    const titles:Record<string,string>={sampleName:'原始样本 / ID',targetName:'基因',deltaCq:'ΔCq',deltaDeltaCq:'ΔΔCq',relativeExpression:'相对表达',normalizedQuantity:'归一化量',targetValidReplicates:'技术复孔',validReplicates:'技术复孔'};
+    const compactRows=rows.map(row=>compactKeys.map(key=>row[headers.indexOf(key)]));
+    return {label:'qPCR 分析',images,fullTable:{headers,rows},table:{headers:compactKeys.map(key=>titles[key]),rows:compactRows},method:`起点 ${state.dataset.analysisStart} · 内参 ${state.settings.referenceTargets.join('、') || '来源记录'} · 校准 ${state.settings.calibratorValue || '未设置'}。误差条：${Object.values(current.chartConfig.settings).some(item=>item.showTechnicalSd)?'技术复孔传播 SD':'未显示'}；孔数为技术重复，不代表生物学样本量。`};
+  });
   const readiness = useMemo(() => assessImportReadiness(sources), [sources]);
   const sessionView = useMemo(
     () => analysisSession ? projectSession(analysisSession) : null,
@@ -728,13 +771,13 @@ export default function QpcrAnalysisStudio() {
     setPasteOverwriteConfirmed(false);
   }
 
-  function setExclusion(excluded: boolean, ids = selected) {
+  function setExclusion(excluded: boolean, ids = selected, reviewReason?:string) {
     if (!ids.length) return;
     executeSessionCommand({
       type: "set-exclusion",
       wellIds: ids,
       excluded,
-      reason: exclusionReason.trim() || l("技术复孔异常（人工判定）", "Technical replicate issue (manual decision)"),
+      reason: reviewReason?.trim() || exclusionReason.trim() || l("技术复孔异常（人工判定）", "Technical replicate issue (manual decision)"),
     });
   }
 
@@ -1018,8 +1061,13 @@ export default function QpcrAnalysisStudio() {
     results: [l("结果与图表", "Results & figures"), "Results"],
   };
 
+  useEffect(()=>{
+    if(!selectedDisplayTargets.length)return;
+    setChartConfig(current=>current.activeTarget?current:{...current,activeTarget:selectedDisplayTargets[0],selectedTargets:[selectedDisplayTargets[0]]});
+  },[selectedDisplayTargets.join('\0')]);
+
   return (
-    <main className="app-shell">
+    <ChartPresentationContext.Provider value={{config:chartConfig,update:patch=>setChartConfig(current=>({...current,...patch}))}}><main className="app-shell">
       <input ref={resultInput} hidden type="file" multiple accept=".xlsx,.csv,.txt,.tsv" onChange={(event) => event.target.files && importFiles(event.target.files)} />
       <input ref={layoutInput} hidden type="file" multiple accept=".xlsx,.csv,.txt,.tsv" onChange={(event) => event.target.files && importFiles(event.target.files)} />
 
@@ -1127,25 +1175,7 @@ export default function QpcrAnalysisStudio() {
                   auditCount={auditLogs.length + importDecisions.length}
                   onOpenResults={() => switchWorkspaceView("results")}
                 /> : <div className="overview-qc-grid">
-                  {plateDefinition && <article className="qc-workbench">
-                    <div className="card-heading compact-card-heading">
-                      <div><p className="eyebrow">REPLICATE QC</p><h3>{l("技术复孔", "Technical replicates")}</h3><div className="qc-scope-counts"><span>{l(`复孔组 ${qcIssueCount}`, `${qcIssueCount} replicate group(s)`)}</span><span>{l(`孔级 ${qcWellIssueCount}`, `${qcWellIssueCount} well alert(s)`)}</span></div><p className="qc-workflow-hint">{l("点击孔位定位单孔；“去板上复核”定位整个复孔组。", "Select a well to locate it, or review the complete replicate group on the plate.")}</p></div>
-                      <details className="inline-rules"><summary>{l("规则：Cq/Tm 极差 > 0.5", "Rule: Cq/Tm range > 0.5")}</summary><p>{l("仅提示，不自动排除；单孔不计算 SD/CV；Tm 偏移需结合曲线和实验设计人工判断。", "Warnings do not automatically exclude wells. SD/CV are not calculated for a single well. Interpret Tm shifts with the curve and experimental design.")}</p></details>
-                    </div>
-                    <div className="table-filterbar compact-filterbar">
-                      <input value={qcSearch} onChange={(event) => setQcSearch(event.target.value)} placeholder={l("筛选样本、靶标或孔位", "Filter sample, target, or well")} />
-                      <button type="button" className={qcIssueOnly ? "filter-chip active" : "filter-chip"} onClick={() => setQcIssueOnly((current) => !current)}>{l("仅看需复核", "Review only")}</button>
-                      <span>{filteredQc.length} / {qc.length} {l("组", "groups")}</span>
-                    </div>
-                    <div className="table-wrap compact-qc-table">
-                      <table>
-                        <thead><tr><th>{l("样本", "Sample")}</th><th>{l("靶标", "Target")}</th><th>{l("孔位", "Wells")}</th>{hasRawQuantification && <><th>{l("有效 Cq/总数", "Valid/total Cq")}</th><th>Mean Cq</th><th>SD</th><th>Cq range</th><th>{l("线性量 CV%", "Linear quantity CV%")}</th></>}{hasMeltAnalysis && <><th>Mean Tm1</th><th>Tm1 range</th><th>{l("第二峰", "Second peak")}</th><th>{l("熔解分组", "Melt groups")}</th></>}<th>{l("判定", "Status")}</th></tr></thead>
-                        <tbody>{filteredQc.map((row) => <tr key={row.id} className={row.warningCodes.length ? "flagged-row" : ""}>
-                          <td><b>{row.sampleName}</b></td><td>{row.targetName}</td><td><div className="qc-well-links">{row.wells.map((wellName) => <button type="button" key={wellName} onClick={() => openQcWellsInPlate(row, [wellName])} aria-label={l(`在板工作区查看 ${wellName}`, `Open ${wellName} in the plate workspace`)}>{wellName}</button>)}</div></td>{hasRawQuantification && <><td>{row.validReplicates}/{row.totalReplicates}</td><td>{formatNumber(row.meanCq, 3)}</td><td>{formatNumber(row.sdCq, 3)}</td><td>{formatNumber(row.cqRange, 3)}</td><td>{formatNumber(row.linearQuantityCvPercent, 1)}</td></>}{hasMeltAnalysis && <><td>{formatNumber(row.meanTm1, 2)}</td><td>{formatNumber(row.tm1Range, 2)}</td><td>{row.secondaryPeakCount || "—"}</td><td>{row.meltGroups.join(", ") || "—"}</td></>}<td>{row.warningCodes.length ? <button type="button" className="qc-review-action" onClick={() => openQcWellsInPlate(row)}><span><b>{l("去板上复核", "Review on plate")}</b><small>{row.suspectWell ? l(`优先检查 ${row.suspectWell}`, `Inspect ${row.suspectWell} first`) : l(`${row.wells.length} 个孔`, `${row.wells.length} wells`)}</small></span><svg aria-hidden="true" viewBox="0 0 16 16"><path d="M3 8h9M9 4.5 12.5 8 9 11.5" /></svg></button> : <span className="status pass-status">{l("通过", "Pass")}</span>}</td>
-                        </tr>)}</tbody>
-                      </table>
-                    </div>
-                  </article>}
+                  {plateDefinition && <WorkflowReview rows={qc} wells={appliedWells} history={reviewHistory} onDecision={decision=>setReviewHistory(current=>[...current,decision])} onLocate={openQcWellsInPlate} onExclude={(ids,excluded,reason)=>setExclusion(excluded,ids,reason)} />}
 
                   <aside className="overview-side-stack">
                     <article className="provenance-card">
@@ -1274,9 +1304,9 @@ export default function QpcrAnalysisStudio() {
                         <div className="selection-qc-heading"><span>QC</span><b>{selectedQcNotices.length ? l(`${selectedQcNotices.length} 条提示`, `${selectedQcNotices.length} alert(s)`) : l("无提示", "No alerts")}</b></div>
                         {selectedQcNotices.length ? <div className="selection-qc-list">{selectedQcNotices.map(({ code, well, group, scope }) => (
                           <article key={`${well.id}-${code}`}>
-                            <div><strong>{well.well} · {warningLabel(code, l)}</strong><span>{scope} · {warningSource(code, well, l)}</span></div>
+                            <div><strong>{well.well} · {warningLabel(code, l)}</strong></div><details><summary>详情</summary><span>{scope} · {warningSource(code, well, l)}</span><div>
                             <p>{warningMessage(code, well, group, l)}</p>
-                            {group && <small>{l(`关联复孔：${group.wells.join(", ")}`, `Replicate group: ${group.wells.join(", ")}`)}</small>}
+                            {group && <small>{l(`关联复孔：${group.wells.join(", ")}`, `Replicate group: ${group.wells.join(", ")}`)}</small>}</div></details>
                           </article>
                         ))}</div> : <p>{l("当前选中孔没有黄色孔级提示或复孔组提醒。", "The selected wells have no yellow well-level alerts or replicate-group warnings.")}</p>}
                       </section>
@@ -1346,7 +1376,7 @@ export default function QpcrAnalysisStudio() {
                   </div>
                 </div>
                 {resultSection === "quantification" && hasQuantification && <>{dataset.analysisStart === "cq" ? <>
-                  <div className="result-settings-grid">
+                  <details className="workflow-settings" open={!referenceTargets.length}><summary>{l("分析设置与展示顺序", "Analysis settings & display order")} · {displaySamples.length} {l("个样本", "samples")}</summary><div className="result-settings-grid">
                     <section className="result-setting-step reference-step">
                       <div className="setting-step-heading"><span>1</span><div><h3>{l("选择内参基因", "Select reference targets")}</h3><p>{l("归一化", "Normalization")}</p></div><small>{l("可多选", "Multiple")}</small></div>
                       <div className="choice-row">{targets.map((target) => <label className={referenceTargets.includes(target) ? "choice active" : "choice"} key={target}><input type="checkbox" checked={referenceTargets.includes(target)} onChange={() => setReferenceTargets((current) => current.includes(target) ? current.filter((item) => item !== target) : [...current, target])} />{target}</label>)}</div>
@@ -1378,9 +1408,9 @@ export default function QpcrAnalysisStudio() {
                       <p>{l("设置后计算 ΔΔCq 与相对表达量；未提供扩增效率时按 100% 计算并记录假设。", "A calibrator enables ΔΔCq and relative expression. Missing amplification efficiency is recorded and assumed to be 100%.")}</p>
                     </section>
                   </div>
-                  {!referenceTargets.length ? <div className="empty-table">{l("请先在第 1 区选择至少一个内参基因。", "Select at least one reference target in section 1.")}</div> : <ResultExplorer results={relativeResults} wells={appliedWells} sampleOrder={displaySamples} targetOrder={selectedDisplayTargets} settings={sessionView!.settings} provenanceWarnings={resultExportWarnings} importDecisions={importDecisions} exportFileStem={analysisExportStem} />}
+                  </details>{!referenceTargets.length ? <div className="empty-table">{l("请先在第 1 区选择至少一个内参基因。", "Select at least one reference target in section 1.")}</div> : <><div className="workflow-target-toolbar"><label>基因 <select value={chartConfig.activeTarget} onChange={event=>setChartConfig(current=>({...current,activeTarget:event.target.value}))}>{selectedDisplayTargets.map(target=><option key={target}>{target}</option>)}</select></label><button type="button" onClick={()=>setChartConfig(current=>({...current,overview:!current.overview}))}>{chartConfig.overview?"单图查看":"多图概览"}</button></div><ResultExplorer results={relativeResults} wells={appliedWells} sampleOrder={displaySamples} targetOrder={selectedDisplayTargets} settings={sessionView!.settings} provenanceWarnings={resultExportWarnings} importDecisions={importDecisions} exportFileStem={analysisExportStem} /></>}
                 </> : <>
-                  <div className={`result-settings-grid supplied-result-settings ${dataset.analysisStart === "delta-delta-cq" ? "single-setting" : ""}`}>
+                  <details className="workflow-settings"><summary>{l("样本筛选与展示顺序", "Samples & display order")} · {displaySamples.length} {l("个样本", "samples")}</summary><div className={`result-settings-grid supplied-result-settings ${dataset.analysisStart === "delta-delta-cq" ? "single-setting" : ""}`}>
                     <section className="result-setting-step display-step">
                       <div className="setting-step-heading"><span>1</span><div><h3>{l("选择展示的基因和样本", "Choose displayed targets & samples")}</h3><p>{l("点选顺序即图表顺序", "Selection order defines chart order")}</p></div><button className="clear-selection-button" type="button" onClick={() => { setDisplayTargets([]); setDisplaySamples([]); }} disabled={!displayTargets.length && !displaySamples.length}>{l("清空", "Clear")}</button></div>
                       <div className="display-choice-group"><div className="display-choice-label"><span>{l("基因", "Targets")}</span><small>{selectedDisplayTargets.length} {l("已选", "selected")}</small></div><div className="ordered-choice-row">{targets.map((target) => { const selectionIndex = selectedDisplayTargets.indexOf(target); return <button type="button" key={target} aria-pressed={selectionIndex >= 0} className={selectionIndex >= 0 ? "ordered-choice active" : "ordered-choice"} onClick={() => toggleOrderedSelection(target, displayTargets, setDisplayTargets)}><span>{target}</span>{selectionIndex >= 0 && <i>{selectionIndex + 1}</i>}</button>; })}</div></div>
@@ -1392,7 +1422,7 @@ export default function QpcrAnalysisStudio() {
                       <p>{l("ΔCq 已由用户提供；校准样本仅用于后续 ΔΔCq 与相对表达量。", "ΔCq is user supplied; the calibrator is used only for downstream ΔΔCq and relative expression.")}</p>
                     </section>}
                   </div>
-                  <SuppliedResultExplorer results={suppliedResults} records={dataset.suppliedCalculations} analysisStart={dataset.analysisStart} sampleOrder={displaySamples} targetOrder={selectedDisplayTargets} provenance={dataset.suppliedCalculationProvenance} importDecisions={importDecisions} exportFileStem={analysisExportStem} />
+                  </details><><div className="workflow-target-toolbar"><label>基因 <select value={chartConfig.activeTarget} onChange={event=>setChartConfig(current=>({...current,activeTarget:event.target.value}))}>{selectedDisplayTargets.map(target=><option key={target}>{target}</option>)}</select></label><button type="button" onClick={()=>setChartConfig(current=>({...current,overview:!current.overview}))}>{chartConfig.overview?"单图查看":"多图概览"}</button></div><SuppliedResultExplorer results={suppliedResults} records={dataset.suppliedCalculations} analysisStart={dataset.analysisStart} sampleOrder={displaySamples} targetOrder={selectedDisplayTargets} provenance={dataset.suppliedCalculationProvenance} importDecisions={importDecisions} exportFileStem={analysisExportStem} /></>
                 </>}</>}
                 {resultSection === "quantification" && !hasQuantification && <div className="empty-table">{l("当前仅导入了 Tm/熔解结果；添加单孔 Cq/Ct/Cp 后可进行相对定量。", "Only Tm/melt results are currently imported. Add well-level Cq/Ct/Cp data for relative quantification.")}</div>}
                 {resultSection === "melt" && hasMeltAnalysis && <MeltAnalysis wells={appliedWells} />}
@@ -1403,6 +1433,7 @@ export default function QpcrAnalysisStudio() {
         </div>
       )}
 
+      {layoutChoices.length>1 && !layoutRef?<label className="workflow-target-toolbar">实验布局<select defaultValue="" onChange={event=>void adoptLayout(event.target.value).catch(error=>setError(error.message))}><option value="" disabled>选择布局版本</option>{layoutChoices.map(choice=><option key={choice.id} value={choice.id}>{choice.id.slice(0,8)} · 修订 {choice.revision}</option>)}</select></label>:null}
       {dataset && !dataManagerOpen && analysisLocked && (
         <button className="recalculate-button" type="button" onClick={recalculate}>
           <span className="recalc-count">{pendingCount || "!"}</span>
@@ -1411,6 +1442,6 @@ export default function QpcrAnalysisStudio() {
         </button>
       )}
       <footer><span>qPCR Analysis Studio · {l("仅供科研使用", "Research use only")}</span><span>{l("原始数据仅在当前浏览器中处理", "Raw data are processed only in this browser")}</span></footer>
-    </main>
+    </main></ChartPresentationContext.Provider>
   );
 }

@@ -271,6 +271,8 @@ export function buildCanonicalDataset(inputSources: ImportedSource[]): Canonical
         normalizeWell(`${rowLabel}${columnLabel}`);
 
       let sampleName = effectiveImportRowValue(source, table, rawRow, "sampleName");
+      const sampleId=effectiveImportRowValue(source,table,rawRow,"sampleId");
+      if(sampleId)sampleName=`${sampleName} [${sampleId}]`;
       let targetName = effectiveImportRowValue(source, table, rawRow, "targetName");
       const placeholder = sampleName === "1" && targetName === "1";
       if (placeholder) {

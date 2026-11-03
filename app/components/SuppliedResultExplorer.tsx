@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useContext, useMemo, useState } from "react";
 import XLSX from "xlsx-js-style";
 import type { AnalysisStart, ImportDecision, SuppliedCalculationProvenance, SuppliedCalculationRecord } from "@/packages/schemas/src";
 import {
@@ -20,6 +20,7 @@ import {
 import { useLanguage } from "../i18n";
 import VisualizationStudioLink from "./VisualizationStudioLink";
 import ExpressionChart from "./ExpressionChart";
+import { ChartPresentationContext } from "./ChartPresentation";
 import { downloadBlob } from "../download";
 
 function formatNumber(value: number | null, digits = 4): string {
@@ -37,7 +38,8 @@ export default function SuppliedResultExplorer({ results, records, analysisStart
   exportFileStem: string;
 }) {
   const { l } = useLanguage();
-  const [showSd, setShowSd] = useState(false);
+  const savedChart = Object.values(useContext(ChartPresentationContext).config.settings)[0];
+  const [showSd, setShowSd] = useState(savedChart?.showTechnicalSd ?? false);
   const filtered = useMemo(() => results.filter((row) => sampleOrder.includes(row.sampleName) && targetOrder.includes(row.targetName)), [results, sampleOrder, targetOrder]);
   const barRows = useMemo(() => buildSuppliedVisualizationBarRows(results, sampleOrder, targetOrder), [results, sampleOrder, targetOrder]);
   const chartTargets = targetOrder.filter((target) => filtered.some((row) => row.targetName === target));
@@ -106,7 +108,7 @@ export default function SuppliedResultExplorer({ results, records, analysisStart
   };
   const barRecords = barRows as unknown as Array<Record<string, string | number | null>>;
   return <div className="result-explorer supplied-result-explorer">
-    <div className="supplied-provenance-notice"><b>{analysisStart === "delta-cq" ? l("从用户提供的 ΔCq 开始", "Starting from user-supplied ΔCq") : l("从用户提供的 ΔΔCq 开始", "Starting from user-supplied ΔΔCq")}</b><span>{l("系统不会重建上游 Cq 或孔级扩增 QC；所有输出均标注计算起点与数值来源。", "Upstream Cq and well-level amplification QC are not reconstructed; every output identifies its start and provenance.")}</span></div>
+    <details className="workflow-method"><summary>{l("计算来源与方法", "Calculation source & method")}</summary><div className="supplied-provenance-notice"><b>{analysisStart === "delta-cq" ? l("从用户提供的 ΔCq 开始", "Starting from user-supplied ΔCq") : l("从用户提供的 ΔΔCq 开始", "Starting from user-supplied ΔΔCq")}</b><span>{l("系统不会重建上游 Cq 或孔级扩增 QC；所有输出均标注计算起点与数值来源。", "Upstream Cq and well-level amplification QC are not reconstructed; every output identifies its start and provenance.")}</span></div>
     <section className={referenceTargets.length ? "supplied-calculation-basis" : "supplied-calculation-basis incomplete"}>
       <div className="calculation-basis-heading"><p className="eyebrow">CALCULATION BASIS</p><h3>{l("用户计算依据", "User-supplied calculation basis")}</h3><small>{l("仅用于方法溯源，不会再次归一化", "Provenance only; values are not normalized again")}</small></div>
       <dl>
@@ -117,13 +119,13 @@ export default function SuppliedResultExplorer({ results, records, analysisStart
       </dl>
       {!referenceTargets.length && <p className="calculation-basis-warning"><b>{l("内参基因未提供", "Reference target not provided")}</b><span>{l("结果仍可查看，但计算依据不完整；系统不会根据基因名称或数值自动猜测。", "Results remain viewable, but the calculation basis is incomplete. The system will not infer a reference target from names or values.")}</span></p>}
     </section>
-    <section className="result-commandbar"><div className="result-commandbar-summary"><div><h3>{l("结果预览", "Result preview")}</h3><p>{l(`${filtered.length} 条用户计算结果`, `${filtered.length} user-supplied result(s)`)}</p></div></div>
+    </details><details className="workflow-export"><summary>{l("显示与导出", "Display & export")}</summary><section className="result-commandbar"><div className="result-commandbar-summary"><div><h3>{l("结果预览", "Result preview")}</h3><p>{l(`${filtered.length} 条用户计算结果`, `${filtered.length} user-supplied result(s)`)}</p></div></div>
       <div className="result-commandbar-grid supplied-commandbar-grid">
         <div className="result-command-group"><span className="command-group-label">{l("显示", "Display")}</span><button type="button" className={showSd ? "filter-chip active" : "filter-chip"} onClick={() => setShowSd((value) => !value)}>{l("技术复孔 SD", "Technical-replicate SD")}</button></div>
         <div className="result-command-group result-export-group"><span className="command-group-label">{l("完整计算结果", "Complete results")}</span><div className="visualization-export-actions"><button type="button" onClick={exportCompleteWorkbook}>Excel</button><button type="button" onClick={exportSuppliedTsvBundle}>TSV</button></div><small className="export-format-hint">{l("Excel 含溯源、版本与数据字典；TSV 同时下载字典", "Excel includes provenance, version, and dictionary sheets; TSV also downloads its dictionary")}</small></div>
         <div className="result-command-group result-export-group visualization-studio-export-group"><div className="command-group-label-row"><span className="command-group-label">Visualization Studio · {l("柱状图格式", "Bar-chart format")}</span><VisualizationStudioLink /></div><div className="visualization-export-actions"><button type="button" onClick={() => exportTable(VISUALIZATION_BAR_HEADERS, barRecords, `${exportFileStem}-visualization-bar.xlsx`)}>{l("柱状图 Excel", "Bar Excel")}</button><button type="button" onClick={() => exportTsv(VISUALIZATION_BAR_HEADERS, barRecords, `${exportFileStem}-visualization-bar.tsv`)}>{l("柱状图 TSV", "Bar TSV")}</button></div><small className="export-format-hint">category · value · sd · sem · group</small></div>
       </div>
-    </section>
+    </section></details>
     <div className="result-chart-stack">{chartTargets.map((target) => <ExpressionChart key={target} rows={filtered.filter(row => row.targetName === target).map(row => ({
       label: row.sampleName,
       rawValue: row.relativeExpression ?? row.normalizedQuantity,

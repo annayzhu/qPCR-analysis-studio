@@ -11,6 +11,7 @@ export type CanonicalField =
   | "well"
   | "row"
   | "column"
+  | "sampleId"
   | "sampleName"
   | "targetName"
   | "cycleType"

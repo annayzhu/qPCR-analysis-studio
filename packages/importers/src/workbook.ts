@@ -164,7 +164,16 @@ export function parseDelimitedText(
 }
 
 export async function parseBrowserFile(file: File): Promise<ImportedSource> {
-  if (/\.xlsx$/i.test(file.name)) return parseWorkbookBytes(await file.arrayBuffer(), file.name);
-  if (/\.(csv|txt|tsv)$/i.test(file.name)) return parseDelimitedText(await file.text(), file.name);
-  throw new Error(`暂不支持 ${file.name}；请选择 XLSX、CSV、TXT 或 TSV。`);
+  const bytes=await file.arrayBuffer();
+  const parsed=/\.xlsx$/i.test(file.name)?parseWorkbookBytes(bytes,file.name):/\.(csv|txt|tsv)$/i.test(file.name)?parseDelimitedText(new TextDecoder().decode(bytes),file.name):null;
+  if(!parsed)throw new Error(`暂不支持 ${file.name}；请选择 XLSX、CSV、TXT 或 TSV。`);
+  let binary='';for(const byte of new Uint8Array(bytes))binary+=String.fromCharCode(byte);
+  const digest=globalThis.crypto?.subtle?Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',bytes)),byte=>byte.toString(16).padStart(2,'0')).join(''):'';
+  const sourceId=digest?`source-${digest}`:id('source-content',binary);
+  const selectedIndex=parsed.tables.findIndex(table=>table.id===parsed.selectedTableId);
+  parsed.id=sourceId;
+  parsed.tables=parsed.tables.map((table,index)=>({...table,id:`${sourceId}-table-${index}`,sourceId,rawRows:table.rawRows.map(row=>({...row,sourceId}))}));
+  parsed.selectedTableId=parsed.tables[selectedIndex]?.id ?? '';
+  parsed.metadata={...parsed.metadata,contentSha256:digest,originalBytesBase64:btoa(binary)};
+  return parsed;
 }

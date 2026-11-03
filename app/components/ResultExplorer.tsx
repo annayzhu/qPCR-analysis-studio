@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useContext, useMemo, useState } from "react";
 import XLSX from "xlsx-js-style";
 import type { AnalysisSettings, ImportDecision, RelativeQuantificationResult, WellRecord } from "@/packages/schemas/src";
 import {
@@ -18,6 +18,7 @@ import {
 import { useLanguage } from "../i18n";
 import VisualizationStudioLink from "./VisualizationStudioLink";
 import ExpressionChart, { type ChartTheme, type AxisMode } from "./ExpressionChart";
+import { ChartPresentationContext } from "./ChartPresentation";
 import { downloadBlob } from "../download";
 
 type SortKey = "sampleName" | "targetName" | "targetMeanCq" | "targetSdCq" | "deltaCq" | "normalizedQuantity" | "relativeExpression";
@@ -51,9 +52,10 @@ interface ResultExplorerProps {
 export default function ResultExplorer({ results, wells, sampleOrder, targetOrder, settings, provenanceWarnings = [], importDecisions = [], exportFileStem }: ResultExplorerProps) {
   const { language, l } = useLanguage();
   const [warningOnly, setWarningOnly] = useState(false);
-  const [showTechnicalSd, setShowTechnicalSd] = useState(false);
-  const [chartTheme, setChartTheme] = useState<ChartTheme>("paper");
-  const [axisMode, setAxisMode] = useState<AxisMode>("log-ratio");
+  const savedChart = Object.values(useContext(ChartPresentationContext).config.settings)[0];
+  const [showTechnicalSd, setShowTechnicalSd] = useState(savedChart?.showTechnicalSd ?? false);
+  const [chartTheme, setChartTheme] = useState<ChartTheme>(savedChart?.theme ?? "paper");
+  const [axisMode, setAxisMode] = useState<AxisMode>(savedChart?.axisMode ?? "log-ratio");
   const [sortKey, setSortKey] = useState<SortKey | null>(null);
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
 
@@ -174,7 +176,7 @@ export default function ResultExplorer({ results, wells, sampleOrder, targetOrde
 
   return (
     <div className="result-explorer">
-      <section className="result-commandbar" aria-label={l("结果显示与导出设置", "Result display and export settings")}>
+      <details className="workflow-export"><summary>{l("显示与导出", "Display & export")}</summary><section className="result-commandbar" aria-label={l("结果显示与导出设置", "Result display and export settings")}>
         <div className="result-commandbar-summary">
           <div>
             <h3>{l("结果预览", "Result preview")}</h3>
@@ -233,7 +235,7 @@ export default function ResultExplorer({ results, wells, sampleOrder, targetOrde
             "The complete Excel contains five sheets: final results, per-well calculations, plate summaries, calculation guide, and data dictionary. The well sheet also calculates reference wells against their own reference mean for independent checking or custom ΔCq/ΔΔCq plotting. Visualization Studio bar files retain exactly category, value, sd, sem, and group.",
           )}</p>
         </details>
-      </section>
+      </section></details>
 
       <div className="result-subsection-heading">
         <div><h3>{l("相对表达图", "Relative-expression figures")}</h3><p>{l("紧凑预览用于快速检查；SVG 与 PNG 4× 保留完整矢量元素和长样本名。", "Compact previews support review; SVG and PNG 4× retain complete figure elements and long sample names.")}</p></div>

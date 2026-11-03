@@ -1,8 +1,10 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useContext, useEffect, useRef, useState } from "react";
 import { buildLogRatioAxis, mapRatioToY, chartLabelVisualUnits, wrapChartLabel } from "@/packages/qpcr-core/src";
 import { useLanguage } from "../i18n";
+import { facetChartRows } from "@/packages/qpcr-core/src/workflow-charts";
+import { ChartPresentationContext } from "./ChartPresentation";
 import { downloadBlob } from "../download";
 export type ChartTheme = "dark" | "paper";
 export type AxisMode = "log-ratio" | "linear";
@@ -27,8 +29,10 @@ function safeFileName(value: string): string {
   return value.trim().replace(/[^\p{L}\p{N}._-]+/gu, "-") || "qpcr-expression";
 }
 
-export default function ExpressionChart({
+function ExpressionPanel({
   rows,
+  axisRows,
+  displayNames,
   metricLabel,
   target,
   sampleOrder,
@@ -38,6 +42,8 @@ export default function ExpressionChart({
   exportFileStem,
 }: {
   rows: ExpressionChartRow[];
+  axisRows?: ExpressionChartRow[];
+  displayNames?: Record<string,string>;
   metricLabel: string;
   target: string;
   sampleOrder: string[];
@@ -55,28 +61,29 @@ export default function ExpressionChart({
 
   if (!chartRows.length) return <div className="empty-chart">{l("当前筛选下没有可绘制的数据。", "No plottable data are available for the current selection.")}</div>;
 
-  const values = chartRows.flatMap((row) => {
+  const values = (axisRows ?? chartRows).filter(row=>row.rawValue!==null && row.rawValue>0).flatMap((entry) => {
+    const row=entry as ExpressionChartRow & {rawValue:number};
     if (!showTechnicalSd || row.propagatedSd === null) return [row.rawValue];
     const lower = row.rawValue - row.propagatedSd;
     return lower > 0
       ? [lower, row.rawValue, row.rawValue + row.propagatedSd]
       : [row.rawValue, row.rawValue + row.propagatedSd];
   });
-  const left = 58;
+  const left = 86;
   const right = 22;
   const top = 42;
   const bottom = 198;
   const maxLabelUnitsPerLine = chartRows.length > 16 ? 7 : chartRows.length > 8 ? 9 : 12;
-  const wrappedSampleLabels = chartRows.map((row) => wrapChartLabel(row.label, maxLabelUnitsPerLine));
+  const wrappedSampleLabels = chartRows.map((row) => wrapChartLabel(displayNames?.[row.label] || row.label, maxLabelUnitsPerLine));
   const longestLabelLine = Math.max(...wrappedSampleLabels.flat().map(chartLabelVisualUnits));
   const maxLabelLines = Math.max(...wrappedSampleLabels.map((lines) => lines.length));
-  const labelLineHeight = 11.5;
+  const labelLineHeight = 16;
   const labelTop = bottom + 15;
   const axisTitleY = labelTop + (maxLabelLines - 1) * labelLineHeight + 21;
   const height = Math.max(270, axisTitleY + 17);
   const minimumSlotWidth = chartRows.length > 16 ? 36 : chartRows.length > 8 ? 46 : Math.max(54, longestLabelLine * 4.2 + 8);
-  const width = Math.max(500, left + right + chartRows.length * minimumSlotWidth);
-  const fitsCompactCard = chartRows.length <= 6;
+  const width = Math.max(640, left + right + chartRows.length * minimumSlotWidth);
+  const fitsCompactCard = false;
   const plotWidth = width - left - right;
   const slotWidth = plotWidth / chartRows.length;
   const barWidth = Math.min(30, slotWidth * .54);
@@ -107,11 +114,10 @@ export default function ExpressionChart({
 
   function serializedSvg(): string | null {
     if (!svgRef.current) return null;
-    const clone = svgRef.current.cloneNode(true) as SVGSVGElement;
-    clone.setAttribute("xmlns", "http://www.w3.org/2000/svg");
-    clone.setAttribute("width", String(width));
-    clone.setAttribute("height", String(height));
-    return new XMLSerializer().serializeToString(clone);
+    const panels=Array.from(svgRef.current.closest('.workflow-chart')?.querySelectorAll<SVGSVGElement>('svg.expression-chart') ?? [svgRef.current]);
+    let offset=0;const exportWidth=Math.max(...panels.map(panel=>panel.viewBox.baseVal.width));
+    const contents=panels.map(panel=>{const clone=panel.cloneNode(true) as SVGSVGElement;const view=panel.viewBox.baseVal;clone.setAttribute('x','0');clone.setAttribute('y',String(offset));clone.setAttribute('width',String(view.width));clone.setAttribute('height',String(view.height));clone.removeAttribute('style');offset+=view.height;return new XMLSerializer().serializeToString(clone);}).join('');
+    return `<svg xmlns="http://www.w3.org/2000/svg" width="${exportWidth}" height="${offset}" viewBox="0 0 ${exportWidth} ${offset}">${contents}</svg>`;
   }
 
   function exportSvg() {
@@ -134,14 +140,15 @@ export default function ExpressionChart({
       });
       const scale = 4;
       const canvas = document.createElement("canvas");
-      canvas.width = width * scale;
-      canvas.height = height * scale;
+      const exportWidth=image.naturalWidth,exportHeight=image.naturalHeight;
+      canvas.width = exportWidth * scale;
+      canvas.height = exportHeight * scale;
       const context = canvas.getContext("2d");
       if (!context) throw new Error(l("浏览器无法创建图像画布", "The browser could not create an image canvas"));
       context.scale(scale, scale);
       context.fillStyle = colors.background;
-      context.fillRect(0, 0, width, height);
-      context.drawImage(image, 0, 0, width, height);
+      context.fillRect(0, 0, exportWidth, exportHeight);
+      context.drawImage(image, 0, 0, exportWidth, exportHeight);
       const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/png", 1));
       if (!blob) throw new Error(l("浏览器无法导出 PNG，请使用 SVG", "PNG export failed; please use SVG"));
       downloadBlob(blob, `${exportFileStem}-${safeFileName(target)}-relative-expression-4x.png`);
@@ -175,13 +182,13 @@ export default function ExpressionChart({
           {theme === "dark" && <rect x="1" y="1" width={width - 2} height={height - 2} fill="none" stroke={colors.border} strokeWidth="1" />}
           <g transform={`translate(${left}, 22)`}>
             <line x1="0" x2="16" y1="-1" y2="-1" stroke={colors.reference} strokeDasharray="4 3" />
-            <text x="22" y="2" fill={colors.muted} fontSize="10">Reference = 1</text>
-            {usesCalibrator && <g transform="translate(122, 0)"><rect x="0" y="-7" width="10" height="10" fill={colors.calibrator} stroke={colors.calibratorStroke} strokeWidth=".8" /><text x="15" y="2" fill={colors.muted} fontSize="10">{l("校准样本", "Calibrator")}</text></g>}
+            <text x="22" y="2" fill={colors.muted} fontSize="13">Reference = 1</text>
+            {usesCalibrator && <g transform="translate(122, 0)"><rect x="0" y="-7" width="10" height="10" fill={colors.calibrator} stroke={colors.calibratorStroke} strokeWidth=".8" /><text x="15" y="2" fill={colors.muted} fontSize="13">{l("校准样本", "Calibrator")}</text></g>}
             {showTechnicalSd && <g transform={`translate(${usesCalibrator ? 218 : 112}, 0)`}>
               <line x1="5" x2="5" y1="-7" y2="5" stroke={colors.axis} strokeWidth="1" />
               <line x1="1" x2="9" y1="-7" y2="-7" stroke={colors.axis} strokeWidth="1" />
               <line x1="1" x2="9" y1="5" y2="5" stroke={colors.axis} strokeWidth="1" />
-              <text x="15" y="2" fill={colors.muted} fontSize="10">{l("技术 SD", "Technical SD")}</text>
+              <text x="15" y="2" fill={colors.muted} fontSize="13">{l("技术 SD", "Technical SD")}</text>
             </g>}
           </g>
 
@@ -191,7 +198,7 @@ export default function ExpressionChart({
               <g key={tick}>
                 <line x1={left} x2={width - right} y1={tickY} y2={tickY} stroke={colors.grid} strokeWidth=".8" />
                 <line x1={left - 5} x2={left} y1={tickY} y2={tickY} stroke={colors.axis} strokeWidth="1" />
-                <text x={left - 10} y={tickY + 3.5} textAnchor="end" fill={colors.muted} fontSize="11">{axisTickLabel(tick)}</text>
+                <text x={left - 10} y={tickY + 3.5} textAnchor="end" fill={colors.muted} fontSize="13">{axisTickLabel(tick)}</text>
               </g>
             );
           })}
@@ -227,7 +234,7 @@ export default function ExpressionChart({
                   y={labelTop}
                   textAnchor="middle"
                   fill={colors.muted}
-                  fontSize="11"
+                  fontSize="13"
                   aria-label={row.label}
                 >{labelLines.map((line, lineIndex) => <tspan key={`${line}-${lineIndex}`} x={centerX} dy={lineIndex === 0 ? 0 : labelLineHeight}>{line}</tspan>)}</text>
               </g>
@@ -242,4 +249,24 @@ export default function ExpressionChart({
       <details className="chart-replicate-details"><summary>{l("有效技术复孔 n", "Valid technical-replicate n")}</summary><p>{replicateSummary}</p></details>
     </div>
   );
+}
+
+
+export default function ExpressionChart(props:Parameters<typeof ExpressionPanel>[0]) {
+ const {config,update}=useContext(ChartPresentationContext);
+ const [facet,setFacet]=useState(0);
+ const [expanded,setExpanded]=useState(false);
+ const root=useRef<HTMLDivElement>(null);
+ const valid=props.rows.filter(row=>row.rawValue!==null && Number.isFinite(row.rawValue) && row.rawValue>0).sort((a,b)=>props.sampleOrder.indexOf(a.label)-props.sampleOrder.indexOf(b.label));
+ const facets=facetChartRows(valid,6);
+ const setting={showTechnicalSd:props.showTechnicalSd,theme:props.theme,axisMode:props.axisMode};
+ useEffect(()=>{const saved=config.settings[props.target];if(JSON.stringify(saved)!==JSON.stringify(setting))update({settings:{...config.settings,[props.target]:setting}});},[props.showTechnicalSd,props.theme,props.axisMode]);
+ useEffect(()=>{if(!expanded)return;const prior=document.activeElement as HTMLElement;const escape=(event:KeyboardEvent)=>{if(event.key==='Escape'){event.stopImmediatePropagation();event.preventDefault();setExpanded(false);prior?.focus();}};document.addEventListener('keydown',escape,true);return()=>document.removeEventListener('keydown',escape,true);},[expanded]);
+ const names=Object.fromEntries(valid.map((row,index)=>{const name=config.names[row.label] || row.label;const duplicates=valid.filter(item=>(config.names[item.label] || item.label)===name).length;return [row.label,duplicates>1?`${name} [${index+1}]`:name];}));
+ const selected=config.selectedTargets.includes(props.target);
+ return <div ref={root} className={expanded?'workflow-chart is-expanded':'workflow-chart'} data-chart-target={props.target} data-chart-selected={selected} hidden={!config.overview && Boolean(config.activeTarget) && config.activeTarget!==props.target}>
+   <div className="workflow-chart-toolbar"><label><input type="checkbox" checked={selected} onChange={event=>update({selectedTargets:event.target.checked?[...config.selectedTargets,props.target]:config.selectedTargets.filter(target=>target!==props.target)})}/>插入此图</label><span>{valid.length} 个类别 · 分面 {Math.min(facet+1,facets.length)} / {facets.length}</span><button type="button" disabled={facet===0} onClick={()=>setFacet(facet-1)}>上一面</button><button type="button" disabled={facet>=facets.length-1} onClick={()=>setFacet(facet+1)}>下一面</button><button type="button" onClick={()=>setExpanded(!expanded)}>{expanded?'收起':'展开查看'}</button><button type="button" onClick={()=>{root.current?.querySelectorAll('svg.expression-chart').forEach((svg,index)=>{const clone=svg.cloneNode(true) as SVGElement;clone.setAttribute('xmlns','http://www.w3.org/2000/svg');downloadBlob(new Blob([new XMLSerializer().serializeToString(clone)],{type:'image/svg+xml'}),`${props.target}-facet-${index+1}.svg`);});}}>导出全部分面</button></div>
+   <details className="workflow-display-names"><summary>显示名称</summary>{valid.map(row=><label key={row.label}><span>{row.label}</span><input aria-label={`${row.label} 显示名称`} value={config.names[row.label]??row.label} onChange={event=>update({names:{...config.names,[row.label]:event.target.value}})}/></label>)}</details>
+   {facets.map((rows,index)=><div key={index} className="workflow-facet" hidden={index!==Math.min(facet,facets.length-1)} data-facet={index+1}><ExpressionPanel {...props} rows={rows} axisRows={valid} displayNames={names}/></div>)}
+ </div>;
 }
