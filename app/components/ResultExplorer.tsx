@@ -17,6 +17,7 @@ import {
 } from "@/packages/qpcr-core/src";
 import { useLanguage } from "../i18n";
 import VisualizationStudioLink from "./VisualizationStudioLink";
+import { ResultsRail } from "./ResultsRail";
 import ExpressionChart, { type ChartTheme, type AxisMode } from "./ExpressionChart";
 import { ChartPresentationContext } from "./ChartPresentation";
 import { downloadBlob } from "../download";
@@ -176,7 +177,7 @@ export default function ResultExplorer({ results, wells, sampleOrder, targetOrde
 
   return (
     <div className="result-explorer">
-      <details className="workflow-export"><summary>{l("显示与导出", "Display & export")}</summary><section className="result-commandbar" aria-label={l("结果显示与导出设置", "Result display and export settings")}>
+      <ResultsRail><details className="workflow-export"><summary>{l("显示与导出", "Display & export")}</summary><section className="result-commandbar" aria-label={l("结果显示与导出设置", "Result display and export settings")}>
         <div className="result-commandbar-summary">
           <div>
             <h3>{l("结果预览", "Result preview")}</h3>
@@ -235,7 +236,7 @@ export default function ResultExplorer({ results, wells, sampleOrder, targetOrde
             "The complete Excel contains five sheets: final results, per-well calculations, plate summaries, calculation guide, and data dictionary. The well sheet also calculates reference wells against their own reference mean for independent checking or custom ΔCq/ΔΔCq plotting. Visualization Studio bar files retain exactly category, value, sd, sem, and group.",
           )}</p>
         </details>
-      </section></details>
+      </section></details></ResultsRail>
 
       <div className="result-subsection-heading">
         <div><h3>{l("相对表达图", "Relative-expression figures")}</h3><p>{l("紧凑预览用于快速检查；SVG 与 PNG 4× 保留完整矢量元素和长样本名。", "Compact previews support review; SVG and PNG 4× retain complete figure elements and long sample names.")}</p></div>
@@ -243,7 +244,7 @@ export default function ResultExplorer({ results, wells, sampleOrder, targetOrde
       </div>
 
       <div className="result-chart-stack">
-        {chartTargets.map((target) => <ExpressionChart key={target} rows={filtered.filter(row => row.targetName === target).map(row => ({
+        {chartTargets.map((target) => <ExpressionChart key={target} targets={chartTargets} rows={filtered.filter(row => row.targetName === target).map(row => ({
           label: row.sampleName,
           rawValue: row.relativeExpression ?? row.normalizedQuantity,
           propagatedSd: row.relativeExpression !== null ? row.relativeExpressionSd : row.normalizedQuantitySd,
