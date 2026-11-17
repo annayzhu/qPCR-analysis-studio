@@ -422,7 +422,7 @@ button.axis-label:hover { color: var(--teal); background: var(--teal-soft); bord
 .layout-transfer-form input, .layout-transfer-form select { min-height: 32px; padding: 6px 8px; font-size:12px; }
 .layout-transfer-preview { display: grid; gap: 3px; margin: 7px 0; padding: 7px 8px; border-radius: 7px; }
 .layout-transfer-preview b { font-size:12px; }.layout-transfer-preview span { font-size:12px; line-height: 1.45; }
-.layout-transfer-preview.is-valid { color: var(--hx-30675f, #30675f); background: var(--hx-e9f5f2, #e9f5f2); }.layout-transfer-preview.is-invalid { color: #8d5821; background: #fff1da; }
+.layout-transfer-preview.is-valid { color: #30675f; background: #e9f5f2; }.layout-transfer-preview.is-invalid { color: #8d5821; background: #fff1da; }
 .layout-correction-tools > .secondary-button { min-height: 32px; padding: 7px; font-size:12px; }
 .paste-details { margin-top: 13px; padding: 0 13px; border: 1px solid #d5ddda; border-radius: 10px; background: #fbfcfb; }
 .paste-details summary { padding: 12px 0; color: var(--hx-3d5057, #3d5057); font-size:12px; font-weight: 800; cursor: pointer; }
@@ -456,7 +456,7 @@ tbody tr:last-child td { border-bottom: 0; }
 tbody tr:hover { background: var(--hx-f8fbfa, #f8fbfa); }
 .flagged-row { background: #fffaf2; }
 .status { padding: 4px 7px; border-radius: 99px; font-size:12px; white-space: nowrap; }
-.warning-status { color: #8e5d1d; background: #fcedd4; }.pass-status { color: var(--hx-196c64, #196c64); background: var(--hx-e4f4f0, #e4f4f0); }
+.warning-status { color: #8e5d1d; background: #fcedd4; }.pass-status { color: #196c64; background: #e4f4f0; }
 .settings-card { display: grid; grid-template-columns: minmax(0,2fr) minmax(220px,.8fr); gap: 18px; margin-bottom: 14px; padding: 19px; border: 1px solid var(--line); border-radius: 12px; background: white; box-shadow: var(--shadow-sm); }
 .settings-card .microcopy { grid-column: 1/-1; margin: 0; }
 .field-title { margin: 0 0 8px; color: var(--muted); font-size:12px; font-weight: 750; }
