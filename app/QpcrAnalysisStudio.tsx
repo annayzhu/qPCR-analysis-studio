@@ -1,5 +1,6 @@
 "use client";
 
+import "./hostTheme";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type {
   AnalysisSettings,

@@ -17,6 +17,9 @@ const languageListeners = new Set<() => void>();
 function readLanguage(): Language {
   const saved = window.localStorage.getItem("qpcr-analysis-language");
   if (saved === "zh" || saved === "en") return saved;
+  // Served by LabNest (same origin), follow its language before the browser's.
+  const host = window.localStorage.getItem("labnest.locale") ?? document.cookie.match(/(?:^|;\s*)labnest_locale=(zh|en)/)?.[1];
+  if (host === "zh" || host === "en") return host;
   return window.navigator.language.toLocaleLowerCase().startsWith("zh") ? "zh" : "en";
 }
 
